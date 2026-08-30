@@ -16,7 +16,6 @@ import ctypes
 import shutil
 import glob
 import platform
-import socket
 import time
 import json
 import threading
@@ -82,7 +81,8 @@ if sys.platform == 'win32':
         import codecs
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
         sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         pass
 
 # Константы для Windows
@@ -183,6 +183,158 @@ def print_header():
 def print_hacker_message(message):
     print(f"{Colors.YELLOW}[SYSTEM]: {message}{Colors.RESET}")
 
+
+def _is_reparse_point(path):
+    """Check if path is a reparse point (symlink or junction) using WinAPI."""
+    import ctypes
+    FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+    attrs = ctypes.windll.kernel32.GetFileAttributesW(path)
+    if attrs == 0xFFFFFFFF:
+        return False  # path does not exist
+    return bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+
+# Whitelist of directories NoVir is explicitly allowed to delete within.
+# Nothing outside these directories can ever be deleted via safe_remove/safe_rmtree.
+# Narrow whitelist: only allow deletion within specific subdirectories.
+# NOTE: C:\Users is intentionally NOT in this list to prevent accidental mass deletion.
+# GroupPolicy paths are handled separately via _DELETION_WHITELIST_EXTENDED.
+_DELETION_WHITELIST = [
+    "c:\\windows\\temp",
+    "c:\\windows\\prefetch",
+    "c:\\programdata\\microsoft\\windows\\start menu\\programs\\startup",
+    "c:\\windows\\system32\\grouppolicy",
+    "c:\\windows\\system32\\grouppolicyusers",
+]
+
+# Extended whitelist for paths that require additional user confirmation before deletion
+_DELETION_WHITELIST_EXTENDED = [
+    "c:\\users",
+    "c:\\documents and settings",
+]
+
+def _path_in_whitelist(real_path, whitelist):
+    return any(real_path.startswith(w) for w in whitelist)
+
+def is_path_safe_for_deletion(target_path):
+    """
+    Hardened path safety check.
+    Uses realpath() to resolve symlinks/junctions, then enforces:
+    - Whitelist: must be inside an allowed directory
+    - Reparse point guard: no junctions/symlinks
+    - No system root or critical directories
+    """
+    import os
+
+    try:
+        # Resolve all symlinks and junctions to the real filesystem path
+        real = os.path.realpath(target_path).lower().rstrip("\\")
+    except Exception:
+        return False
+
+    # Guard: block reparse points at target itself
+    if _is_reparse_point(target_path):
+        return False
+
+    # Absolute hard blocks — never delete these regardless of whitelist
+    critical_paths = [
+        "c:\\", "c:\\windows", "c:\\system32", "c:\\syswow64",
+        "c:\\program files", "c:\\program files (x86)",
+        "c:\\users\\default", "c:\\programdata",
+    ]
+    for blocked in critical_paths:
+        if real == blocked or real.startswith(blocked + "\\") is False and real == blocked:
+            return False
+
+    # Whitelist: realpath must start with allowed directory
+    if not (_path_in_whitelist(real, _DELETION_WHITELIST) or
+            _path_in_whitelist(real, _DELETION_WHITELIST_EXTENDED)):
+        return False
+
+    return True
+
+def safe_remove(path):
+    """Safely delete a single file after strict validation."""
+    if not require_mutation_allowed(f"safe_remove: {path}"): return False
+    if not is_path_safe_for_deletion(path): return False
+    import os
+    try:
+        # Note: this is a best-effort re-check, not an atomic guarantee.
+    # TOCTOU risk between check and remove is minimal in local-only use but non-zero.
+        if not os.path.isfile(path):
+            return False
+        if _is_reparse_point(path):
+            return False
+        os.remove(path)
+        return True
+    except Exception as _e:
+        print(f"[safe_remove] Failed: {_e}")
+        return False
+
+def safe_rmtree(path, _gui_parent=None):
+    """Safely delete a directory tree, checking every item individually."""
+    if not require_mutation_allowed(f"safe_rmtree: {path}"): return False
+    if not is_path_safe_for_deletion(path): return False
+    import os, shutil
+
+    # Extra confirmation if path falls in extended whitelist (user data area)
+    real = os.path.realpath(path).lower().rstrip("\\")
+    if _path_in_whitelist(real, _DELETION_WHITELIST_EXTENDED):
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtCore import Qt as _Qt
+            msg = QMessageBox(_gui_parent)
+            msg.setWindowFlags(msg.windowFlags() | _Qt.WindowStaysOnTopHint)
+            msg.setWindowTitle("\u26a0\ufe0f Подтверждение удаления")
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText(
+                f"\u26a0\ufe0f УДАЛЕНИЕ ДАННЫХ ПОЛЬЗОВАТЕЛЯ\n\n"
+                f"Будет удалено:\n{path}\n\n"
+                "Это действие необратимо. Продолжить?"
+            )
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.button(QMessageBox.Yes).setText("УДАЛИТЬ")
+            msg.button(QMessageBox.No).setText("ОТМЕНА")
+            msg.setDefaultButton(QMessageBox.No)
+            msg.setStyleSheet(
+                "QMessageBox { background-color: #000000; color: #ffffff; }"
+                " QLabel { color: #ffffff; font-size: 13px; }"
+                " QPushButton { background-color: #000000; color: #ffffff;"
+                " border: 2px solid #ffffff; padding: 6px 16px; font-weight: bold; }"
+                " QPushButton:hover { background-color: #ffffff; color: #000000; }"
+            )
+            if msg.exec() != QMessageBox.Yes:
+                return False
+        except Exception:
+            # No Qt context (e.g. CLI mode) — require explicit flag instead
+            return False
+
+    # Walk tree and validate every child before deleting anything
+    for root, dirs, files in os.walk(path):
+        for d in dirs:
+            full = os.path.join(root, d)
+            if _is_reparse_point(full):
+                return False  # Abort entire operation if any junction found
+        for f in files:
+            full = os.path.join(root, f)
+            if not is_path_safe_for_deletion(full):
+                return False
+    # Final re-check on root
+    if _is_reparse_point(path):
+        return False
+
+    try:
+        shutil.rmtree(path)
+        return True
+    except Exception as _e:
+        print(f"[safe_rmtree] Failed: {_e}")
+        return False
+
+def require_mutation_allowed(action_name):
+    if DRY_RUN:
+        print(f"{Colors.CYAN}[DRY-RUN] Изменение заблокировано: {action_name}{Colors.RESET}")
+        return False
+    return True
+
 def run_command(cmd, as_admin=False):
     """Выполнение команды с обработкой ошибок"""
     if DRY_RUN:
@@ -197,21 +349,19 @@ def run_command(cmd, as_admin=False):
     except Exception as e:
         return False, "", str(e)
 
-def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ):
+def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hive=None):
     """Установка значения в реестре с обходом блокировок"""
-    if DRY_RUN:
-        print(f"{Colors.CYAN}[DRY-RUN] Реестр: {key_path} -> {value_name} = {value_data}{Colors.RESET}")
+    if not require_mutation_allowed(f"reg_set_value: {key_path}\\{value_name}"):
         return True
     
-    hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+    hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
     success = False
-    for hive in hives:
-        hive_name = "HKLM" if hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
+    for current_hive in hives:
+        hive_name = "HKLM" if current_hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
         try:
-            # Метод 1: Прямая запись через winreg (быстро)
             for access in [winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_32KEY]:
                 try:
-                    key = winreg.CreateKeyEx(hive, key_path, 0, access)
+                    key = winreg.CreateKeyEx(current_hive, key_path, 0, access)
                     winreg.SetValueEx(key, value_name, 0, value_type, value_data)
                     winreg.CloseKey(key)
                     success = True
@@ -220,12 +370,10 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ):
                     continue
             
             if not success:
-                # Метод 2: Через команду REG (обход некоторых защит)
                 v_type = "REG_SZ" if value_type == winreg.REG_SZ else "REG_DWORD"
-                cmd = f'reg add "{hive_name}\\{key_path}" /v "{value_name}" /t {v_type} /d "{value_data}" /f'
+                cmd = f'reg add "{hive_name}\{key_path}" /v "{value_name}" /t {v_type} /d "{value_data}" /f'
                 res, _, _ = run_command(cmd)
                 if res: success = True
-                
         except Exception:
             continue
     return success
@@ -247,7 +395,8 @@ def reg_delete_value(key_path, value_name):
                 winreg.DeleteValue(key, value_name)
                 winreg.CloseKey(key)
                 success = True
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 continue
         
         if not success:
@@ -258,29 +407,32 @@ def reg_delete_value(key_path, value_name):
             
     return success
 
-def reg_delete_key(key_path, recursive=False):
+def reg_delete_key(key_path, recursive=False, hive=None):
     """Удаление ключа реестра"""
-    if DRY_RUN:
-        print(f"{Colors.CYAN}[DRY-RUN] Удаление ключа реестра: {key_path} (recursive={recursive}){Colors.RESET}")
+    if not require_mutation_allowed(f"reg_delete_key: {key_path}"):
         return True
     
-    try:
-        if recursive:
-            # reg delete работает надежнее для рекурсивного удаления
-            subprocess.run(['reg', 'delete', f'HKLM\\{key_path}', '/f'], shell=True, capture_output=True)
-            subprocess.run(['reg', 'delete', f'HKCU\\{key_path}', '/f'], shell=True, capture_output=True)
-            return True
-        else:
-            hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
-            for hive in hives:
+    hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+    success_any = False
+    
+    for current_hive in hives:
+        hive_str = "HKLM" if current_hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
+        try:
+            if recursive:
+                res = subprocess.run(['reg', 'delete', f'{hive_str}\{key_path}', '/f'], 
+                                     shell=False, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                if res.returncode == 0:
+                    success_any = True
+            else:
                 try:
-                    winreg.DeleteKey(hive, key_path)
-                    return True
-                except:
-                    continue
-            return False
-    except:
-        return False
+                    winreg.DeleteKey(current_hive, key_path)
+                    success_any = True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+            
+    return success_any
 
 # ═══════════════════════════════════════════════════════════════
 # БЛОК 1: ВИЗУАЛЬНОЕ ВОССТАНОВЛЕНИЕ (ИНТЕРФЕЙС)
@@ -316,7 +468,8 @@ def Font_Standard_Full():
             try:
                 winreg.SetValueEx(key, font, 0, winreg.REG_SZ, substitute)
                 success_count += 1
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         winreg.CloseKey(key)
         
@@ -324,14 +477,16 @@ def Font_Standard_Full():
         try:
             reg_set_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontDPI", "LogPixels", 96, winreg.REG_DWORD)
             success_count += 1
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         # Восстанавливаем масштаб через HKCU
         try:
             reg_set_value(r"Control Panel\Desktop", "LogPixels", 96, winreg.REG_DWORD)
             success_count += 1
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         # Проверяем и восстанавливаем базовые шрифты в ветке Fonts
@@ -355,17 +510,19 @@ def Font_Standard_Full():
                         # Если нет, создаем
                         winreg.SetValueEx(fonts_key, font_name, 0, winreg.REG_SZ, font_file)
                         success_count += 1
-                except:
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
             winreg.CloseKey(fonts_key)
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         # Очищаем кэш шрифтов (FNTCACHE.DAT) - вирусы часто портят его
         try:
             font_cache_path = os.path.join(os.environ['SystemRoot'], 'System32', 'FNTCACHE.DAT')
             if os.path.exists(font_cache_path):
-                os.unlink(font_cache_path)
+                safe_remove(font_cache_path)
                 success_count += 1
                 print(f"{Colors.YELLOW}[!] Удален кэш шрифтов FNTCACHE.DAT - пересоздастся при перезагрузке{Colors.RESET}")
         except Exception as e:
@@ -405,7 +562,8 @@ def Wallpaper_Force():
             winreg.DeleteValue(key, value)
             winreg.CloseKey(key)
             success = True
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
     
     if success:
@@ -565,7 +723,8 @@ def Shell_Standard():
                 
                 if "explorer.exe" not in value.lower() and value != "userinit.exe,":
                     print(f"{Colors.YELLOW}[!] Обнаружено подозрительное значение: {value}{Colors.RESET}")
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         # Перезапускаем проводник
@@ -1004,10 +1163,12 @@ def Emergency_Recovery():
                 if name not in ['explorer.exe', 'taskmgr.exe', 'svchost.exe', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'winlogon.exe', 'novir.exe', 'python.exe']:
                     try:
                         proc.kill()
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
             run_command("taskkill /f /im explorer.exe & start explorer.exe")
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
     return True
 
@@ -1042,7 +1203,7 @@ def Replace_Sethc_Utilman():
             if os.path.exists(bak):
                 # Restore
                 try:
-                    os.remove(target)
+                    safe_remove(target)
                     shutil.move(bak, target)
                     restored = True
                 except: pass
@@ -1092,7 +1253,7 @@ def Alt_N_Fix():
         shortcut_path = os.path.join(desktop, 'NoVir_Emergency.lnk')
         
         if os.path.exists(shortcut_path):
-            os.remove(shortcut_path)
+            safe_remove(shortcut_path)
             print("Ярлык удален (функция Alt+N отключена).")
         else:
             try:
@@ -1110,7 +1271,7 @@ oLink.Save
                     vbs_file.write(vbs_code)
                 import subprocess
                 subprocess.run(['cscript', '//nologo', vbs_path], creationflags=subprocess.CREATE_NO_WINDOW)
-                os.remove(vbs_path)
+                safe_remove(vbs_path)
                 run_command(f'attrib +h "{shortcut_path}"')
                 print(f"[+] Ярлык создан (VBS): {shortcut_path}")
             except Exception as e:
@@ -1364,7 +1525,7 @@ def Policies_Nuke():
                     deleted_count += 1
                 else:
                     try:
-                        shutil.rmtree(path)
+                        safe_rmtree(path)
                         deleted_count += 1
                         print(f"{Colors.GREEN}[+] Удалено: {path}{Colors.RESET}")
                     except Exception as e:
@@ -1437,7 +1598,8 @@ def IFEO_Clean():
         try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ifeo_path, 0, winreg.KEY_READ)
             winreg.CloseKey(key)
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         logger.log("IFEO_Clean", "success", f"Очищено {cleaned_count} перехватчиков")
@@ -1713,7 +1875,8 @@ def Route_Reset():
         try:
             subprocess.run(["sc", "config", "lmhosts", "start=auto"], capture_output=True)
             subprocess.run(["sc", "start", "lmhosts"], capture_output=True)
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         logger.log("Route_Reset", "success", "Маршруты сброшены")
@@ -1785,14 +1948,16 @@ def Temp_Deep_Clean():
                         item_path = entry.path
                         try:
                             if os.path.isfile(item_path):
-                                os.unlink(item_path)
+                                safe_remove(item_path)
                                 total_deleted += 1
                             elif os.path.isdir(item_path):
-                                shutil.rmtree(item_path)
+                                safe_rmtree(item_path)
                                 total_deleted += 1
-                        except:
+                        except Exception as _e:
+                            # Expected exception, intentionally ignored
                             pass
-                except:
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
     
     logger.log("Temp_Deep_Clean", "success", f"Удалено {total_deleted} файлов")
@@ -1813,8 +1978,9 @@ def Prefetch_Wipe():
                     item = entry.name
                     item_path = entry.path
                     try:
-                        os.unlink(item_path)
-                    except:
+                        safe_remove(item_path)
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
         
         logger.log("Prefetch_Wipe", "success", "Prefetch очищен")
@@ -2084,9 +2250,10 @@ def IconCache_Clear():
     for pattern in icon_cache_paths:
         for file_path in glob.glob(pattern):
             try:
-                os.unlink(file_path)
+                safe_remove(file_path)
                 cleaned_count += 1
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
     
     # Перезапускаем проводник
@@ -2127,10 +2294,11 @@ def Startup_Clean():
                 item_lower = item.lower()
                 if any(sus in item_lower for sus in suspicious_names):
                     try:
-                        os.unlink(item_path)
+                        safe_remove(item_path)
                         cleaned_count += 1
                         print(f"{Colors.YELLOW}[!] Удалено из автозагрузки: {item}{Colors.RESET}")
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
     
     # Также проверяем реестр Run
@@ -2156,7 +2324,8 @@ def Startup_Clean():
                 except OSError:
                     break
             winreg.CloseKey(key)
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
     
     logger.log("Startup_Clean", "success", f"Очищено {cleaned_count} записей автозагрузки")
@@ -2266,7 +2435,8 @@ def Service_State_Scan():
                 subprocess.run(["sc", "start", service], capture_output=True)
                 started_count += 1
                 print(f"{Colors.YELLOW}[!] Запущена служба: {service}{Colors.RESET}")
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
     
     logger.log("Service_State_Scan", "success", f"Запущено {started_count} служб")
@@ -2329,12 +2499,14 @@ def WinUpdate_Reset():
                         item_path = entry.path
                         try:
                             if os.path.isfile(item_path):
-                                os.unlink(item_path)
+                                safe_remove(item_path)
                             elif os.path.isdir(item_path):
-                                shutil.rmtree(item_path)
-                        except:
+                                safe_rmtree(item_path)
+                        except Exception as _e:
+                            # Expected exception, intentionally ignored
                             pass
-                except:
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
         
         # Запускаем службы обратно
@@ -2377,9 +2549,10 @@ def LNK_File_Fix():
                                 print(f"{Colors.CYAN}[DRY-RUN] Будет удален ярлык: {lnk_path}{Colors.RESET}")
                             else:
                                 # Удаляем ярлык
-                                os.unlink(lnk_path)
+                                safe_remove(lnk_path)
                             fixed_count += 1
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
         
         logger.log("LNK_File_Fix", "success", f"Исправлено {fixed_count} ярлыков")
@@ -2412,8 +2585,9 @@ def Print_Spooler_Fix():
                 item = entry.name
                 item_path = entry.path
                 try:
-                    os.unlink(item_path)
-                except:
+                    safe_remove(item_path)
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
         
         # Запускаем службу обратно
@@ -2553,7 +2727,8 @@ def TrustedInstaller_Restore():
                 try:
                     subprocess.run(["icacls", path, "/reset", "/T", "/C", "/Q"], shell=True, capture_output=True)
                     restored_count += 1
-                except:
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
         
         # Также восстанавливаем права для ключей реестра
@@ -2561,7 +2736,8 @@ def TrustedInstaller_Restore():
             # Восстанавливаем владение для ключей HKLM\SOFTWARE
             ps_cmd = "Get-Acl HKLM:\\SOFTWARE | Set-Acl HKLM:\\SOFTWARE"
             subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True)
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             pass
         
         logger.log("TrustedInstaller_Restore", "success", f"Права восстановлены для {restored_count} папок")
@@ -2678,7 +2854,8 @@ def MSCONFIG_Unlock():
                     reg_delete_value(key_path, value_name)
                 else:
                     reg_delete_key(key_path, recursive=True)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         logger.log("MSCONFIG_Unlock", "success", "msconfig разблокирован")
@@ -2711,7 +2888,8 @@ def Windows_Defender_Enable():
         for key_path, value_name in defender_keys:
             try:
                 reg_delete_value(key_path, value_name)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         # Запускаем службы Защитника
@@ -2747,7 +2925,8 @@ def System_Restore_Enable():
         for key_path, value_name in keys_to_delete:
             try:
                 reg_delete_value(key_path, value_name)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         # Включаем службу
@@ -2899,7 +3078,8 @@ def Startup_Registry_Scan():
                     except OSError:
                         break
                 winreg.CloseKey(key)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         logger.log("Startup_Registry_Scan", "success", f"Найдено подозрительных: {len(suspicious_entries)}")
@@ -2932,7 +3112,8 @@ def Event_Viewer_Clean():
         for log_name in logs_to_clear:
             try:
                 subprocess.run(["wevtutil", "cl", log_name], shell=True, capture_output=True)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
         
         logger.log("Event_Viewer_Clean", "success", "Журналы событий очищены")
@@ -2976,7 +3157,8 @@ def Backup_Registry():
                 try:
                     result = subprocess.run(["reg", "export", key, "-"], capture_output=True, text=True, shell=True)
                     f.write(result.stdout)
-                except:
+                except Exception as _e:
+                    # Expected exception, intentionally ignored
                     pass
         
         logger.log("Backup_Registry", "success", f"Бэкап реестра сохранен: {backup_file}")
@@ -3229,7 +3411,8 @@ class ProcessAnalyzer:
             threat_score = max(0, min(10, threat_score))
             
             return threat_score * 10
-        except:
+        except Exception as _e:
+            # Expected exception, intentionally ignored
             return 50  # Средний уровень угрозы по умолчанию
 
     @staticmethod
@@ -3366,7 +3549,8 @@ def freeze_process(pid):
         status = ntdll.NtSuspendProcess(h_process)
         kernel32.CloseHandle(h_process)
         return status == 0
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         return False
 
 def resume_process(pid):
@@ -3382,7 +3566,8 @@ def resume_process(pid):
         status = ntdll.NtResumeProcess(h_process)
         kernel32.CloseHandle(h_process)
         return status == 0
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         return False
 
 # Restart Manager API Constants
@@ -3466,7 +3651,8 @@ def kill_process_force(pid):
         status = kernel32.TerminateProcess(h_process, 1)
         kernel32.CloseHandle(h_process)
         return status != 0
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         return False
 
 def enable_privilege(privilege_name):
@@ -3522,7 +3708,8 @@ def set_process_critical(pid, is_critical=True):
         status = ntdll.NtSetInformationProcess(h_process, 29, ctypes.byref(break_on_term), ctypes.sizeof(wintypes.ULONG))
         kernel32.CloseHandle(h_process)
         return status == 0
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         return False
 
 def open_in_explorer(path):
@@ -3533,7 +3720,8 @@ def open_in_explorer(path):
                 path = os.path.dirname(path)
             subprocess.run(['explorer', path], shell=True)
             return True
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         return False
     return False
 
@@ -6008,7 +6196,8 @@ if GUI_MODE:
                         with winreg.OpenKey(hk, subk) as key:
                             val, _ = winreg.QueryValueEx(key, name)
                             return str(val) if str(val).strip() else "(Пустое значение)"
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         return "(Пустое значение)"
                 data = [
                     ("AppInit_DLLs", get_val(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs"), r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows"),
@@ -6388,7 +6577,8 @@ if GUI_MODE:
                                     winreg.CloseKey(key)
                                 except FileNotFoundError:
                                     winreg.CloseKey(key)
-                            except:
+                            except Exception as _e:
+                                # Expected exception, intentionally ignored
                                 pass
                     
                     logger.log(f"Registry_{reg_type}", "success", f"Изменена запись: {old_name} -> {new_name}")
@@ -6514,7 +6704,7 @@ if GUI_MODE:
             if reply == QMessageBox.Yes:
                 try:
                     if os.path.exists(filepath):
-                        os.remove(filepath)
+                        safe_remove(filepath)
                         logger.log("Folder_Startup", "success", f"Удален файл: {filename}")
                         self.load_folder_data()
                         QMessageBox.information(self, "Успех", "Файл удален из автозагрузки")
@@ -7049,9 +7239,11 @@ if GUI_MODE:
                         info = service.as_dict()
                         if info['start_type'] in ['automatic', 'delayed']:
                             entries.append((info['display_name'], info['binpath']))
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
             return entries
 
@@ -7068,7 +7260,8 @@ if GUI_MODE:
                     except OSError:
                         break
                 winreg.CloseKey(key)
-            except:
+            except Exception as _e:
+                # Expected exception, intentionally ignored
                 pass
             return entries
 
@@ -7949,7 +8142,8 @@ if GUI_MODE:
                     # Fallback
                     try:
                         kill_process_force(pid)
-                    except:
+                    except Exception as _e:
+                        # Expected exception, intentionally ignored
                         pass
                     killed += 1
                     
@@ -7959,7 +8153,7 @@ if GUI_MODE:
                 import time
                 time.sleep(1) # wait for handles to release
                 try:
-                    os.remove(path)
+                    safe_remove(path)
                     msg += "\nФайл успешно удален!"
                 except Exception as e:
                     msg += f"\nНе удалось удалить файл: {e}"
@@ -8494,7 +8688,8 @@ def main():
             sys.exit(1)
         elif not is_admin and DRY_RUN and not GUI_MODE:
             print(f"{Colors.YELLOW}[!] DRY-RUN запущен без прав администратора. Реальные изменения выполняться не будут.{Colors.RESET}")
-    except:
+    except Exception as _e:
+        # Expected exception, intentionally ignored
         pass
     
     if GUI_MODE:

@@ -20,6 +20,7 @@ import time
 import json
 import threading
 import re
+import hashlib
 from datetime import datetime
 from functools import lru_cache
 
@@ -64,7 +65,7 @@ if GUI_MODE:
                                      QHeaderView, QTabWidget, QFrame, QCheckBox,
                                      QTreeWidget, QTreeWidgetItem, QSlider,
                                      QGridLayout, QStackedWidget)
-        from PySide6.QtCore import Qt, QThread, Signal
+        from PySide6.QtCore import Qt, QThread, Signal, Slot
         from PySide6.QtGui import QClipboard
         PYSIDE_AVAILABLE = True
     except ImportError:
@@ -111,19 +112,44 @@ class Colors:
     BOLD = '\033[1m'
 
 class Logger:
-    __slots__ = ('actions', 'start_time')
+    __slots__ = ('actions', 'start_time', '_log_path')
 
     def __init__(self):
         self.actions = []
+        from datetime import datetime
         self.start_time = datetime.now()
+        try:
+            import os
+            log_dir = os.path.join(os.environ.get('APPDATA', ''), 'NoVir', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            self._log_path = os.path.join(log_dir, f'audit_{datetime.now().strftime("%Y%m%d")}.log')
+        except Exception:
+            self._log_path = None
 
     def log(self, action, status, message=""):
-        self.actions.append({
+        from datetime import datetime
+        entry = {
             'time': datetime.now().strftime('%H:%M:%S'),
+            'date': datetime.now().strftime('%d.%m.%Y'),
             'action': action,
             'status': status,
             'message': message
-        })
+        }
+        self.actions.append(entry)
+        if getattr(self, '_log_path', None):
+            try:
+                icon = '[+]' if status == 'success' else '[-]' if status == 'error' else '[!]'
+                line = f"{entry['date']} {entry['time']} {icon} {action}"
+                if message:
+                    line += f" — {message}"
+                with open(self._log_path, 'a', encoding='utf-8') as f:
+                    f.write(line + '\n')
+            except Exception:
+                pass
+
+    @property
+    def audit_log_path(self):
+        return getattr(self, '_log_path', None)
 
     def generate_report(self):
         lines = [
@@ -154,6 +180,62 @@ class Logger:
         except Exception as e:
             print(f"{Colors.RED}[!] Ошибка сохранения отчета: {e}{Colors.RESET}")
             return None
+
+
+
+class RollbackManager:
+    """Saves registry values before changing them so they can be restored."""
+    def __init__(self):
+        self._snapshots = []  # list of (hive, key_path, value_name, old_value, old_type)
+
+    def snapshot_value(self, hive, key_path, value_name):
+        """Capture current registry value for rollback."""
+        import winreg
+        try:
+            key = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
+            val, vtype = winreg.QueryValueEx(key, value_name)
+            winreg.CloseKey(key)
+            self._snapshots.append((hive, key_path, value_name, val, vtype, 'set'))
+        except FileNotFoundError:
+            # Key/value didn't exist — rollback means deleting it
+            self._snapshots.append((hive, key_path, value_name, None, None, 'delete'))
+        except Exception:
+            pass
+
+    def rollback(self):
+        """Restore all snapshotted registry values."""
+        import winreg
+        restored, failed = 0, 0
+        for snap in reversed(self._snapshots):
+            hive, key_path, value_name, old_val, old_type, mode = snap
+            try:
+                if mode == 'delete' or old_val is None:
+                    try:
+                        key = winreg.OpenKey(hive, key_path, 0,
+                                             winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY)
+                        winreg.DeleteValue(key, value_name)
+                        winreg.CloseKey(key)
+                    except Exception:
+                        pass
+                else:
+                    key = winreg.CreateKeyEx(hive, key_path, 0,
+                                             winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY)
+                    winreg.SetValueEx(key, value_name, 0, old_type, old_val)
+                    winreg.CloseKey(key)
+                restored += 1
+            except Exception:
+                failed += 1
+        self._snapshots.clear()
+        return restored, failed
+
+    def clear(self):
+        self._snapshots.clear()
+
+    @property
+    def has_snapshots(self):
+        return len(self._snapshots) > 0
+
+rollback_mgr = RollbackManager()
 
 logger = Logger()
 
@@ -213,7 +295,15 @@ _DELETION_WHITELIST_EXTENDED = [
 ]
 
 def _path_in_whitelist(real_path, whitelist):
-    return any(real_path.startswith(w) for w in whitelist)
+    try:
+        real_path = os.path.normcase(os.path.abspath(real_path))
+        for allowed in whitelist:
+            allowed_path = os.path.normcase(os.path.abspath(allowed))
+            if os.path.commonpath([real_path, allowed_path]) == allowed_path:
+                return True
+    except (OSError, ValueError):
+        return False
+    return False
 
 def is_path_safe_for_deletion(target_path):
     """
@@ -242,7 +332,8 @@ def is_path_safe_for_deletion(target_path):
         "c:\\users\\default", "c:\\programdata",
     ]
     for blocked in critical_paths:
-        if real == blocked or real.startswith(blocked + "\\") is False and real == blocked:
+        blocked = os.path.normcase(os.path.abspath(blocked))
+        if real == blocked:
             return False
 
     # Whitelist: realpath must start with allowed directory
@@ -349,6 +440,24 @@ def run_command(cmd, as_admin=False):
     except Exception as e:
         return False, "", str(e)
 
+def _run_safe_process(args, timeout=15):
+    """Run a fixed executable without shell parsing."""
+    if DRY_RUN:
+        print(f"{Colors.CYAN}[DRY-RUN] Команда: {args}{Colors.RESET}")
+        return True, "", ""
+    try:
+        result = subprocess.run(
+            args,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return result.returncode == 0, result.stdout, result.stderr
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, "", str(error)
+
 def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hive=None):
     """Установка значения в реестре с обходом блокировок"""
     if not require_mutation_allowed(f"reg_set_value: {key_path}\\{value_name}"):
@@ -361,6 +470,7 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hi
         try:
             for access in [winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_32KEY]:
                 try:
+                    rollback_mgr.snapshot_value(current_hive, key_path, value_name)
                     key = winreg.CreateKeyEx(current_hive, key_path, 0, access)
                     winreg.SetValueEx(key, value_name, 0, value_type, value_data)
                     winreg.CloseKey(key)
@@ -3817,6 +3927,75 @@ def Firewall_Force_Enable():
         run_reg(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\mpssvc", "Start", 2, winreg.REG_DWORD)
     return True
 
+def Security_Baseline_Audit():
+    """Проверяет базовые настройки безопасности без внесения изменений."""
+    print_hacker_message("Проверяю базовую защиту Windows без изменения настроек.")
+
+    checks = []
+
+    try:
+        uac_key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            0,
+            winreg.KEY_READ,
+        )
+        enable_lua, _ = winreg.QueryValueEx(uac_key, "EnableLUA")
+        winreg.CloseKey(uac_key)
+        checks.append(("UAC", enable_lua == 1, f"EnableLUA={enable_lua}"))
+    except (OSError, FileNotFoundError) as error:
+        checks.append(("UAC", False, str(error)))
+
+    firewall_ok, firewall_out, firewall_err = _run_safe_process(
+        ["netsh", "advfirewall", "show", "allprofiles", "state"]
+    )
+    firewall_text = f"{firewall_out}\n{firewall_err}".lower()
+    checks.append((
+        "Брандмауэр",
+        firewall_ok and "state" in firewall_text and "off" not in firewall_text,
+        "состояние получено" if firewall_ok else firewall_err.strip(),
+    ))
+
+    defender_ok, defender_out, defender_err = _run_safe_process(
+        ["sc", "query", "WinDefend"]
+    )
+    defender_text = f"{defender_out}\n{defender_err}".upper()
+    checks.append((
+        "Microsoft Defender",
+        defender_ok and "RUNNING" in defender_text,
+        "служба запущена" if "RUNNING" in defender_text else "служба не запущена или недоступна",
+    ))
+
+    hosts_path = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "drivers", "etc", "hosts"
+    )
+    try:
+        with open(hosts_path, "rb") as hosts_file:
+            hosts_hash = hashlib.sha256(hosts_file.read()).hexdigest()[:16]
+        checks.append(("Файл hosts", True, f"SHA-256: {hosts_hash}"))
+    except OSError as error:
+        checks.append(("Файл hosts", False, str(error)))
+
+    failed = 0
+    for name, passed, details in checks:
+        if passed:
+            print(f"{Colors.GREEN}[OK] {name}: {details}{Colors.RESET}")
+        else:
+            failed += 1
+            print(f"{Colors.YELLOW}[WARN] {name}: {details}{Colors.RESET}")
+
+    logger.log(
+        "Security_Baseline_Audit",
+        "success" if failed == 0 else "warning",
+        f"Проверено: {len(checks)}, предупреждений: {failed}",
+    )
+    print(
+        f"{Colors.GREEN}[+] Аудит завершен: {len(checks)} проверок, "
+        f"предупреждений: {failed}{Colors.RESET}"
+    )
+    return failed == 0
+
 
 @lru_cache(maxsize=1)
 def get_repair_function_catalog():
@@ -3943,6 +4122,9 @@ def get_repair_function_catalog():
             ("Chrome Extensions", "Проверяет расширения Chrome", Chrome_Extensions_Clean),
             ("Startup Registry Scan", "Сканирует ключи автозагрузки", Startup_Registry_Scan),
             ("Event Viewer Clean", "Очищает журналы событий Windows", Event_Viewer_Clean),
+        ],
+        "Безопасность": [
+            ("Security Audit", "Проверяет UAC, брандмауэр, Defender и hosts без изменений", Security_Baseline_Audit),
         ],
     }
 
@@ -4159,7 +4341,7 @@ if GUI_MODE:
                                  QTableWidget, QTableWidgetItem, QHeaderView, QHBoxLayout,
                                  QStackedWidget, QFrame, QTabWidget, QTabBar, QTextBrowser)
     from PySide6.QtGui import QColor, QIcon, QFont, QPixmap
-    from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
+    from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QTimer
 
     class Worker(QThread):
 
@@ -5298,6 +5480,8 @@ if GUI_MODE:
             outer.addLayout(btn_layout)
 
     class NoVirGUI(QMainWindow):
+        update_result = Signal(object)
+
         def __init__(self):
             super().__init__()
             self.setWindowTitle("NoVir - Ultimate Recovery")
@@ -5307,7 +5491,11 @@ if GUI_MODE:
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
             self.worker = None
+            self.update_result.connect(self._on_update_checked)
             self.init_ui()
+            # Check for updates in background after 2 seconds
+            from PySide6.QtCore import QTimer as _QTimer
+            _QTimer.singleShot(2000, self.check_for_updates)
 
 
         def init_ui(self):
@@ -5508,13 +5696,13 @@ if GUI_MODE:
             bottom_layout = QHBoxLayout(bottom_bar)
             bottom_layout.setContentsMargins(15, 0, 15, 0)
 
-            bottom_support_btn = QPushButton("★  ПОДДЕРЖАТЬ АВТОРА")
+            bottom_support_btn = QPushButton("ПОДДЕРЖАТЬ АВТОРА")
             bottom_support_btn.setFixedHeight(28)
             bottom_support_btn.setStyleSheet(
                 "QPushButton { border: 1px solid #333333; color: #888888; font-size: 11px; font-weight: bold; padding: 0 12px; }"
                 " QPushButton:hover { border-color: #ffffff; color: #ffffff; }"
             )
-            bottom_support_btn.clicked.connect(self.show_support_dialog)
+            bottom_support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             bottom_layout.addStretch()
             bottom_layout.addWidget(bottom_support_btn)
             self.layout.addWidget(bottom_bar)
@@ -5552,17 +5740,65 @@ if GUI_MODE:
                 btn.clicked.connect(lambda checked=False, x=idx: self.switch_page(x))
                 grid.addWidget(btn, *position)
 
+            layout.addStretch()
             layout.addLayout(grid)
 
-            support_btn = QPushButton("★  ПОДДЕРЖАТЬ АВТОРА")
+            layout.addStretch()  # ПУШИТ ВСЁ ВНИЗ
+            support_btn = QPushButton("ПОДДЕРЖАТЬ АВТОРА")
             support_btn.setFixedHeight(44)
             support_btn.setStyleSheet(
                 "QPushButton { background-color: #000000; color: #ffffff; border: 2px solid #ffffff;"
                 " font-size: 14px; font-weight: bold; letter-spacing: 2px; }"
                 " QPushButton:hover { background-color: #ffffff; color: #000000; }"
             )
-            support_btn.clicked.connect(self.show_support_dialog)
+            support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             layout.addWidget(support_btn)
+
+            # ── Action row: Fix-All / Audit Log / Rollback ──────────────
+            action_row = QHBoxLayout()
+            action_row.setSpacing(10)
+
+            fix_all_btn = QPushButton("ПОЧИНИТЬ ВСЁ")
+            fix_all_btn.setFixedHeight(40)
+            fix_all_btn.setStyleSheet(
+                "QPushButton { background-color: #ffffff; color: #000000; border: none;"
+                " font-size: 13px; font-weight: bold; }"
+                " QPushButton:hover { background-color: #dddddd; }"
+            )
+            fix_all_btn.clicked.connect(self.run_fix_all)
+            action_row.addWidget(fix_all_btn, stretch=2)
+
+            audit_btn = QPushButton("ЖУРНАЛ")
+            audit_btn.setFixedHeight(40)
+            audit_btn.setStyleSheet(
+                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
+                " font-size: 12px; }"
+                " QPushButton:hover { border-color: #ffffff; }"
+            )
+            audit_btn.clicked.connect(lambda checked=False: self.show_audit_log())
+            action_row.addWidget(audit_btn, stretch=1)
+
+            rollback_btn = QPushButton("ОТКАТ")
+            rollback_btn.setFixedHeight(40)
+            rollback_btn.setStyleSheet(
+                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
+                " font-size: 12px; }"
+                " QPushButton:hover { border-color: #ffffff; }"
+            )
+            rollback_btn.clicked.connect(lambda checked=False: self.show_rollback_dialog())
+            action_row.addWidget(rollback_btn, stretch=1)
+
+
+            update_btn = QPushButton("ОБНОВИТЬ")
+            update_btn.setFixedHeight(40)
+            update_btn.setStyleSheet(
+                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
+                " font-size: 12px; }"
+                " QPushButton:hover { border-color: #ffffff; }"
+            )
+            update_btn.clicked.connect(lambda checked=False: self.check_for_updates(manual=True))
+            action_row.addWidget(update_btn, stretch=1)
+            layout.addLayout(action_row)
 
             return page
 
@@ -5611,7 +5847,7 @@ if GUI_MODE:
             layout.setSpacing(14)
 
             # Title
-            title = QLabel("★  ПОДДЕРЖАТЬ АВТОРА")
+            title = QLabel("ПОДДЕРЖАТЬ АВТОРА")
             title.setStyleSheet("font-size: 18px; font-weight: bold; letter-spacing: 3px;")
             layout.addWidget(title)
 
@@ -5822,21 +6058,6 @@ if GUI_MODE:
                     QScrollBar:vertical { background: #000000; width: 10px; }
                     QScrollBar::handle:vertical { background: #222222; }
                     QCheckBox { color: #ffffff; }
-                """)
-            elif theme_name == "Тема Ванька":
-                try:
-                    import sys as _sys, os as _os
-                    _base = _sys._MEIPASS
-                except Exception:
-                    import os as _os
-                    _base = _os.path.abspath(_os.path.dirname(__file__))
-                img_path = _os.path.join(_base, "Иван.png").replace("\\", "/")
-                self.main_container.setStyleSheet(f"""
-                    #MainContainer {{
-                        background-image: url('{img_path}');
-                        background-position: center;
-                        background-repeat: no-repeat;
-                    }}
                 """)
             elif theme_name == "МАТОВЫЙ":
                 self.setStyleSheet("""
@@ -6826,8 +7047,13 @@ if GUI_MODE:
                         trigger_xml = f'<Trigger><Daily /></Trigger>'
                     
                     # Создаем задачу через schtasks
-                    cmd = f'schtasks /create /tn "{task_name}" /tr "{program_path}" /sc {trigger_type.lower()} /f'
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    result = subprocess.run(
+                        ["schtasks", "/create", "/tn", task_name, "/tr", program_path,
+                         "/sc", trigger_type.lower(), "/f"],
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                    )
                     
                     if result.returncode == 0:
                         logger.log("Scheduler", "success", f"Создана задача: {task_name}")
@@ -6861,7 +7087,12 @@ if GUI_MODE:
             
             if reply == QMessageBox.Yes:
                 try:
-                    result = subprocess.run(f'schtasks /delete /tn "{task_name}" /f', shell=True, capture_output=True, text=True)
+                    result = subprocess.run(
+                        ["schtasks", "/delete", "/tn", task_name, "/f"],
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                    )
                     
                     if result.returncode == 0:
                         logger.log("Scheduler", "success", f"Удалена задача: {task_name}")
@@ -6882,7 +7113,12 @@ if GUI_MODE:
             task_name = self.table_scheduler.item(row, 0).text()
             
             try:
-                result = subprocess.run(f'schtasks /run /tn "{task_name}"', shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    ["schtasks", "/run", "/tn", task_name],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 
                 if result.returncode == 0:
                     logger.log("Scheduler", "success", f"Запущена задача: {task_name}")
@@ -6902,7 +7138,12 @@ if GUI_MODE:
             task_name = self.table_scheduler.item(row, 0).text()
             
             try:
-                result = subprocess.run(f'schtasks /change /tn "{task_name}" /disable', shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    ["schtasks", "/change", "/tn", task_name, "/disable"],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 
                 if result.returncode == 0:
                     logger.log("Scheduler", "success", f"Отключена задача: {task_name}")
@@ -6923,7 +7164,12 @@ if GUI_MODE:
             task_name = self.table_scheduler.item(row, 0).text()
             
             try:
-                result = subprocess.run(f'schtasks /change /tn "{task_name}" /enable', shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    ["schtasks", "/change", "/tn", task_name, "/enable"],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 
                 if result.returncode == 0:
                     logger.log("Scheduler", "success", f"Включена задача: {task_name}")
@@ -6968,7 +7214,12 @@ if GUI_MODE:
             service_name = self.table_services.item(row, 0).text()
             
             try:
-                result = subprocess.run(f'net start "{service_name}"', shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    ["net", "start", service_name],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Запущена служба: {service_name}")
@@ -6994,7 +7245,12 @@ if GUI_MODE:
             
             if reply == QMessageBox.Yes:
                 try:
-                    result = subprocess.run(f'net stop "{service_name}"', shell=True, capture_output=True, text=True)
+                    result = subprocess.run(
+                        ["net", "stop", service_name],
+                        shell=False,
+                        capture_output=True,
+                        text=True,
+                    )
                     
                     if result.returncode == 0:
                         logger.log("Services", "success", f"Остановлена служба: {service_name}")
@@ -7016,9 +7272,19 @@ if GUI_MODE:
             
             try:
                 # Сначала останавливаем
-                subprocess.run(f'net stop "{service_name}"', shell=True, capture_output=True, text=True)
+                subprocess.run(
+                    ["net", "stop", service_name],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 # Затем запускаем
-                result = subprocess.run(f'net start "{service_name}"', shell=True, capture_output=True, text=True)
+                result = subprocess.run(
+                    ["net", "start", service_name],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                )
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Перезапущена служба: {service_name}")
@@ -7289,7 +7555,7 @@ if GUI_MODE:
             categories = [
                 "Интерфейс", "Проводник", "Реестр",
                 "Система", "Запуск утилит", "Клавиатура",
-                "Очистка", "Продвинутое", "Хардкор (Трояны)"
+                "Очистка", "Продвинутое", "Безопасность", "Хардкор (Трояны)"
             ]
             for cat in categories:
                 funcs = catalog.get(cat, [])
@@ -8164,7 +8430,7 @@ if GUI_MODE:
             self.unlocker_path_edit.clear()
 
         def create_program_page(self):
-            """Настройки — только выбор темы"""
+            """Настройки - только выбор темы"""
             page = QFrame()
             layout = QVBoxLayout(page)
             layout.setContentsMargins(30, 30, 30, 30)
@@ -8185,7 +8451,7 @@ if GUI_MODE:
             layout.addWidget(lbl_theme)
 
             self.cb_theme = QComboBox()
-            self.cb_theme.addItems(["Minimal B&W", "Тёмная тема (Стандартная)", "Тема Ванька", "МАТОВЫЙ", "ПРОЗРАЧНЫЙ"])
+            self.cb_theme.addItems(["Minimal B&W", "Тёмная тема (Стандартная)", "МАТОВЫЙ", "ПРОЗРАЧНЫЙ"])
             self.cb_theme.setStyleSheet("""
                 QComboBox {
                     background-color: #000000;
@@ -8613,6 +8879,296 @@ if GUI_MODE:
             self.worker.start()
 
 
+
+        def check_for_updates(self, manual=False):
+            """Загружает Latest и последний pre-release с GitHub."""
+            import threading
+
+            def _check():
+                try:
+                    import urllib.request
+
+                    url = "https://api.github.com/repos/artemcik907/NoVir/releases?per_page=30"
+                    req = urllib.request.Request(
+                        url,
+                        headers={"User-Agent": "NoVir-UpdateChecker/2.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        releases = json.loads(resp.read().decode("utf-8"))
+
+                    releases = [
+                        release for release in releases
+                        if not release.get("draft", False)
+                    ]
+                    self.update_result.emit({
+                        "releases": releases,
+                        "manual": manual,
+                    })
+                except Exception as error:
+                    self.update_result.emit({
+                        "error": str(error),
+                        "manual": manual,
+                    })
+
+            threading.Thread(target=_check, daemon=True).start()
+
+        @Slot(object)
+        def _on_update_checked(self, data):
+            if data.get("error"):
+                if data.get("manual"):
+                    QMessageBox.warning(
+                        self,
+                        "Обновление",
+                        "Не удалось получить список релизов GitHub:\n"
+                        f"{data['error']}"
+                    )
+                return
+
+            releases = data.get("releases", [])
+            stable = next(
+                (release for release in releases
+                 if not release.get("prerelease", False)),
+                None
+            )
+            prerelease = next(
+                (release for release in releases
+                 if release.get("prerelease", False)),
+                None
+            )
+
+            if stable or prerelease:
+                self._show_update_dialog(stable, prerelease)
+            elif data.get("manual"):
+                QMessageBox.information(
+                    self,
+                    "Обновление",
+                    "На GitHub пока нет опубликованных релизов."
+                )
+
+        def _show_update_dialog(self, stable, prerelease):
+            import webbrowser
+
+            dlg = QDialog(self)
+            dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
+            dlg.setWindowTitle("NoVir — Обновления")
+            dlg.setMinimumWidth(420)
+            dlg.setStyleSheet("QDialog{background:#000000;} QLabel{color:#ffffff;}")
+            lay = QVBoxLayout(dlg)
+            lay.setSpacing(14)
+            lay.setContentsMargins(20, 20, 20, 20)
+
+            lay.addWidget(QLabel("Выберите версию для загрузки:"))
+
+            combo = QComboBox()
+            if stable:
+                combo.addItem(
+                    f"Latest — {stable.get('tag_name', 'без тега')}",
+                    stable
+                )
+            if prerelease:
+                combo.addItem(
+                    f"Pre-release — {prerelease.get('tag_name', 'без тега')}",
+                    prerelease
+                )
+            lay.addWidget(combo)
+
+            warning = QLabel()
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color:#ffcc00; font-size:12px;")
+            lay.addWidget(warning)
+
+            def update_warning(index):
+                release = combo.itemData(index)
+                if release and release.get("prerelease"):
+                    warning.setText(
+                        "⚠️ PRE-RELEASE: версия может содержать ошибки и "
+                        "нестабильные функции. Разработчик не отвечает за "
+                        "возможные проблемы этой версии."
+                    )
+                else:
+                    warning.setText("Latest — стабильная версия.")
+
+            combo.currentIndexChanged.connect(update_warning)
+            update_warning(combo.currentIndex())
+
+            title = QLabel("Релиз GitHub")
+            title.setStyleSheet("font-size:14px; font-weight:bold; color:#ffffff;")
+            lay.addWidget(title)
+
+            info = QLabel("Выберите что скачать:")
+            info.setStyleSheet("color:#aaaaaa; font-size:12px;")
+            lay.addWidget(info)
+
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(10)
+
+            def download(asset_kind):
+                release = combo.currentData()
+                if not release:
+                    return
+
+                if release.get("prerelease"):
+                    answer = QMessageBox.warning(
+                        dlg,
+                        "Предупреждение PRE-RELEASE",
+                        "Вы выбрали предварительную версию. Она может "
+                        "содержать ошибки и работать нестабильно.\n\n"
+                        "Продолжить загрузку?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if answer != QMessageBox.Yes:
+                        return
+
+                assets = release.get("assets", [])
+                if asset_kind == "installer":
+                    asset = next(
+                        (item for item in assets
+                         if any(word in item.get("name", "").lower()
+                                for word in ("setup", "installer", "install"))),
+                        None
+                    )
+                else:
+                    asset = next(
+                        (item for item in assets
+                         if item.get("name", "").lower().endswith(".exe")
+                         and not any(word in item.get("name", "").lower()
+                                     for word in ("setup", "installer", "install"))),
+                        None
+                    )
+
+                if asset:
+                    webbrowser.open(asset["browser_download_url"])
+                else:
+                    webbrowser.open(release.get("html_url", ""))
+                dlg.accept()
+
+            if stable or prerelease:
+                b1 = QPushButton("Скачать Installer")
+                b1.clicked.connect(lambda: download("installer"))
+                btn_row.addWidget(b1)
+
+                b2 = QPushButton("Скачать Portable (.exe)")
+                b2.clicked.connect(lambda: download("portable"))
+                btn_row.addWidget(b2)
+
+            lay.addLayout(btn_row)
+
+            b_skip = QPushButton("Закрыть")
+            b_skip.setStyleSheet("QPushButton{background:transparent;color:#555;border:none;padding:4px;font-size:11px;} QPushButton:hover{color:#fff;}")
+            b_skip.clicked.connect(dlg.reject)
+            lay.addWidget(b_skip, alignment=Qt.AlignRight)
+
+            dlg.exec()
+
+        def run_fix_all(self):
+            """One-click safe recovery mode: runs a curated set of non-destructive fixes."""
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar, QPushButton
+            from PySide6.QtCore import Qt, QTimer
+
+            dlg = QDialog(self)
+            dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
+            dlg.setWindowTitle("NoVir — Починить всё")
+            dlg.setMinimumWidth(460)
+            dlg.setMinimumHeight(300)
+            dlg.setStyleSheet("QDialog{background:#000000;} QLabel{color:#ffffff;} QProgressBar{border:1px solid #444;background:#111;height:12px;} QProgressBar::chunk{background:#ffffff;}")
+            lay = QVBoxLayout(dlg)
+
+            lbl_title = QLabel("Запуск комплексного восстановления...")
+            lbl_title.setStyleSheet("font-size:14px; font-weight:bold; color:#ffffff;")
+            lay.addWidget(lbl_title)
+
+            lbl_step = QLabel("Подготовка...")
+            lbl_step.setStyleSheet("color:#aaaaaa; font-size:12px;")
+            lay.addWidget(lbl_step)
+
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            lay.addWidget(bar)
+
+            lbl_log = QLabel("")
+            lbl_log.setStyleSheet("color:#888; font-size:11px;")
+            lbl_log.setWordWrap(True)
+            lay.addWidget(lbl_log)
+
+            btn_close = QPushButton("Закрыть")
+            btn_close.setEnabled(False)
+            btn_close.setStyleSheet("QPushButton{background:#000;color:#fff;border:2px solid #fff;padding:6px 20px;font-weight:bold;}"
+                                    "QPushButton:hover{background:#fff;color:#000;}"
+                                    "QPushButton:disabled{color:#444;border-color:#444;}")
+            btn_close.clicked.connect(dlg.accept)
+            lay.addWidget(btn_close, alignment=Qt.AlignRight)
+
+            STEPS = [
+                ("Снятие блокировки реестра",    lambda: __import__('__main__').Disable_Regedit_Fix() if hasattr(__import__('__main__'), 'Disable_Regedit_Fix') else None),
+                ("Снятие блокировки диспетчера", lambda: __import__('__main__').Disable_TaskManager_Fix() if hasattr(__import__('__main__'), 'Disable_TaskManager_Fix') else None),
+                ("Восстановление ярлыков",       lambda: __import__('__main__').Desktop_Icons_Fix() if hasattr(__import__('__main__'), 'Desktop_Icons_Fix') else None),
+                ("Сброс ассоциаций файлов",      lambda: __import__('__main__').File_Associations_Fix() if hasattr(__import__('__main__'), 'File_Associations_Fix') else None),
+                ("Очистка автозапуска",          None),
+                ("Готово!",                      None),
+            ]
+
+            step_idx = [0]
+            
+            def next_step():
+                if step_idx[0] >= len(STEPS):
+                    bar.setValue(100)
+                    lbl_step.setText("Готово! Все безопасные исправления применены.")
+                    lbl_log.setText("Рекомендуется перезагрузить компьютер.")
+                    btn_close.setEnabled(True)
+                    return
+                
+                i = step_idx[0]
+                name, func = STEPS[i]
+                
+                pct = int((i / len(STEPS)) * 100)
+                lbl_step.setText(f"Шаг {i+1}/{len(STEPS)}: {name}")
+                bar.setValue(pct)
+                logger.log("FixAll", "info", name)
+                
+                if func:
+                    try:
+                        func()
+                        lbl_log.setText(f"OK: {name} — выполнено")
+                    except Exception as _e:
+                        lbl_log.setText(f"ПРОПУСК: {name} — {_e}")
+                
+                step_idx[0] += 1
+                QTimer.singleShot(400, next_step)
+
+            QTimer.singleShot(400, next_step)
+            dlg.exec()
+
+        def show_audit_log(self):
+            """Open the audit log file in Notepad."""
+            import subprocess, os
+            log_path = logger.audit_log_path
+            if log_path and os.path.exists(log_path):
+                subprocess.Popen(["notepad.exe", log_path])
+            else:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Журнал", "Журнал действий пуст или файл не найден.")
+
+        def show_rollback_dialog(self):
+            """Offer to rollback registry changes made this session."""
+            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtCore import Qt
+            if not rollback_mgr.has_snapshots:
+                QMessageBox.information(self, "Откат", "Нечего откатывать: изменений реестра в этой сессии не зафиксировано.")
+                return
+            msg = QMessageBox(self)
+            msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
+            msg.setWindowTitle("↩ Откат изменений")
+            msg.setText(f"Откатить все изменения реестра текущей сессии?\n\nЗафиксировано изменений: {len(rollback_mgr._snapshots)}")
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg.button(QMessageBox.Yes).setText("ОТКАТИТЬ")
+            msg.button(QMessageBox.No).setText("Отмена")
+            msg.setStyleSheet("QMessageBox{background:#000;} QLabel{color:#fff;} QPushButton{background:#000;color:#fff;border:2px solid #fff;padding:6px 14px;font-weight:bold;} QPushButton:hover{background:#fff;color:#000;}")
+            if msg.exec() == QMessageBox.Yes:
+                restored, failed = rollback_mgr.rollback()
+                QMessageBox.information(self, "Откат завершён", f"Восстановлено: {restored}\nОшибок: {failed}")
+
+
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""
             if not getattr(self, '_user_supported', False):
@@ -8622,7 +9178,7 @@ if GUI_MODE:
                 msg.setWindowFlags(msg.windowFlags() | _Qt.WindowStaysOnTopHint)
                 msg.setWindowTitle("NoVir")
                 msg.setText(
-                    "★  Перед выходом: если программа тебе помогла, поддержи автора!\n\n"
+                    " Перед выходом: если программа тебе помогла, поддержи автора!\n\n"
                     "Любая сумма очень важна.\n"
                     "Карта ПриватБанк: 5168 7521 1573 8307"
                 )
@@ -8681,12 +9237,17 @@ def main():
         is_admin = check_admin_status()
         admin_required = not (DRY_RUN and not GUI_MODE)
         if not is_admin and admin_required:
-            if not GUI_MODE:
+            if GUI_MODE:
+                import ctypes
+                script = os.path.abspath(sys.argv[0])
+                params = " ".join(sys.argv[1:])
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {params}', None, 1)
+                sys.exit(0)
+            else:
                 print(f"{Colors.RED}[!] ВНИМАНИЕ: Запустите скрипт от имени АДМИНИСТРАТОРА!{Colors.RESET}")
                 print(f"{Colors.YELLOW}[!] Нажмите Enter для выхода...{Colors.RESET}")
                 input()
-            sys.exit(1)
-        elif not is_admin and DRY_RUN and not GUI_MODE:
+                sys.exit(1)
             print(f"{Colors.YELLOW}[!] DRY-RUN запущен без прав администратора. Реальные изменения выполняться не будут.{Colors.RESET}")
     except Exception as _e:
         # Expected exception, intentionally ignored

@@ -98,11 +98,12 @@ SELF_CHECK = '--self-check' in sys.argv or '--check' in sys.argv
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NoVir_Backups")
 if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
-BACKUP_MANIFEST = os.path.join(
-    os.environ.get("APPDATA", os.path.dirname(BACKUP_DIR)),
+BACKUP_SECURITY_DIR = os.path.join(
+    os.environ.get("ProgramData", r"C:\ProgramData"),
     "NoVir",
-    "backup_manifest.json",
+    "Security",
 )
+BACKUP_MANIFEST = os.path.join(BACKUP_SECURITY_DIR, "backup_manifest.json")
 
 # Цвета для консоли
 class Colors:
@@ -274,7 +275,22 @@ def print_hacker_message(message):
 def _register_backup(path):
     """Record backup metadata outside the backup directory for restore validation."""
     try:
-        os.makedirs(os.path.dirname(BACKUP_MANIFEST), exist_ok=True)
+        os.makedirs(BACKUP_SECURITY_DIR, exist_ok=True)
+        if _is_reparse_point(BACKUP_SECURITY_DIR):
+            return False
+        acl_result = subprocess.run(
+            [
+                "icacls", BACKUP_SECURITY_DIR,
+                "/inheritance:r",
+                "/remove:g", "*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545",
+                "/grant:r", "*S-1-5-18:(OI)(CI)(F)", "*S-1-5-32-544:(OI)(CI)(F)",
+            ],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if acl_result.returncode != 0:
+            return False
         try:
             with open(BACKUP_MANIFEST, "r", encoding="utf-8") as manifest_file:
                 manifest = json.load(manifest_file)
@@ -304,7 +320,12 @@ def _verified_backup_path(filename, suffix):
         return None
     path = os.path.join(BACKUP_DIR, filename)
     try:
-        if not os.path.isfile(path) or _is_reparse_point(path):
+        if (
+            not os.path.isfile(path)
+            or _is_reparse_point(path)
+            or _is_reparse_point(BACKUP_SECURITY_DIR)
+            or _is_reparse_point(BACKUP_MANIFEST)
+        ):
             return None
         with open(BACKUP_MANIFEST, "r", encoding="utf-8") as manifest_file:
             record = json.load(manifest_file).get(filename)
@@ -371,7 +392,6 @@ _DELETION_WHITELIST_EXTENDED = [
     "c:\\documents and settings",
 ]
 
-@lru_cache(maxsize=2048)
 def _path_in_whitelist(real_path, whitelist_key):
     try:
         real_path = os.path.normcase(os.path.abspath(real_path))
@@ -384,7 +404,6 @@ def _path_in_whitelist(real_path, whitelist_key):
         return False
     return False
 
-@lru_cache(maxsize=4096)
 def is_path_safe_for_deletion(target_path):
     """
     Hardened path safety check.
@@ -498,6 +517,27 @@ def require_mutation_allowed(action_name):
         return False
     return True
 
+def confirm_high_risk_action(title, details):
+    """Require an explicit confirmation before changing system-wide security state."""
+    if DRY_RUN:
+        return True
+    try:
+        if GUI_MODE and PYSIDE_AVAILABLE:
+            from PySide6.QtWidgets import QMessageBox, QApplication
+            parent = QApplication.instance().activeWindow() if QApplication.instance() else None
+            answer = QMessageBox.warning(
+                parent,
+                title,
+                f"{details}\n\nПродолжить?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return answer == QMessageBox.Yes
+        answer = input(f"[!] {title}: {details}\nПродолжить? Введите YES: ")
+        return answer.strip() == "YES"
+    except (EOFError, OSError):
+        return False
+
 def run_command(cmd, as_admin=False):
     """Выполнение команды с обработкой ошибок"""
     if DRY_RUN:
@@ -560,13 +600,13 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hi
             continue
     return success
 
-def reg_delete_value(key_path, value_name):
+def reg_delete_value(key_path, value_name, hive=None):
     """Удаление значения из реестра с обходом блокировок"""
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Удаление из реестра: {key_path} -> {value_name}{Colors.RESET}")
         return True
     
-    hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+    hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
     success = False
     for hive in hives:
         hive_name = "HKLM" if hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
@@ -588,6 +628,18 @@ def reg_delete_value(key_path, value_name):
             if res: success = True
             
     return success
+
+def run_reg(hive, key_path, value_name, value_data, value_type=winreg.REG_SZ):
+    """Compatibility wrapper for legacy registry write call sites."""
+    return reg_set_value(key_path, value_name, value_data, value_type, hive=hive)
+
+def delete_registry_key(hive, key_path, value_name=None):
+    """Compatibility wrapper for legacy value/key deletion call sites."""
+    if value_name == "DisallowRun":
+        return reg_delete_key(f"{key_path}\\{value_name}", hive=hive)
+    if value_name:
+        return reg_delete_value(key_path, value_name, hive=hive)
+    return reg_delete_key(key_path, hive=hive)
 
 def reg_delete_key(key_path, recursive=False, hive=None):
     """Удаление ключа реестра"""
@@ -794,7 +846,7 @@ def Icon_Size_Reset():
         if DRY_RUN:
             print(f"{Colors.CYAN}[DRY-RUN] Будет сброшен LogPixels до 96 через PowerShell{Colors.RESET}")
         else:
-            subprocess.run(["powershell", "-Command", "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name 'LogPixels' -Value 96"], shell=True, capture_output=True)
+            subprocess.run(["powershell", "-Command", "Set-ItemProperty -Path 'HKCU:\\Control Panel\\Desktop' -Name 'LogPixels' -Value 96"], capture_output=True)
         
         logger.log("Icon_Size_Reset", "success", "Масштаб иконок сброшен")
         print(f"{Colors.GREEN}[+] Масштаб иконок сброшен на стандартный{Colors.RESET}")
@@ -844,12 +896,12 @@ def Screen_Rotate_Lock():
         result = subprocess.run([
             "powershell", "-Command",
             "$wmi = Get-WmiObject -Namespace root/wmi -Class WmiMonitorIDToPOMethod; $wmi.InvokeMethod(0, 1)"
-        ], shell=True, capture_output=True)
+        ], capture_output=True)
         
         # Альтернативный метод через дисплей с правильными спецсимволами SendKeys
         # ^ = Control, % = Alt, {UP} = Стрелка вверх
         # ПРИМЕЧАНИЕ: Работает только если горячие клавиши включены в драйвере видеокарты
-        subprocess.run(["powershell", "-Command", "(New-Object -ComObject WScript.Shell).SendKeys('^%{UP}')"], shell=True, capture_output=True)
+        subprocess.run(["powershell", "-Command", "(New-Object -ComObject WScript.Shell).SendKeys('^%{UP}')"], capture_output=True)
         
         logger.log("Screen_Rotate_Lock", "success", "Ориентация экрана сброшена на 0°")
         print(f"{Colors.GREEN}[+] Ориентация экрана установлена на 0° (если не сработало - используйте настройки дисплея вручную){Colors.RESET}")
@@ -1325,7 +1377,7 @@ def SFC_Scannow():
     """Запуск проверки системных файлов (sfc /scannow)"""
     print_hacker_message("Запуск SFC Scannow.")
     if not DRY_RUN:
-        subprocess.Popen("start cmd /k sfc /scannow", shell=True)
+        subprocess.Popen(["cmd.exe", "/k", "sfc /scannow"])
     return True
 
 def LogonUI_Restore():
@@ -1365,6 +1417,12 @@ def Disable_Test_Mode():
 def Replace_Sethc_Utilman():
     """Заменить sethc и utilman"""
     print_hacker_message("Запуск замены sethc и utilman.")
+    if not confirm_high_risk_action(
+        "Опасная операция: sethc/utilman",
+        "Будут изменены системные файлы экрана входа Windows с правами администратора.",
+    ):
+        logger.log("Replace_Sethc_Utilman", "warning", "Операция отменена пользователем")
+        return False
     if not DRY_RUN:
         import sys, shutil, os
         novir_path = sys.executable
@@ -1405,6 +1463,12 @@ def Replace_Sethc_Utilman():
 def File_Full_Access():
     """Полный доступ к файлу (Takeown & Icacls)"""
     print_hacker_message("Запуск процедуры получения прав на файл.")
+    if not confirm_high_risk_action(
+        "Опасная операция: права файла",
+        "Выдача полного доступа может ослабить защиту выбранного системного файла.",
+    ):
+        logger.log("File_Full_Access", "warning", "Операция отменена пользователем")
+        return False
     if not DRY_RUN:
         from PySide6.QtWidgets import QFileDialog, QMessageBox, QApplication
         app = QApplication.instance()
@@ -1420,6 +1484,12 @@ def File_Full_Access():
 def Driver_Cleanup():
     """Очистка драйверов"""
     print_hacker_message("Удаление всех нештатных драйверов.")
+    if not confirm_high_risk_action(
+        "Опасная операция: удаление драйверов",
+        "Будут удалены сторонние драйверы из хранилища Windows.",
+    ):
+        logger.log("Driver_Cleanup", "warning", "Операция отменена пользователем")
+        return False
     if not DRY_RUN:
         run_command("pnputil /delete-driver oem*.inf /uninstall /force")
         print("Сторонние драйверы удалены.")
@@ -1463,6 +1533,12 @@ oLink.Save
 def Easy_Launcher():
     """Удобный запуск"""
     print_hacker_message("Установка Удобного запуска (nov, контекстное меню, отключение UAC).")
+    if not confirm_high_risk_action(
+        "Опасная операция: отключение UAC",
+        "UAC будет отключён, а приложение скопировано в системный каталог.",
+    ):
+        logger.log("Easy_Launcher", "warning", "Операция отменена пользователем")
+        return False
     if not DRY_RUN:
         import sys, shutil, os
         import winreg
@@ -1501,7 +1577,7 @@ def Open_Regedit():
 
 def Open_Explorer():
     print_hacker_message("Запуск Explorer")
-    if not DRY_RUN: subprocess.Popen("explorer.exe")
+    if not DRY_RUN: subprocess.Popen(["explorer.exe"])
     return True
 
 def Open_Taskmgr():
@@ -1512,17 +1588,17 @@ def Open_Taskmgr():
 def Fix_MBR_Boot():
     print_hacker_message("Скрипт восстановления загрузчика")
     if not DRY_RUN:
-        subprocess.Popen('start cmd /k "bootrec /fixmbr & bootrec /fixboot & bootrec /rebuildbcd"', shell=True)
+        subprocess.Popen(["cmd.exe", "/k", "bootrec /fixmbr & bootrec /fixboot & bootrec /rebuildbcd"])
     return True
 
 def Open_Browser():
     print_hacker_message("Запуск Браузера")
-    if not DRY_RUN: subprocess.Popen("start https://google.com", shell=True)
+    if not DRY_RUN: os.startfile("https://google.com")
     return True
 
 def Open_User_Management():
     print_hacker_message("Запуск управления пользователями")
-    if not DRY_RUN: subprocess.Popen("lusrmgr.msc", shell=True)
+    if not DRY_RUN: subprocess.Popen(["lusrmgr.msc"])
     return True
 
 def Open_System_Cleanup():
@@ -1532,7 +1608,7 @@ def Open_System_Cleanup():
 
 def Open_Default_Apps():
     print_hacker_message("Запуск ассоциаций")
-    if not DRY_RUN: subprocess.Popen("start ms-settings:defaultapps", shell=True)
+    if not DRY_RUN: os.startfile("ms-settings:defaultapps")
     return True
 
 def Open_Password_Reset():
@@ -1542,13 +1618,13 @@ def Open_Password_Reset():
 
 def Open_Disk_Management():
     print_hacker_message("Управление дисками")
-    if not DRY_RUN: subprocess.Popen("diskmgmt.msc", shell=True)
+    if not DRY_RUN: subprocess.Popen(["diskmgmt.msc"])
     return True
 
 def WinRE_Backup_Restore():
     print_hacker_message("Резервное копирование WinRE")
     if not DRY_RUN:
-        subprocess.Popen("start cmd /k reagentc /info", shell=True)
+        subprocess.Popen(["cmd.exe", "/k", "reagentc /info"])
     return True
 
 
@@ -1842,7 +1918,7 @@ def Hosts_Clean_Hard():
     try:
         hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
         # Сначала снимаем атрибуты (только чтение, скрытый, системный)
-        subprocess.run(f'attrib -r -s -h "{hosts_path}"', shell=True, capture_output=True)
+        subprocess.run(["attrib", "-r", "-s", "-h", hosts_path], capture_output=True)
         
         default_hosts = """# Copyright (c) 1993-2009 Microsoft Corp.
 #
@@ -1879,7 +1955,7 @@ def Hosts_Clean_Hard():
             ps_cmd = f'''$content = @'
 {default_hosts}
 '@; Set-Content -Path "{hosts_path}" -Value $content -Force'''
-            subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True)
+            subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
             logger.log("Hosts_Clean_Hard", "success", "Файл hosts очищен через PowerShell")
             print(f"{Colors.GREEN}[+] Файл hosts очищен через PowerShell{Colors.RESET}")
             return True
@@ -1934,20 +2010,20 @@ def DNS_Google_Force():
             interfaces = [i.strip() for i in stdout.split('\n') if i.strip()]
             for interface in interfaces:
                 # Устанавливаем DNS через netsh для каждого активного интерфейса
-                subprocess.run(f'netsh interface ip set dns name="{interface}" static 8.8.8.8 primary', shell=True, capture_output=True)
-                subprocess.run(f'netsh interface ip add dns name="{interface}" 8.8.4.4 index=2', shell=True, capture_output=True)
+                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={interface}", "static", "8.8.8.8", "primary"], capture_output=True)
+                subprocess.run(["netsh", "interface", "ip", "add", "dns", f"name={interface}", "8.8.4.4", "index=2"], capture_output=True)
             
             # Сбрасываем кэш DNS
-            subprocess.run("ipconfig /flushdns", shell=True, capture_output=True)
+            subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
             
             logger.log("DNS_Google_Force", "success", f"DNS установлен на {len(interfaces)} интерфейсах")
             print(f"{Colors.GREEN}[+] DNS успешно изменен на Google DNS{Colors.RESET}")
             return True
         else:
             # Fallback: пробуем стандартный способ через name=*
-            subprocess.run('netsh interface ip set dns name="*" static 8.8.8.8 primary', shell=True, capture_output=True)
-            subprocess.run('netsh interface ip add dns name="*" 8.8.4.4 index=2', shell=True, capture_output=True)
-            subprocess.run("ipconfig /flushdns", shell=True, capture_output=True)
+            subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=*", "static", "8.8.8.8", "primary"], capture_output=True)
+            subprocess.run(["netsh", "interface", "ip", "add", "dns", "name=*", "8.8.4.4", "index=2"], capture_output=True)
+            subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
             return True
     except Exception as e:
         logger.log("DNS_Google_Force", "error", str(e))
@@ -2186,7 +2262,7 @@ def RecycleBin_Empty():
     try:
         # Очищаем корзину через PowerShell
         ps_cmd = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
-        subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True)
+        subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
         
         logger.log("RecycleBin_Empty", "success", "Корзина очищена")
         print(f"{Colors.GREEN}[+] Корзина очищена{Colors.RESET}")
@@ -2527,7 +2603,7 @@ def TaskScheduler_Clean():
     try:
         # Получаем список задач через PowerShell
         ps_cmd = "Get-ScheduledTask | Where-Object {$_.TaskName -notmatch '^Microsoft$'} | Select-Object TaskName, TaskPath"
-        result = subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True, text=True)
+        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
         
         suspicious_count = 0
         if result.returncode == 0:
@@ -2642,7 +2718,7 @@ Get-ChildItem -Path Cert:\\LocalMachine\\Root | Where-Object {
     $_.Issuer -eq $_.Subject -and $_.NotBefore -gt (Get-Date).AddDays(-30)
 } | Remove-Item -Force
 '''
-        subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True)
+        subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
         
         logger.log("Cert_Store_Clean", "success", "Сертификаты очищены")
         print(f"{Colors.GREEN}[+] Подозрительные сертификаты удалены{Colors.RESET}")
@@ -2664,8 +2740,8 @@ def WinUpdate_Reset():
     
     try:
         # Останавливаем службы обновлений
-        subprocess.run(["net", "stop", "wuauserv", "/y"], shell=True, capture_output=True)
-        subprocess.run(["net", "stop", "bits", "/y"], shell=True, capture_output=True)
+        subprocess.run(["net", "stop", "wuauserv", "/y"], capture_output=True)
+        subprocess.run(["net", "stop", "bits", "/y"], capture_output=True)
         
         # Удаляем папки обновлений
         update_dirs = [
@@ -2692,8 +2768,8 @@ def WinUpdate_Reset():
                     pass
         
         # Запускаем службы обратно
-        subprocess.run(["net", "start", "bits"], shell=True, capture_output=True)
-        subprocess.run(["net", "start", "wuauserv"], shell=True, capture_output=True)
+        subprocess.run(["net", "start", "bits"], capture_output=True)
+        subprocess.run(["net", "start", "wuauserv"], capture_output=True)
         
         logger.log("WinUpdate_Reset", "success", "Центр обновлений сброшен")
         print(f"{Colors.GREEN}[+] Центр обновлений сброшен{Colors.RESET}")
@@ -2720,7 +2796,7 @@ def LNK_File_Fix():
                     try:
                         # Проверяем цель ярлыка через PowerShell
                         ps_cmd = f"$shell = New-Object -ComObject WScript.Shell; $shortcut = $shell.CreateShortcut('{lnk_path}'); $shortcut.TargetPath"
-                        result = subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True, text=True)
+                        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
                         target = result.stdout.strip().lower()
                         
                         # Если цель — подозрительный файл
@@ -2757,7 +2833,7 @@ def Print_Spooler_Fix():
     
     try:
         # Останавливаем службу печати
-        subprocess.run(["net", "stop", "spooler", "/y"], shell=True, capture_output=True)
+        subprocess.run(["net", "stop", "spooler", "/y"], capture_output=True)
         time.sleep(1)
         
         # Удаляем файлы очереди
@@ -2773,7 +2849,7 @@ def Print_Spooler_Fix():
                     pass
         
         # Запускаем службу обратно
-        subprocess.run(["net", "start", "spooler"], shell=True, capture_output=True)
+        subprocess.run(["net", "start", "spooler"], capture_output=True)
         
         logger.log("Print_Spooler_Fix", "success", "Очередь печати очищена")
         print(f"{Colors.GREEN}[+] Очередь печати очищена{Colors.RESET}")
@@ -2907,7 +2983,7 @@ def TrustedInstaller_Restore():
                 ps_cmd = f"icacls '{path}' /restore '{path}\\acl_backup.txt' /T /C /Q"
                 # Это упрощенная версия - полный бэкап ACL требует больше логики
                 try:
-                    subprocess.run(["icacls", path, "/reset", "/T", "/C", "/Q"], shell=True, capture_output=True)
+                    subprocess.run(["icacls", path, "/reset", "/T", "/C", "/Q"], capture_output=True)
                     restored_count += 1
                 except Exception as _e:
                     # Expected exception, intentionally ignored
@@ -2917,7 +2993,7 @@ def TrustedInstaller_Restore():
         try:
             # Восстанавливаем владение для ключей HKLM\SOFTWARE
             ps_cmd = "Get-Acl HKLM:\\SOFTWARE | Set-Acl HKLM:\\SOFTWARE"
-            subprocess.run(["powershell", "-Command", ps_cmd], shell=True, capture_output=True)
+            subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
         except Exception as _e:
             # Expected exception, intentionally ignored
             pass
@@ -2941,11 +3017,11 @@ def EXE_Assoc():
         return True
     
     try:
-        # Восстанавливаем ассоциацию .exe
-        subprocess.run(["assoc", ".exe=exefile"], shell=True, capture_output=True)
-        
-        # Восстанавливаем команду запуска
-        subprocess.run(["ftype", "exefile=\"%1\" %*"], shell=True, capture_output=True)
+        # Восстанавливаем ассоциацию .exe напрямую через реестр.
+        with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, ".exe") as extension_key:
+            winreg.SetValue(extension_key, "", winreg.REG_SZ, "exefile")
+        with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, r"exefile\shell\open\command") as command_key:
+            winreg.SetValue(command_key, "", winreg.REG_SZ, '"%1" %*')
         
         logger.log("EXE_Assoc", "success", "Ассоциации .exe восстановлены")
         print(f"{Colors.GREEN}[+] Ассоциации .exe файлов восстановлены{Colors.RESET}")
@@ -2983,6 +3059,12 @@ def Self_Protect():
 def Admin_Force():
     """Проверка и запрос SeTakeOwnershipPrivilege для удаления защищенных файлов"""
     print_hacker_message("Запрашиваю привилегии владения файлами для удаления защищенных вирусов!")
+    if not confirm_high_risk_action(
+        "Опасная операция: привилегия владения",
+        "Процессу будет выдана SeTakeOwnershipPrivilege для изменения защищённых файлов.",
+    ):
+        logger.log("Admin_Force", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет запрошена привилегия SeTakeOwnershipPrivilege{Colors.RESET}")
@@ -3075,8 +3157,8 @@ def Windows_Defender_Enable():
                 pass
         
         # Запускаем службы Защитника
-        subprocess.run(["sc", "config", "WinDefend", "start=", "auto"], shell=True, capture_output=True)
-        subprocess.run(["net", "start", "WinDefend"], shell=True, capture_output=True)
+        subprocess.run(["sc", "config", "WinDefend", "start=", "auto"], capture_output=True)
+        subprocess.run(["net", "start", "WinDefend"], capture_output=True)
         
         logger.log("Windows_Defender_Enable", "success", "Защитник Windows включен")
         print(f"{Colors.GREEN}[+] Защитник Windows включен{Colors.RESET}")
@@ -3112,7 +3194,7 @@ def System_Restore_Enable():
                 pass
         
         # Включаем службу
-        subprocess.run(["sc", "config", "sr", "start=", "demand"], shell=True, capture_output=True)
+        subprocess.run(["sc", "config", "sr", "start=", "demand"], capture_output=True)
         
         logger.log("System_Restore_Enable", "success", "Восстановление системы включено")
         print(f"{Colors.GREEN}[+] Восстановление системы включено{Colors.RESET}")
@@ -3159,7 +3241,7 @@ def Boot_Sector_Check():
     
     try:
         # Проверяем bcdedit на наличие подозрительных записей
-        result = subprocess.run(["bcdedit", "/enum", "firmware"], capture_output=True, text=True, shell=True)
+        result = subprocess.run(["bcdedit", "/enum", "firmware"], capture_output=True, text=True)
         
         suspicious_found = False
         if "unknown" in result.stdout.lower() or "malware" in result.stdout.lower():
@@ -3168,7 +3250,7 @@ def Boot_Sector_Check():
         
         # Проверяем MBR через diskpart
         diskpart_cmd = "list disk"
-        result = subprocess.run(["diskpart", "/s", "-"], input=diskpart_cmd, capture_output=True, text=True, shell=True)
+        result = subprocess.run(["diskpart", "/s", "-"], input=diskpart_cmd, capture_output=True, text=True)
         
         logger.log("Boot_Sector_Check", "success", f"Проверка завершена, подозрительно: {suspicious_found}")
         
@@ -3293,7 +3375,7 @@ def Event_Viewer_Clean():
         
         for log_name in logs_to_clear:
             try:
-                subprocess.run(["wevtutil", "cl", log_name], shell=True, capture_output=True)
+                subprocess.run(["wevtutil", "cl", log_name], capture_output=True)
             except Exception as _e:
                 # Expected exception, intentionally ignored
                 pass
@@ -3367,7 +3449,7 @@ def Backup_System_Restore():
     try:
         # Создаем точку восстановления через PowerShell
         ps_cmd = "Checkpoint-Computer -Description 'NoVir Backup' -RestorePointType 'MODIFY_SETTINGS'"
-        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True, shell=True)
+        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
         
         if result.returncode == 0:
             logger.log("Backup_System_Restore", "success", "Точка восстановления создана")
@@ -3502,9 +3584,11 @@ def Restore_From_Backup():
         
         if backup_files:
             latest_registry = max(backup_files)
-            registry_path = os.path.join(BACKUP_DIR, latest_registry)
+            registry_path = _verified_backup_path(latest_registry, ".reg")
             
             # Импортируем реестр
+            if not registry_path:
+                raise OSError("Бэкап реестра изменился перед импортом")
             result = subprocess.run(["reg", "import", registry_path], capture_output=True)
             
             if result.returncode == 0:
@@ -3523,9 +3607,11 @@ def Restore_From_Backup():
         
         if hosts_backups:
             latest_hosts = max(hosts_backups)
-            hosts_path = os.path.join(BACKUP_DIR, latest_hosts)
+            hosts_path = _verified_backup_path(latest_hosts, ".txt")
             hosts_dest = r"C:\Windows\System32\drivers\etc\hosts"
             
+            if not hosts_path:
+                raise OSError("Бэкап hosts изменился перед восстановлением")
             shutil.copy2(hosts_path, hosts_dest)
             print(f"{Colors.GREEN}[+] Hosts восстановлен из: {latest_hosts}{Colors.RESET}")
         else:
@@ -3540,8 +3626,10 @@ def Restore_From_Backup():
         
         if firewall_backups:
             latest_firewall = max(firewall_backups)
-            firewall_path = os.path.join(BACKUP_DIR, latest_firewall)
+            firewall_path = _verified_backup_path(latest_firewall, ".wfw")
             
+            if not firewall_path:
+                raise OSError("Бэкап брандмауэра изменился перед импортом")
             result = subprocess.run(["netsh", "advfirewall", "import", firewall_path], capture_output=True)
             
             if result.returncode == 0:
@@ -3920,7 +4008,7 @@ def open_in_explorer(path):
         if path and os.path.exists(path):
             if os.path.isfile(path):
                 path = os.path.dirname(path)
-            subprocess.run(['explorer', path], shell=True)
+            subprocess.run(['explorer', path], check=False)
             return True
     except Exception as _e:
         # Expected exception, intentionally ignored
@@ -4623,7 +4711,7 @@ if GUI_MODE:
                     continue
                 try:
                     cmd = f'"{defender_path}" -Scan -ScanType 3 -File "{exe_path}"'
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000)
                     if result.returncode == 2:
                         self.update_threat_signal.emit(row, 100)
                     elif result.returncode == 0:
@@ -8791,8 +8879,8 @@ if GUI_MODE:
                 info.append(f"Процессор: {platform.processor()}")
                 
                 try:
-                    result = subprocess.run('wmic OS get TotalVisibleMemorySize /value', 
-                                          shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                    result = subprocess.run(["wmic", "OS", "get", "TotalVisibleMemorySize", "/value"],
+                                          capture_output=True, text=True, creationflags=0x08000000)
                     for line in result.stdout.strip().split('\n'):
                         if 'TotalVisibleMemorySize' in line:
                             mem_kb = int(line.split('=')[1].strip())
@@ -8802,8 +8890,8 @@ if GUI_MODE:
                     pass
                 
                 try:
-                    result = subprocess.run('wmic logicaldisk get size,freespace,caption /value',
-                                          shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                    result = subprocess.run(["wmic", "logicaldisk", "get", "size,freespace,caption", "/value"],
+                                          capture_output=True, text=True, creationflags=0x08000000)
                     current_disk = {}
                     for line in result.stdout.strip().split('\n'):
                         line = line.strip()
@@ -8837,8 +8925,8 @@ if GUI_MODE:
             if reply == QMessageBox.Yes:
                 import subprocess
                 try:
-                    subprocess.run('taskkill /f /im explorer.exe', shell=True, 
-                                  capture_output=True, creationflags=0x08000000)
+                    subprocess.run(["taskkill", "/f", "/im", "explorer.exe"],
+                                   capture_output=True, creationflags=0x08000000)
                     import time
                     time.sleep(1)
                     subprocess.Popen('explorer.exe')
@@ -8892,7 +8980,7 @@ if GUI_MODE:
         def check_network_ports(self):
             import subprocess
             try:
-                result = subprocess.run('netstat -ano', shell=True, capture_output=True, 
+                result = subprocess.run(["netstat", "-ano"], capture_output=True,
                                        text=True, creationflags=0x08000000, timeout=15)
                 lines = result.stdout.strip().split('\n')
                 

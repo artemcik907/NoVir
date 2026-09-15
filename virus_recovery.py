@@ -98,6 +98,11 @@ SELF_CHECK = '--self-check' in sys.argv or '--check' in sys.argv
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NoVir_Backups")
 if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
+BACKUP_MANIFEST = os.path.join(
+    os.environ.get("APPDATA", os.path.dirname(BACKUP_DIR)),
+    "NoVir",
+    "backup_manifest.json",
+)
 
 # Цвета для консоли
 class Colors:
@@ -266,6 +271,78 @@ def print_hacker_message(message):
     print(f"{Colors.YELLOW}[SYSTEM]: {message}{Colors.RESET}")
 
 
+def _register_backup(path):
+    """Record backup metadata outside the backup directory for restore validation."""
+    try:
+        os.makedirs(os.path.dirname(BACKUP_MANIFEST), exist_ok=True)
+        try:
+            with open(BACKUP_MANIFEST, "r", encoding="utf-8") as manifest_file:
+                manifest = json.load(manifest_file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            manifest = {}
+
+        digest = hashlib.sha256()
+        with open(path, "rb") as backup_file:
+            for chunk in iter(lambda: backup_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        manifest[os.path.basename(path)] = {
+            "sha256": digest.hexdigest(),
+            "size": os.path.getsize(path),
+        }
+        temporary_path = BACKUP_MANIFEST + ".tmp"
+        with open(temporary_path, "w", encoding="utf-8") as manifest_file:
+            json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+        os.replace(temporary_path, BACKUP_MANIFEST)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _verified_backup_path(filename, suffix):
+    """Return a backup path only when its recorded metadata still matches."""
+    if not re.fullmatch(rf"(?:registry_backup|firewall_backup|hosts_backup)_\d{{8}}_\d{{6}}{re.escape(suffix)}", filename):
+        return None
+    path = os.path.join(BACKUP_DIR, filename)
+    try:
+        if not os.path.isfile(path) or _is_reparse_point(path):
+            return None
+        with open(BACKUP_MANIFEST, "r", encoding="utf-8") as manifest_file:
+            record = json.load(manifest_file).get(filename)
+        if not record or record.get("size") != os.path.getsize(path):
+            return None
+        digest = hashlib.sha256()
+        with open(path, "rb") as backup_file:
+            for chunk in iter(lambda: backup_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return path if digest.hexdigest() == record.get("sha256") else None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def iter_tree_paths(root_path):
+    """Yield all directory and file paths under root_path using scandir for speed."""
+    root_path = os.path.normpath(root_path)
+    if not os.path.exists(root_path):
+        return
+
+    stack = [root_path]
+    while stack:
+        current = stack.pop()
+        yield current
+
+        try:
+            with os.scandir(current) as iterator:
+                entries = list(iterator)
+        except (OSError, PermissionError):
+            continue
+
+        for entry in reversed(entries):
+            if entry.is_dir(follow_symlinks=False):
+                stack.append(entry.path)
+            elif entry.is_file(follow_symlinks=False):
+                yield entry.path
+
+
 def _is_reparse_point(path):
     """Check if path is a reparse point (symlink or junction) using WinAPI."""
     import ctypes
@@ -294,9 +371,11 @@ _DELETION_WHITELIST_EXTENDED = [
     "c:\\documents and settings",
 ]
 
-def _path_in_whitelist(real_path, whitelist):
+@lru_cache(maxsize=2048)
+def _path_in_whitelist(real_path, whitelist_key):
     try:
         real_path = os.path.normcase(os.path.abspath(real_path))
+        whitelist = _DELETION_WHITELIST if whitelist_key == 0 else _DELETION_WHITELIST_EXTENDED
         for allowed in whitelist:
             allowed_path = os.path.normcase(os.path.abspath(allowed))
             if os.path.commonpath([real_path, allowed_path]) == allowed_path:
@@ -305,6 +384,7 @@ def _path_in_whitelist(real_path, whitelist):
         return False
     return False
 
+@lru_cache(maxsize=4096)
 def is_path_safe_for_deletion(target_path):
     """
     Hardened path safety check.
@@ -337,8 +417,7 @@ def is_path_safe_for_deletion(target_path):
             return False
 
     # Whitelist: realpath must start with allowed directory
-    if not (_path_in_whitelist(real, _DELETION_WHITELIST) or
-            _path_in_whitelist(real, _DELETION_WHITELIST_EXTENDED)):
+    if not (_path_in_whitelist(real, 0) or _path_in_whitelist(real, 1)):
         return False
 
     return True
@@ -369,7 +448,7 @@ def safe_rmtree(path, _gui_parent=None):
 
     # Extra confirmation if path falls in extended whitelist (user data area)
     real = os.path.realpath(path).lower().rstrip("\\")
-    if _path_in_whitelist(real, _DELETION_WHITELIST_EXTENDED):
+    if _path_in_whitelist(real, 1):
         try:
             from PySide6.QtWidgets import QMessageBox
             from PySide6.QtCore import Qt as _Qt
@@ -399,19 +478,12 @@ def safe_rmtree(path, _gui_parent=None):
             # No Qt context (e.g. CLI mode) — require explicit flag instead
             return False
 
-    # Walk tree and validate every child before deleting anything
-    for root, dirs, files in os.walk(path):
-        for d in dirs:
-            full = os.path.join(root, d)
-            if _is_reparse_point(full):
-                return False  # Abort entire operation if any junction found
-        for f in files:
-            full = os.path.join(root, f)
-            if not is_path_safe_for_deletion(full):
-                return False
-    # Final re-check on root
-    if _is_reparse_point(path):
-        return False
+    # Fast traversal with scandir: less overhead than repeated os.walk() calls.
+    for candidate in iter_tree_paths(path):
+        if _is_reparse_point(candidate):
+            return False
+        if candidate != path and not is_path_safe_for_deletion(candidate):
+            return False
 
     try:
         shutil.rmtree(path)
@@ -3265,11 +3337,14 @@ def Backup_Registry():
             f.write("Windows Registry Editor Version 5.00\n\n")
             for key in keys_to_export:
                 try:
-                    result = subprocess.run(["reg", "export", key, "-"], capture_output=True, text=True, shell=True)
+                    result = subprocess.run(["reg", "export", key, "-"], capture_output=True, text=True)
                     f.write(result.stdout)
                 except Exception as _e:
                     # Expected exception, intentionally ignored
                     pass
+
+        if not _register_backup(backup_file):
+            raise OSError("Не удалось записать метаданные целостности бэкапа")
         
         logger.log("Backup_Registry", "success", f"Бэкап реестра сохранен: {backup_file}")
         print(f"{Colors.GREEN}[+] Бэкап реестра сохранен: {backup_file}{Colors.RESET}")
@@ -3323,6 +3398,9 @@ def Backup_Hosts():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_file = os.path.join(BACKUP_DIR, f"hosts_backup_{timestamp}.txt")
             shutil.copy2(hosts_path, backup_file)
+
+            if not _register_backup(backup_file):
+                raise OSError("Не удалось записать метаданные целостности бэкапа")
             
             logger.log("Backup_Hosts", "success", f"Бэкап hosts сохранен: {backup_file}")
             print(f"{Colors.GREEN}[+] Бэкап hosts сохранен: {backup_file}{Colors.RESET}")
@@ -3350,9 +3428,11 @@ def Backup_Firewall():
         backup_file = os.path.join(BACKUP_DIR, f"firewall_backup_{timestamp}.wfw")
         
         # Экспортируем правила брандмауэра
-        result = subprocess.run(["netsh", "advfirewall", "export", backup_file], capture_output=True, shell=True)
+        result = subprocess.run(["netsh", "advfirewall", "export", backup_file], capture_output=True)
         
         if result.returncode == 0:
+            if not _register_backup(backup_file):
+                raise OSError("Не удалось записать метаданные целостности бэкапа")
             logger.log("Backup_Firewall", "success", f"Бэкап брандмауэра сохранен: {backup_file}")
             print(f"{Colors.GREEN}[+] Бэкап брандмауэра сохранен: {backup_file}{Colors.RESET}")
             return True
@@ -3414,14 +3494,18 @@ def Restore_From_Backup():
     
     try:
         # Находим последний бэкап реестра
-        backup_files = [e.name for e in os.scandir(BACKUP_DIR) if e.name.startswith("registry_backup_") and e.name.endswith(".reg")]
+        backup_files = [
+            e.name for e in os.scandir(BACKUP_DIR)
+            if e.name.startswith("registry_backup_") and e.name.endswith(".reg")
+            and _verified_backup_path(e.name, ".reg")
+        ]
         
         if backup_files:
             latest_registry = max(backup_files)
             registry_path = os.path.join(BACKUP_DIR, latest_registry)
             
             # Импортируем реестр
-            result = subprocess.run(["reg", "import", registry_path], capture_output=True, shell=True)
+            result = subprocess.run(["reg", "import", registry_path], capture_output=True)
             
             if result.returncode == 0:
                 print(f"{Colors.GREEN}[+] Реестр восстановлен из: {latest_registry}{Colors.RESET}")
@@ -3431,7 +3515,11 @@ def Restore_From_Backup():
             print(f"{Colors.YELLOW}[!] Бэкап реестра не найден{Colors.RESET}")
         
         # Находим последний бэкап hosts
-        hosts_backups = [e.name for e in os.scandir(BACKUP_DIR) if e.name.startswith("hosts_backup_") and e.name.endswith(".txt")]
+        hosts_backups = [
+            e.name for e in os.scandir(BACKUP_DIR)
+            if e.name.startswith("hosts_backup_") and e.name.endswith(".txt")
+            and _verified_backup_path(e.name, ".txt")
+        ]
         
         if hosts_backups:
             latest_hosts = max(hosts_backups)
@@ -3444,13 +3532,17 @@ def Restore_From_Backup():
             print(f"{Colors.YELLOW}[!] Бэкап hosts не найден{Colors.RESET}")
         
         # Находим последний бэкап брандмауэра
-        firewall_backups = [e.name for e in os.scandir(BACKUP_DIR) if e.name.startswith("firewall_backup_") and e.name.endswith(".wfw")]
+        firewall_backups = [
+            e.name for e in os.scandir(BACKUP_DIR)
+            if e.name.startswith("firewall_backup_") and e.name.endswith(".wfw")
+            and _verified_backup_path(e.name, ".wfw")
+        ]
         
         if firewall_backups:
             latest_firewall = max(firewall_backups)
             firewall_path = os.path.join(BACKUP_DIR, latest_firewall)
             
-            result = subprocess.run(["netsh", "advfirewall", "import", firewall_path], capture_output=True, shell=True)
+            result = subprocess.run(["netsh", "advfirewall", "import", firewall_path], capture_output=True)
             
             if result.returncode == 0:
                 print(f"{Colors.GREEN}[+] Брандмауэр восстановлен из: {latest_firewall}{Colors.RESET}")
@@ -8951,7 +9043,7 @@ if GUI_MODE:
             dlg = QDialog(self)
             dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
             dlg.setWindowTitle("NoVir — Обновления")
-            dlg.setMinimumWidth(420)
+            dlg.resize(450, 250)
             dlg.setStyleSheet("QDialog{background:#000000;} QLabel{color:#ffffff;}")
             lay = QVBoxLayout(dlg)
             lay.setSpacing(14)
@@ -9171,33 +9263,6 @@ if GUI_MODE:
 
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""
-            if not getattr(self, '_user_supported', False):
-                from PySide6.QtWidgets import QMessageBox
-                from PySide6.QtCore import Qt as _Qt
-                msg = QMessageBox(self)
-                msg.setWindowFlags(msg.windowFlags() | _Qt.WindowStaysOnTopHint)
-                msg.setWindowTitle("NoVir")
-                msg.setText(
-                    " Перед выходом: если программа тебе помогла, поддержи автора!\n\n"
-                    "Любая сумма очень важна.\n"
-                    "Карта ПриватБанк: 5168 7521 1573 8307"
-                )
-                msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
-                msg.button(QMessageBox.Ok).setText("ПОДДЕРЖАТЬ  →")
-                msg.button(QMessageBox.Cancel).setText("Закрыть программу")
-                msg.setStyleSheet(
-                    "QMessageBox { background-color: #000000; color: #ffffff; }"
-                    " QLabel { color: #ffffff; font-size: 13px; }"
-                    " QPushButton { background-color: #000000; color: #ffffff;"
-                    " border: 2px solid #ffffff; padding: 6px 16px;"
-                    " font-weight: bold; min-width: 100px; }"
-                    " QPushButton:hover { background-color: #ffffff; color: #000000; }"
-                )
-                result = msg.exec()
-                if result == QMessageBox.Ok:
-                    self._run_support_dialog()
-                    return
-
             # Список всех возможных потоков
             threads_to_stop = []
             if hasattr(self, '_scheduler_loader') and self._scheduler_loader is not None:

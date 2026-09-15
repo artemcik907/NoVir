@@ -274,11 +274,16 @@ class ExplorerTab(QWidget):
                 reply = QMessageBox.question(self, "Удаление", f"Удалить безвозвратно?\n{path}", QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     try:
+                        from virus_recovery import safe_remove, safe_rmtree
+
                         if os.path.isdir(path):
-                            shutil.rmtree(path)
+                            deleted = safe_rmtree(path, self)
                         else:
-                            os.remove(path)
-                        self.refresh_files()
+                            deleted = safe_remove(path)
+                        if deleted:
+                            self.refresh_files()
+                        else:
+                            QMessageBox.warning(self, "Удаление заблокировано", "Путь не прошел проверку безопасности.")
                     except Exception as e:
                         QMessageBox.warning(self, "Ошибка", f"Обычное удаление не удалось: {e}\nПопробуйте сначала разблокировать.")
         else:

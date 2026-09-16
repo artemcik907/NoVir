@@ -1,0 +1,68 @@
+name: Windows build and security checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+          cache: pip
+
+      - name: Install pinned build and test tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip==24.3.1
+          python -m pip install -r requirements.txt pytest==8.3.4
+
+      - name: Run tests, including Windows ACL integration
+        shell: pwsh
+        run: python -m pytest -q
+
+      - name: Build executable
+        shell: pwsh
+        run: pyinstaller --clean --noconfirm virus_recovery.spec
+
+      - name: Sign release executable
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PASSWORD)) {
+            throw "Release tags require WINDOWS_CERT_BASE64 and WINDOWS_CERT_PASSWORD secrets."
+          }
+          [IO.File]::WriteAllBytes("NoVir-signing.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          if ($null -eq $signtool) { throw "signtool.exe was not found." }
+          & $signtool.FullName sign /fd SHA256 /f NoVir-signing.pfx /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td SHA256 dist\NoVir.exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed." }
+          & $signtool.FullName verify /pa /all dist\NoVir.exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed." }
+          Remove-Item NoVir-signing.pfx -Force
+
+      - name: Generate SHA-256 manifest
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\NoVir.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  NoVir.exe" | Set-Content dist\NoVir.exe.sha256 -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NoVir-windows-${{ github.sha }}
+          path: |
+            dist/NoVir.exe
+            dist/NoVir.exe.sha256

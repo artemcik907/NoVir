@@ -272,24 +272,11 @@ def print_hacker_message(message):
     print(f"{Colors.YELLOW}[SYSTEM]: {message}{Colors.RESET}")
 
 
-def _register_backup(path):
+def _register_backup(path, diagnostics=None):
     """Record backup metadata outside the backup directory for restore validation."""
     try:
         os.makedirs(BACKUP_SECURITY_DIR, exist_ok=True)
-        if _is_reparse_point(BACKUP_SECURITY_DIR):
-            return False
-        acl_result = subprocess.run(
-            [
-                "icacls", BACKUP_SECURITY_DIR,
-                "/inheritance:r",
-                "/remove:g", "*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545",
-                "/grant:r", "*S-1-5-18:(OI)(CI)(F)", "*S-1-5-32-544:(OI)(CI)(F)",
-            ],
-            capture_output=True,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if acl_result.returncode != 0:
+        if not _harden_backup_security_dir(diagnostics) or _is_reparse_point(BACKUP_SECURITY_DIR):
             return False
         try:
             with open(BACKUP_MANIFEST, "r", encoding="utf-8") as manifest_file:
@@ -309,9 +296,61 @@ def _register_backup(path):
         with open(temporary_path, "w", encoding="utf-8") as manifest_file:
             json.dump(manifest, manifest_file, indent=2, sort_keys=True)
         os.replace(temporary_path, BACKUP_MANIFEST)
+        if not _harden_acl_path(BACKUP_MANIFEST, diagnostics, set_owner=False):
+            return False
         return True
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError) as error:
+        if diagnostics is not None:
+            diagnostics.append(f"register exception={error!r}")
         return False
+
+
+def _harden_acl_path(path, diagnostics=None, set_owner=True):
+    """Apply the manifest owner and DACL to one existing path."""
+    if _is_reparse_point(path):
+        return False
+    is_directory = os.path.isdir(path)
+    grants = (
+        ["*S-1-5-18:(OI)(CI)(F)", "*S-1-5-32-544:(OI)(CI)(F)"]
+        if is_directory
+        else ["*S-1-5-18:F", "*S-1-5-32-544:F"]
+    )
+    commands = [
+        ["takeown", "/f", path, "/a"],
+        ["icacls", path, "/reset"],
+        ["icacls", path, "/inheritance:r"],
+        ["icacls", path, "/grant:r", *grants],
+    ]
+    if set_owner:
+        commands.append(["icacls", path, "/setowner", "*S-1-5-18"])
+    for command in commands:
+        result = subprocess.run(
+            command,
+            shell=False,
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        failed_match = re.search(r"failed processing\s+([1-9]\d*)", output)
+        if (
+            result.returncode != 0
+            or failed_match
+            or "access is denied" in output
+            or "this security id may not be assigned" in output
+        ):
+            if diagnostics is not None:
+                diagnostics.append(
+                    f"command={command!r}; returncode={result.returncode}; "
+                    f"stdout={result.stdout!r}; stderr={result.stderr!r}"
+                )
+            return False
+    return True
+
+
+def _harden_backup_security_dir(diagnostics=None):
+    """Reset the manifest directory to a known owner and DACL."""
+    return _harden_acl_path(BACKUP_SECURITY_DIR, diagnostics)
 
 
 def _verified_backup_path(filename, suffix):
@@ -539,12 +578,14 @@ def confirm_high_risk_action(title, details):
         return False
 
 def run_command(cmd, as_admin=False):
-    """Выполнение команды с обработкой ошибок"""
+    """Run an argv command without invoking a shell."""
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Команда: {cmd}{Colors.RESET}")
         return True, "", ""
+    if isinstance(cmd, str):
+        return False, "", "run_command requires an argument list"
     try:
-        kwargs = {"shell": True, "capture_output": True, "text": True}
+        kwargs = {"shell": False, "capture_output": True, "text": True}
         if sys.platform == 'win32' and hasattr(subprocess, 'CREATE_NO_WINDOW'):
             kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         result = subprocess.run(cmd, **kwargs)
@@ -594,7 +635,7 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hi
             if not success:
                 v_type = "REG_SZ" if value_type == winreg.REG_SZ else "REG_DWORD"
                 cmd = f'reg add "{hive_name}\{key_path}" /v "{value_name}" /t {v_type} /d "{value_data}" /f'
-                res, _, _ = run_command(cmd)
+                res, _, _ = run_command(["reg", "add", f"{hive_name}\\{key_path}", "/v", value_name, "/t", v_type, "/d", str(value_data), "/f"])
                 if res: success = True
         except Exception:
             continue
@@ -624,7 +665,7 @@ def reg_delete_value(key_path, value_name, hive=None):
         if not success:
             # Метод 2: Через REG DELETE
             cmd = f'reg delete "{hive_name}\\{key_path}" /v "{value_name}" /f'
-            res, _, _ = run_command(cmd)
+            res, _, _ = run_command(["reg", "delete", f"{hive_name}\\{key_path}", "/v", value_name, "/f"])
             if res: success = True
             
     return success
@@ -1354,15 +1395,15 @@ def Logoff_User():
     """Принудительный выход из пользователя"""
     print_hacker_message("Выход из текущего пользователя.")
     if not DRY_RUN:
-        run_command("shutdown /l /f")
+        run_command(["shutdown", "/l", "/f"])
     return True
 
 def Boot_WinRE():
     """Перезагрузка в среду восстановления (WinRE)"""
     print_hacker_message("Подготовка к перезагрузке в WinRE.")
     if not DRY_RUN:
-        run_command("reagentc /boottore")
-        run_command("shutdown /r /t 0")
+        run_command(["reagentc", "/boottore"])
+        run_command(["shutdown", "/r", "/t", "0"])
     return True
 
 def Restore_Russian_Keyboard():
@@ -1390,6 +1431,12 @@ def LogonUI_Restore():
 def Emergency_Recovery():
     """Экстренное восстановление: убить сторонние процессы"""
     print_hacker_message("Экстренное восстановление: закрытие всех неизвестных процессов.")
+    if not confirm_high_risk_action(
+        "Опасная операция: экстренное завершение процессов",
+        "Будут принудительно завершены почти все процессы, кроме системного и NoVir-процессов. Несохранённые данные могут быть потеряны.",
+    ):
+        logger.log("Emergency_Recovery", "warning", "Операция отменена пользователем")
+        return False
     if not DRY_RUN:
         try:
             for proc in psutil.process_iter(['pid', 'name']):
@@ -1400,7 +1447,8 @@ def Emergency_Recovery():
                     except Exception as _e:
                         # Expected exception, intentionally ignored
                         pass
-            run_command("taskkill /f /im explorer.exe & start explorer.exe")
+            run_command(["taskkill", "/f", "/im", "explorer.exe"])
+            run_command(["explorer.exe"])
         except Exception as _e:
             # Expected exception, intentionally ignored
             pass
@@ -1410,8 +1458,8 @@ def Disable_Test_Mode():
     """Отключение тестового режима Windows"""
     print_hacker_message("Отключение тестового режима.")
     if not DRY_RUN:
-        run_command("bcdedit /set testsigning off")
-        run_command("bcdedit /set nointegritychecks off")
+        run_command(["bcdedit", "/set", "testsigning", "off"])
+        run_command(["bcdedit", "/set", "nointegritychecks", "off"])
     return True
 
 def Replace_Sethc_Utilman():
@@ -1437,8 +1485,8 @@ def Replace_Sethc_Utilman():
             target = os.path.join(sys32, file)
             bak = target + ".bak"
             
-            run_command(f'takeown /f "{target}"')
-            run_command(f'icacls "{target}" /grant administrators:F')
+            run_command(["takeown", "/f", target])
+            run_command(["icacls", target, "/grant", "administrators:F"])
             
             if os.path.exists(bak):
                 # Restore
@@ -1476,8 +1524,8 @@ def File_Full_Access():
             active_window = app.activeWindow()
             file_path, _ = QFileDialog.getOpenFileName(active_window, "Выберите файл для полного доступа")
             if file_path:
-                run_command(f'takeown /f "{file_path}"')
-                run_command(f'icacls "{file_path}" /grant administrators:F')
+                run_command(["takeown", "/f", file_path])
+                run_command(["icacls", file_path, "/grant", "administrators:F"])
                 QMessageBox.information(active_window, "Готово", f"Полный доступ к {file_path} получен.")
     return True
 
@@ -1491,7 +1539,7 @@ def Driver_Cleanup():
         logger.log("Driver_Cleanup", "warning", "Операция отменена пользователем")
         return False
     if not DRY_RUN:
-        run_command("pnputil /delete-driver oem*.inf /uninstall /force")
+        run_command(["pnputil", "/delete-driver", "oem*.inf", "/uninstall", "/force"])
         print("Сторонние драйверы удалены.")
     return True
 
@@ -1524,7 +1572,7 @@ oLink.Save
                 import subprocess
                 subprocess.run(['cscript', '//nologo', vbs_path], creationflags=subprocess.CREATE_NO_WINDOW)
                 safe_remove(vbs_path)
-                run_command(f'attrib +h "{shortcut_path}"')
+                run_command(["attrib", "+h", shortcut_path])
                 print(f"[+] Ярлык создан (VBS): {shortcut_path}")
             except Exception as e:
                 print(f"[!] Ошибка создания ярлыка: {e}")
@@ -1908,6 +1956,12 @@ def Regedit_CMD_Unlock():
 def Hosts_Clean_Hard():
     """Очистка файла hosts от вирусных записей"""
     print_hacker_message("Проверяю файл hosts. Удаляю блокировки антивирусов.")
+    if not confirm_high_risk_action(
+        "Подтверждение: файл hosts",
+        "Файл hosts будет полностью перезаписан, что изменит системное разрешение имён.",
+    ):
+        logger.log("Hosts_Clean_Hard", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет перезаписан файл: C:\\Windows\\System32\\drivers\\etc\\hosts{Colors.RESET}")
@@ -1994,6 +2048,12 @@ def Proxy_Nuke():
 def DNS_Google_Force():
     """Принудительная установка Google DNS (8.8.8.8) на все активные адаптеры"""
     print_hacker_message("DNS сломан или направлен на вирусный сервер? Щас поставим Google DNS — 8.8.8.8!")
+    if not confirm_high_risk_action(
+        "Подтверждение: DNS",
+        "DNS всех активных сетевых адаптеров будет изменён на 8.8.8.8 и 8.8.4.4.",
+    ):
+        logger.log("DNS_Google_Force", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет установлен Google DNS (8.8.8.8, 8.8.4.4) на все активные интерфейсы{Colors.RESET}")
@@ -2004,7 +2064,7 @@ def DNS_Google_Force():
     try:
         # Получаем список активных интерфейсов через PowerShell
         ps_cmd = "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
-        success, stdout, _ = run_command(f'powershell -Command "{ps_cmd}"')
+        success, stdout, _ = run_command(["powershell", "-NoProfile", "-Command", ps_cmd])
         
         if success and stdout:
             interfaces = [i.strip() for i in stdout.split('\n') if i.strip()]
@@ -2033,6 +2093,12 @@ def DNS_Google_Force():
 def Firewall_State_Reset():
     """Сброс настроек брандмауэра на заводские"""
     print_hacker_message("Брандмауэр настроен криво? Щас сбросим на заводские настройки!")
+    if not confirm_high_risk_action(
+        "Подтверждение: брандмауэр",
+        "Правила брандмауэра будут сброшены, а брандмауэр включён для всех профилей.",
+    ):
+        logger.log("Firewall_State_Reset", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет выполнено: netsh advfirewall reset{Colors.RESET}")
@@ -2082,6 +2148,12 @@ def WinHttp_Proxy_Reset():
 def Network_Discovery_On():
     """Включение сетевого обнаружения"""
     print_hacker_message("Сетевое обнаружение выключено? Щас включим, чтобы компы в сети видеть!")
+    if not confirm_high_risk_action(
+        "Подтверждение: сетевое обнаружение",
+        "Будут включены сетевые правила брандмауэра и службы обнаружения/общего доступа.",
+    ):
+        logger.log("Network_Discovery_On", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет выполнено: netsh firewall set service type=fileandprint mode=enable{Colors.RESET}")
@@ -2092,19 +2164,19 @@ def Network_Discovery_On():
     
     try:
         # Включаем через netsh (старый и новый методы)
-        run_command("netsh firewall set service type=fileandprint mode=enable")
-        run_command('netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes')
-        run_command('netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes')
+        run_command(["netsh", "firewall", "set", "service", "type=fileandprint", "mode=enable"])
+        run_command(["netsh", "advfirewall", "firewall", "set", "rule", "group=Network Discovery", "new", "enable=Yes"])
+        run_command(["netsh", "advfirewall", "firewall", "set", "rule", "group=File and Printer Sharing", "new", "enable=Yes"])
         
         # Включаем через PowerShell (самый надежный метод для Win10/11)
         ps_cmd = "Set-NetFirewallRule -DisplayGroup 'Network Discovery' -Enabled True; Set-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Enabled True"
-        run_command(f'powershell -Command "{ps_cmd}"')
+        run_command(["powershell", "-NoProfile", "-Command", ps_cmd])
         
         # Включаем службы, необходимые для обнаружения
         services = ['upnphost', 'SSDPSRV', 'FDResPub', 'FunctionDiscoveryDataPublishing']
         for svc in services:
-            run_command(f'sc config {svc} start=auto')
-            run_command(f'net start {svc}')
+            run_command(["sc", "config", svc, "start=auto"])
+            run_command(["net", "start", svc])
             
         logger.log("Network_Discovery_On", "success", "Сетевое обнаружение включено")
         print(f"{Colors.GREEN}[+] Сетевое обнаружение и общий доступ включены{Colors.RESET}")
@@ -2148,6 +2220,12 @@ def Route_Reset():
 def IP_Reset():
     """Полный сброс IP/DNS/Winsock стека"""
     print_hacker_message("Сеть лагает? Вирус прокси вставил? Щас я всё обнулю!")
+    if not confirm_high_risk_action(
+        "Подтверждение: сброс сети",
+        "Будут сброшены маршруты, Winsock, TCP/IP и DNS-кеш; сетевое соединение может прерваться.",
+    ):
+        logger.log("IP_Reset", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет выполнен сброс Winsock, TCP/IP и очистка DNS кеша{Colors.RESET}")
@@ -2155,15 +2233,15 @@ def IP_Reset():
         return True
     
     commands = [
-        "netsh winsock reset",
-        "netsh int ip reset",
-        "netsh int ipv6 reset",
-        "ipconfig /release",
-        "ipconfig /renew",
-        "ipconfig /flushdns",
-        "arp -d *",
-        "nbtstat -R",
-        "nbtstat -RR"
+        ["netsh", "winsock", "reset"],
+        ["netsh", "int", "ip", "reset"],
+        ["netsh", "int", "ipv6", "reset"],
+        ["ipconfig", "/release"],
+        ["ipconfig", "/renew"],
+        ["ipconfig", "/flushdns"],
+        ["arp", "-d", "*"],
+        ["nbtstat", "-R"],
+        ["nbtstat", "-RR"]
     ]
     
     success_count = 0
@@ -2403,6 +2481,12 @@ def SafeMode_Registry_Fix():
 def SafeMode_Next_Boot_Setup():
     """Настройка следующей загрузки в безопасный режим с поддержкой командной строки"""
     print_hacker_message("Настраиваю систему для загрузки в безопасный режим при следующем запуске...")
+    if not confirm_high_risk_action(
+        "Подтверждение: следующая загрузка",
+        "Следующая загрузка Windows будет переведена в безопасный режим с командной строкой.",
+    ):
+        logger.log("SafeMode_Next_Boot", "warning", "Операция отменена пользователем")
+        return False
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет выполнено: bcdedit /set {{current}} safeboot minimal{Colors.RESET}")
@@ -2416,8 +2500,8 @@ def SafeMode_Next_Boot_Setup():
         # Настройка через bcdedit
         # minimal - безопасный режим
         # alternateshell yes - поддержка командной строки
-        success1, _, err1 = run_command("bcdedit /set {current} safeboot minimal")
-        success2, _, err2 = run_command("bcdedit /set {current} safebootalternateshell yes")
+        success1, _, err1 = run_command(["bcdedit", "/set", "{current}", "safeboot", "minimal"])
+        success2, _, err2 = run_command(["bcdedit", "/set", "{current}", "safebootalternateshell", "yes"])
         
         if success1 and success2:
             logger.log("SafeMode_Next_Boot", "success", "Настроена загрузка в Safe Mode с командной строкой")
@@ -2463,7 +2547,7 @@ bcdedit /set {{current}} safebootalternateshell yes
         SafeMode_Next_Boot_Setup()
         
         # Запускаем таймер перезагрузки
-        run_command("shutdown /r /t 10 /c \"NoVir: Переход в безопасный режим для глубокой очистки\"")
+        run_command(["shutdown", "/r", "/t", "10", "/c", "NoVir: Переход в безопасный режим для глубокой очистки"])
         
         return True
     except Exception as e:

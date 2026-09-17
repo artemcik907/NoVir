@@ -272,14 +272,30 @@ class ExplorerTab(QWidget):
         menu.addSeparator()
         
         if self.current_path != self.ROOT_PATH:
+            action_rename = menu.addAction(tr("Переименовать"))
+            action_copy_path = menu.addAction(tr("Копировать путь"))
+            menu.addSeparator()
             action_unlock = menu.addAction(tr("Разблокировать (Unlocker)"))
             action_own = menu.addAction(tr("Стать владельцем (Take Ownership)"))
-            action_del = menu.addAction(tr("Удалить принудительно (Force Delete)"))
+            action_del = menu.addAction(tr("Удалить безвозвратно (Force Delete)"))
             
             action = menu.exec(self.file_table.viewport().mapToGlobal(pos))
             
             if action == action_open:
                 self.on_item_double_clicked(name_item)
+            elif action == action_rename:
+                from PySide6.QtWidgets import QInputDialog
+                new_name, ok = QInputDialog.getText(self, tr("Переименование"), tr("Новое имя:"), QLineEdit.Normal, os.path.basename(path))
+                if ok and new_name:
+                    new_path = os.path.join(os.path.dirname(path), new_name)
+                    try:
+                        os.rename(path, new_path)
+                        self.refresh_files()
+                    except Exception as e:
+                        QMessageBox.warning(self, tr("Ошибка"), f"{tr('Не удалось переименовать:')} {e}")
+            elif action == action_copy_path:
+                from PySide6.QtWidgets import QApplication
+                QApplication.clipboard().setText(path)
             elif action == action_unlock:
                 if novir_native and hasattr(novir_native, 'unlock_file'):
                     res = novir_native.unlock_file(path)

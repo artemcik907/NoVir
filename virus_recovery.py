@@ -5204,7 +5204,7 @@ if GUI_MODE:
         """Shown once, before the main NoVir window is created."""
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.setWindowTitle("Choose language")
+            self.setWindowTitle("Выбор языка")
             self.setModal(True)
             self.setFixedWidth(420)
             self.setStyleSheet("QDialog { background: #000; color: #fff; } QPushButton { min-height: 40px; font-weight: bold; }")
@@ -5213,7 +5213,7 @@ if GUI_MODE:
             title.setWordWrap(True)
             title.setStyleSheet("font-size: 18px; font-weight: bold;")
             layout.addWidget(title)
-            description = QLabel("Choose the interface language. You can change it later in Settings.")
+            description = QLabel("Выберите язык интерфейса. Позже вы сможете изменить его в Настройках.")
             description.setWordWrap(True)
             layout.addWidget(description)
             for label, code in (("English", "en"), ("Українська", "uk"), ("Русский", "ru")):
@@ -6371,7 +6371,7 @@ if GUI_MODE:
 
         def __init__(self):
             super().__init__()
-            self.setWindowTitle("NoVir - Ultimate Recovery")
+            self.setWindowTitle("NoVir - Восстановление системы")
             self.setMinimumSize(1000, 700)
             self.setWindowFlags(Qt.FramelessWindowHint) # Безрамочное окно
             self.setAttribute(Qt.WA_TranslucentBackground)
@@ -10080,22 +10080,32 @@ if GUI_MODE:
         def show_rollback_dialog(self):
             """Offer to rollback registry changes made this session."""
             from PySide6.QtWidgets import QMessageBox
-            from PySide6.QtCore import Qt
-            if not rollback_mgr.has_snapshots:
-                QMessageBox.information(self, "Откат", "Нечего откатывать: изменений реестра в этой сессии не зафиксировано.")
+            
+            if not rollback_mgr.snapshots:
+                QMessageBox.information(self, language_manager.translate("Откат"), language_manager.translate("Нет доступных точек отката (изменения еще не вносились)."))
                 return
-            msg = QMessageBox(self)
-            msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
-            msg.setWindowTitle("↩ Откат изменений")
-            msg.setText(f"Откатить все изменения реестра текущей сессии?\n\nЗафиксировано изменений: {len(rollback_mgr._snapshots)}")
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            msg.button(QMessageBox.Yes).setText("ОТКАТИТЬ")
-            msg.button(QMessageBox.No).setText("Отмена")
-            msg.setStyleSheet("QMessageBox{background:#000;} QLabel{color:#fff;} QPushButton{background:#000;color:#fff;border:2px solid #fff;padding:6px 14px;font-weight:bold;} QPushButton:hover{background:#fff;color:#000;}")
-            if msg.exec() == QMessageBox.Yes:
-                restored, failed = rollback_mgr.rollback()
-                QMessageBox.information(self, "Откат завершён", f"Восстановлено: {restored}\nОшибок: {failed}")
-
+                
+            count = len(rollback_mgr.snapshots)
+            
+            details = ""
+            for s in reversed(rollback_mgr.snapshots):
+                key = s['key_path']
+                val_name = s['value_name']
+                details += f"{key} \\ {val_name}\n"
+                
+            reply = QMessageBox.question(
+                self, 
+                language_manager.translate("Откат"), 
+                f"{language_manager.translate('Вы действительно хотите отменить')} {count} {language_manager.translate('последних изменений реестра?')}\n\n{details}",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                try:
+                    rollback_mgr.rollback()
+                    QMessageBox.information(self, language_manager.translate("Откат"), language_manager.translate("Изменения успешно отменены!"))
+                except Exception as e:
+                    QMessageBox.warning(self, language_manager.translate("Ошибка"), f"{language_manager.translate('Не удалось выполнить откат:')}\n{e}")
 
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""

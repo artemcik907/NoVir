@@ -65,7 +65,7 @@ if GUI_MODE:
                                      QHeaderView, QTabWidget, QFrame, QCheckBox,
                                      QTreeWidget, QTreeWidgetItem, QSlider,
                                      QGridLayout, QStackedWidget)
-        from PySide6.QtCore import Qt, QThread, Signal, Slot
+        from PySide6.QtCore import Qt, QThread, Signal, Slot, QEvent, QObject
         from PySide6.QtGui import QClipboard
         PYSIDE_AVAILABLE = True
     except ImportError:
@@ -244,6 +244,463 @@ class RollbackManager:
 rollback_mgr = RollbackManager()
 
 logger = Logger()
+
+# ---------------------------------------------------------------------------
+# Interface language
+# ---------------------------------------------------------------------------
+# Keep the source strings in Russian for backwards compatibility, but translate
+# every Qt widget just before it is shown.  This also covers dialogs created by
+# tools later in the session, rather than only the main window.
+LANGUAGE_CONFIG_PATH = os.path.join(
+    os.environ.get("APPDATA", os.path.expanduser("~")), "NoVir", "settings.json"
+)
+
+
+class LanguageManager:
+    """Persist and translate the language selected by the user."""
+
+    LANGUAGES = ("en", "uk", "ru")
+
+    # (English, Ukrainian).  The entries below are complete for the visible
+    # navigation, settings, dialogs, controls, tables and status messages.
+    TRANSLATIONS = {
+        "Отмена": ("Cancel", "Скасувати"),
+        "ОТМЕНА": ("CANCEL", "СКАСУВАТИ"),
+        "Закрыть": ("Close", "Закрити"),
+        "Готово": ("Done", "Готово"),
+        "Ошибка": ("Error", "Помилка"),
+        "Успех": ("Success", "Успіх"),
+        "Внимание": ("Warning", "Увага"),
+        "Подтверждение": ("Confirmation", "Підтвердження"),
+        "Результат": ("Result", "Результат"),
+        "Нет выбора": ("Nothing selected", "Нічого не вибрано"),
+        "< НАЗАД": ("< BACK", "< НАЗАД"),
+        "АВТОЗАГРУЗКА": ("STARTUP", "АВТОЗАПУСК"),
+        "ПРОВОДНИК": ("EXPLORER", "ПРОВІДНИК"),
+        "СНЯТИЕ ОГРАНИЧЕНИЙ": ("REMOVE RESTRICTIONS", "ЗНЯТТЯ ОБМЕЖЕНЬ"),
+        "ДОП. ВОЗМОЖНОСТИ": ("EXTRA TOOLS", "ДОДАТКОВІ МОЖЛИВОСТІ"),
+        "АНЛОКЕР": ("UNLOCKER", "РОЗБЛОКУВАЛЬНИК"),
+        "НАСТРОЙКИ": ("SETTINGS", "НАЛАШТУВАННЯ"),
+        "ПОДДЕРЖАТЬ АВТОРА": ("SUPPORT THE AUTHOR", "ПІДТРИМАТИ АВТОРА"),
+        "Страна:": ("Country:", "Країна:"),
+        "Украина (грн)": ("Ukraine (UAH)", "Україна (грн)"),
+        "Россия (руб)": ("Russia (RUB)", "Росія (руб)"),
+        "Весь мир (USD/EUR)": ("Worldwide (USD/EUR)", "Увесь світ (USD/EUR)"),
+        "Номер карты ПриватБанк:": ("PrivatBank card number:", "Номер картки ПриватБанк:"),
+        "Нажмите на номер, чтобы скопировать": ("Click the number to copy it", "Натисніть номер, щоб скопіювати"),
+        "Нажмите, чтобы скопировать": ("Click to copy", "Натисніть, щоб скопіювати"),
+        "✓ Номер скопирован!": ("✓ Number copied!", "✓ Номер скопійовано!"),
+        "ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →": ("TRANSFER VIA PRIVATBANK  →", "ПЕРЕКАЗ ЧЕРЕЗ ПРИВАТБАНК  →"),
+        "ПЕРЕЙТИ НА BESTCHANGE  →": ("GO TO BESTCHANGE  →", "ПЕРЕЙТИ ДО BESTCHANGE  →"),
+        "ПЕРЕЙТИ НА PAYSEND  →": ("GO TO PAYSEND  →", "ПЕРЕЙТИ ДО PAYSEND  →"),
+        "Всё идёт напрямую на карту ПриватБанк.":
+            ("All support goes directly to the PrivatBank card.", "Уся підтримка надходить безпосередньо на картку ПриватБанк."),
+        "Всё идёт напрямую на карту ПриватБанк. Спасибо за поддержку!":
+            ("All support goes directly to the PrivatBank card. Thank you!", "Уся підтримка надходить безпосередньо на картку ПриватБанк. Дякуємо!"),
+        "Прямые переводы отключены. Но вы можете перевести деньги со Сбербанка/Тинькофф напрямую на мою карту ПриватБанка через обменники (например, BestChange).":
+            ("Direct transfers are unavailable. You can transfer from Sberbank or Tinkoff to the PrivatBank card through exchangers such as BestChange.", "Прямі перекази недоступні. Ви можете переказати кошти зі Сбербанку або Тінькофф на картку ПриватБанку через обмінники, наприклад BestChange."),
+        "Для переводов из США, Европы и других стран используйте сервисы Paysend, TransferGo или Wise. Отправляйте напрямую на мою карту ПриватБанка.":
+            ("For transfers from the US, Europe and other countries, use Paysend, TransferGo or Wise to send directly to the PrivatBank card.", "Для переказів зі США, Європи та інших країн використовуйте Paysend, TransferGo або Wise, щоб надіслати кошти безпосередньо на картку ПриватБанку."),
+        "ПОЧИНИТЬ ВСЁ": ("FIX ALL", "ВИПРАВИТИ ВСЕ"),
+        "ЖУРНАЛ": ("LOG", "ЖУРНАЛ"),
+        "ОТКАТ": ("ROLLBACK", "ВІДКАТ"),
+        "ОБНОВИТЬ": ("UPDATE", "ОНОВИТИ"),
+        "ТЕМА ОФОРМЛЕНИЯ": ("APPEARANCE", "ТЕМА ОФОРМЛЕННЯ"),
+        "Тёмная тема (Стандартная)": ("Dark Theme (Default)", "Темна тема (Стандартна)"),
+        "МАТОВЫЙ": ("MATTE", "МАТОВА"),
+        "ПРОЗРАЧНЫЙ": ("TRANSPARENT", "ПРОЗОРА"),
+        "Язык интерфейса": ("Interface language", "Мова інтерфейсу"),
+        "Выберите язык": ("Choose language", "Оберіть мову"),
+        "Выберите язык интерфейса. Его можно изменить позже в настройках.":
+            ("Choose the interface language. You can change it later in Settings.",
+             "Оберіть мову інтерфейсу. Її можна змінити пізніше в налаштуваннях."),
+        "Диспетчер задач NoVir": ("NoVir Task Manager", "Диспетчер завдань NoVir"),
+        "Диспетчер задач": ("Task Manager", "Диспетчер завдань"),
+        "Современный контроль процессов, быстрые действия и аккуратный интерфейс в одном окне":
+            ("Modern process control, quick actions and a clean interface in one window",
+             "Сучасний контроль процесів, швидкі дії та охайний інтерфейс в одному вікні"),
+        "Обновить": ("Refresh", "Оновити"),
+        "Заморозить": ("Freeze", "Призупинити"),
+        "Разморозить": ("Resume", "Відновити"),
+        "Убить": ("Kill", "Завершити"),
+        "Заблокировать": ("Block", "Заблокувати"),
+        "Разблокировать": ("Unblock", "Розблокувати"),
+        "Открыть путь": ("Open location", "Відкрити розташування"),
+        "Критичный": ("Critical", "Критичний"),
+        "Некритичный": ("Not critical", "Некритичний"),
+        "Обновить список процессов": ("Refresh process list", "Оновити список процесів"),
+        "Остановить выбранный процесс": ("Suspend selected process", "Призупинити вибраний процес"),
+        "Разрешить работу процесса": ("Resume process execution", "Відновити роботу процесу"),
+        "Принудительно завершить процесс": ("Force-close selected process", "Примусово завершити вибраний процес"),
+        "Заблокировать процесс через IFEO": ("Block process through IFEO", "Заблокувати процес через IFEO"),
+        "Снять IFEO-блокировку": ("Remove IFEO block", "Зняти блокування IFEO"),
+        "Открыть каталог процесса": ("Open process folder", "Відкрити папку процесу"),
+        "Сделать процесс критичным": ("Make process critical", "Зробити процес критичним"),
+        "Снять статус критичности": ("Remove critical status", "Зняти критичний статус"),
+        "Выберите процесс и выполните нужное действие: обновить, заморозить, завершить или заблокировать":
+            ("Select a process, then refresh, freeze, end or block it.",
+             "Виберіть процес, а потім оновіть, призупиніть, завершіть або заблокуйте його."),
+        "Имя": ("Name", "Ім'я"), "Путь": ("Path", "Шлях"),
+        "Пользователь": ("User", "Користувач"), "Угроза": ("Threat", "Загроза"),
+        "Тип": ("Type", "Тип"), "Значение": ("Value", "Значення"),
+        "Параметр": ("Entry", "Параметр"), "Файл": ("File", "Файл"),
+        "Расположение": ("Location", "Розташування"), "Состояние": ("Status", "Стан"),
+        "Служба": ("Service", "Служба"), "Диск": ("Drive", "Диск"),
+        "Размер": ("Size", "Розмір"), "Используется": ("Used", "Використано"),
+        "Мой компьютер": ("This PC", "Цей комп'ютер"),
+        "Редактор реестра": ("Registry Editor", "Редактор реєстру"),
+        "Пользователи": ("Users", "Користувачі"),
+        "Создание нового пользователя": ("Create a new user", "Створення нового користувача"),
+        "Имя пользователя:": ("User name:", "Ім'я користувача:"),
+        "Пароль:": ("Password:", "Пароль:"),
+        "С правами администратора": ("Administrator privileges", "З правами адміністратора"),
+        "Создать\nпользователя": ("Create\nuser", "Створити\nкористувача"),
+        "Требовать нажатие CTRL+ALT+DEL при входе":
+            ("Require CTRL+ALT+DEL at sign-in", "Вимагати CTRL+ALT+DEL під час входу"),
+        "Удаление дисков": ("Drive removal", "Видалення дисків"),
+        "Диски": ("Drives", "Диски"), "Удалить диск": ("Remove drive", "Видалити диск"),
+        "Снятие ограничений": ("Remove restrictions", "Зняття обмежень"),
+        "Интерфейс": ("Interface", "Інтерфейс"), "Система": ("System", "Система"),
+        "Запуск утилит": ("Run utilities", "Запуск утиліт"), "Клавиатура": ("Keyboard", "Клавіатура"),
+        "Очистка": ("Cleanup", "Очищення"), "Продвинутое": ("Advanced", "Розширене"),
+        "Безопасность": ("Security", "Безпека"), "Хардкор (Трояны)": ("Hardcore (Trojans)", "Хардкор (Трояни)"),
+        "☑ Выбрать всё": ("☑ Select all", "☑ Вибрати все"),
+        "☐ Снять всё": ("☐ Clear all", "☐ Зняти все"),
+        "✓ Подтвердить выбранное": ("✓ Apply selected", "✓ Застосувати вибране"),
+        "Дополнительные инструменты": ("Additional tools", "Додаткові інструменти"),
+        "Сканер ограничений системы": ("System restriction scanner", "Сканер системних обмежень"),
+        "Находит активные блокировки (реестр, групповые политики, системные ключи)":
+            ("Finds active blocks in the registry, group policies and system keys",
+             "Знаходить активні блокування в реєстрі, групових політиках і системних ключах"),
+        "Сканировать": ("Scan", "Сканувати"),
+        "Снять выбранные": ("Remove selected", "Зняти вибрані"),
+        "Снять всё": ("Remove all", "Зняти все"),
+        "Нажмите «Сканировать» для поиска ограничений":
+            ("Click “Scan” to look for restrictions", "Натисніть «Сканувати», щоб знайти обмеження"),
+        "Встроенные утилиты": ("Built-in utilities", "Вбудовані утиліти"),
+        "Запустить": ("Run", "Запустити"), "Остановить": ("Stop", "Зупинити"),
+        "Перезапустить": ("Restart", "Перезапустити"), "Отключить": ("Disable", "Вимкнути"),
+        "Включить": ("Enable", "Увімкнути"), "Добавить": ("Add", "Додати"),
+        "Удалить": ("Delete", "Видалити"), "Изменить": ("Edit", "Змінити"),
+        "Сохранить": ("Save", "Зберегти"), "Обзор...": ("Browse...", "Огляд..."),
+        "Открыть файл": ("Open file", "Відкрити файл"), "Копировать путь": ("Copy path", "Копіювати шлях"),
+        "Копировать значение": ("Copy value", "Копіювати значення"),
+        "Разблокировка файлов (Unlocker)": ("File Unlocker", "Розблокування файлів"),
+        "Выберите заблокированный файл. Программа найдет процессы, которые его удерживают, и позволит их завершить.":
+            ("Select a locked file. The app will find the processes holding it and let you end them.",
+             "Виберіть заблокований файл. Програма знайде процеси, які його утримують, і дозволить їх завершити."),
+        "Анализ файла": ("Analyze file", "Аналіз файлу"),
+        "Разблокировать (Убить процессы)": ("Unlock (end processes)", "Розблокувати (завершити процеси)"),
+        "Уничтожить (Убить + Удалить файл)": ("Destroy (end + delete file)", "Знищити (завершити + видалити файл)"),
+        "Выберите файл:": ("Select a file:", "Виберіть файл:"),
+        "Папка автозагрузки:": ("Startup folder:", "Папка автозапуску:"),
+        "Путь к программе:": ("Program path:", "Шлях до програми:"),
+        "Имя задачи:": ("Task name:", "Ім'я завдання:"),
+        "Триггер:": ("Trigger:", "Тригер:"),
+        "Создать задачу": ("Create task", "Створити завдання"),
+        "Планировщик задач": ("Task Scheduler", "Планувальник завдань"),
+        "Все задачи": ("All tasks", "Усі завдання"),
+        "Только пользовательские": ("User tasks only", "Лише користувацькі"),
+        "Только подозрительные": ("Suspicious only", "Лише підозрілі"),
+        "Папка автозагрузки": ("Startup folder", "Папка автозапуску"),
+        "Реестр": ("Registry", "Реєстр"),
+        "Добавить файл": ("Add file", "Додати файл"), "Открыть папку": ("Open folder", "Відкрити папку"),
+        "▶ Запустить": ("▶ Run", "▶ Запустити"), "⏸ Отключить": ("⏸ Disable", "⏸ Вимкнути"),
+        "✓ Включить": ("✓ Enable", "✓ Увімкнути"), "↻ Обновить": ("↻ Refresh", "↻ Оновити"),
+        "Выберите запись для удаления": ("Select an entry to delete", "Виберіть запис для видалення"),
+        "Выберите запись для редактирования": ("Select an entry to edit", "Виберіть запис для редагування"),
+        "Выберите файл для удаления": ("Select a file to delete", "Виберіть файл для видалення"),
+        "Выберите задачу для удаления": ("Select a task to delete", "Виберіть завдання для видалення"),
+        "Выберите задачу для запуска": ("Select a task to run", "Виберіть завдання для запуску"),
+        "Выберите задачу для отключения": ("Select a task to disable", "Виберіть завдання для вимкнення"),
+        "Выберите задачу для включения": ("Select a task to enable", "Виберіть завдання для увімкнення"),
+        "Выберите службу для запуска": ("Select a service to start", "Виберіть службу для запуску"),
+        "Выберите службу для остановки": ("Select a service to stop", "Виберіть службу для зупинки"),
+        "Выберите службу для перезапуска": ("Select a service to restart", "Виберіть службу для перезапуску"),
+        "Отметьте хотя бы одно действие для выполнения.":
+            ("Select at least one action to run.", "Позначте принаймні одну дію для виконання."),
+        "Выполнить": ("Run", "Виконати"), "выбранных действий?": ("selected actions?", "вибраних дій?"),
+        "Что заблокировано": ("What is blocked", "Що заблоковано"),
+        "Ключ реестра / GPO": ("Registry key / GPO", "Ключ реєстру / GPO"),
+        "Статус": ("Status", "Статус"),
+        "Ограничений не найдено!": ("No restrictions found!", "Обмежень не знайдено!"),
+        "Найдено": ("Found", "Знайдено"), "блокировок": ("blocks", "блокувань"),
+        "Не выбрано ни одного ограничения.": ("No restrictions selected.", "Не вибрано жодного обмеження."),
+        "Продолжить?": ("Continue?", "Продовжити?"),
+        "Информация о системе": ("System information", "Відомості про систему"),
+        "Перезапуск Explorer": ("Restart Explorer", "Перезапуск Провідника"),
+        "Обновление": ("Update", "Оновлення"),
+        "Релиз GitHub": ("GitHub release", "Реліз GitHub"),
+        "Выберите что скачать:": ("Choose what to download:", "Оберіть, що завантажити:"),
+        "Выберите версию для загрузки:": ("Choose a version to download:", "Оберіть версію для завантаження:"),
+        "Скачать Installer": ("Download installer", "Завантажити інсталятор"),
+        "Скачать Portable (.exe)": ("Download portable (.exe)", "Завантажити портативну версію (.exe)"),
+        "Запуск комплексного восстановления...": ("Starting full recovery...", "Запуск комплексного відновлення..."),
+        "Подготовка...": ("Preparing...", "Підготовка..."),
+        "NoVir — Починить всё": ("NoVir — Fix all", "NoVir — Виправити все"),
+        "Шаг": ("Step", "Крок"),
+        "выполнено": ("completed", "виконано"),
+        "ПРОПУСК:": ("SKIPPED:", "ПРОПУЩЕНО:"),
+        "Снятие блокировки реестра": ("Remove Registry Editor block", "Зняття блокування редактора реєстру"),
+        "Снятие блокировки диспетчера": ("Remove Task Manager block", "Зняття блокування диспетчера завдань"),
+        "Восстановление ярлыков": ("Restore shortcuts", "Відновлення ярликів"),
+        "Сброс ассоциаций файлов": ("Reset file associations", "Скидання асоціацій файлів"),
+        "Очистка автозапуска": ("Clean startup", "Очищення автозапуску"),
+        "Готово!": ("Done!", "Готово!"),
+        "↩ Откат изменений": ("↩ Roll back changes", "↩ Відкотити зміни"),
+        "ОТКАТИТЬ": ("ROLL BACK", "ВІДКОТИТИ"),
+        "Журнал действий пуст или файл не найден.":
+            ("The action log is empty or the file was not found.", "Журнал дій порожній або файл не знайдено."),
+        "Нечего откатывать: изменений реестра в этой сессии не зафиксировано.":
+            ("Nothing to roll back: no registry changes were recorded in this session.",
+             "Немає чого відкотити: у цій сесії не зафіксовано змін реєстру."),
+        "Данный модуль запускается как отдельное окно утилиты и работает в едином стиле приложения.":
+            ("This module opens in its own utility window and uses the same application style.",
+             "Цей модуль відкривається в окремому вікні утиліти та використовує єдиний стиль програми."),
+        "Добавить запись в реестр": ("Add registry entry", "Додати запис до реєстру"),
+        "Изменить запись в реестре": ("Edit registry entry", "Змінити запис у реєстрі"),
+        "Раздел реестра:": ("Registry hive:", "Розділ реєстру:"),
+        "Текущий пользователь": ("Current user", "Поточний користувач"),
+        "Все пользователи": ("All users", "Усі користувачі"),
+        "Добавить файл в автозагрузку": ("Add startup file", "Додати файл до автозапуску"),
+        "Создать задачу в планировщике": ("Create scheduled task", "Створити завдання в планувальнику"),
+        "При входе в систему": ("At sign-in", "Під час входу до системи"),
+        "При запуске системы": ("At system startup", "Під час запуску системи"),
+        "Ежедневно": ("Daily", "Щодня"),
+        "Принудительно перезагрузить список задач из системы":
+            ("Force-reload the task list from the system", "Примусово перезавантажити список завдань із системи"),
+        "Меню служб": ("Services menu", "Меню служб"),
+        "Загрузка задач планировщика...": ("Loading scheduled tasks...", "Завантаження завдань планувальника..."),
+        "Открывает собственный редактор реестра в стиле системного окна.":
+            ("Opens NoVir's built-in registry editor in a system-window style.",
+             "Відкриває вбудований редактор реєстру NoVir у стилі системного вікна."),
+        "Открывает отдельное окно восстановления загрузчика MBR/BCD.":
+            ("Opens a separate MBR/BCD bootloader recovery window.",
+             "Відкриває окреме вікно відновлення завантажувача MBR/BCD."),
+        "Открывает собственный менеджер учетных записей.":
+            ("Opens the built-in account manager.", "Відкриває вбудований менеджер облікових записів."),
+        "Открывает отдельное окно управления дисками и разделами.":
+            ("Opens a separate window for managing disks and partitions.",
+             "Відкриває окреме вікно керування дисками та розділами."),
+        "Открывает окно управления учетными записями и паролями.":
+            ("Opens the account and password management window.",
+             "Відкриває вікно керування обліковими записами та паролями."),
+        "Восстанавливает загрузочный сектор и конфигурацию загрузчика Windows.":
+            ("Restores the Windows boot sector and bootloader configuration.",
+             "Відновлює завантажувальний сектор і конфігурацію завантажувача Windows."),
+        "Запустить восстановление": ("Start recovery", "Запустити відновлення"),
+        "Введите имя пользователя.": ("Enter a user name.", "Введіть ім'я користувача."),
+        "Диск успешно удалён из списка отображения.":
+            ("The drive was removed from the display list.", "Диск успішно видалено зі списку відображення."),
+        "Заполните все поля": ("Fill in all fields", "Заповніть усі поля"),
+        "Запись добавлена в реестр": ("Registry entry added", "Запис додано до реєстру"),
+        "Запись удалена из реестра": ("Registry entry deleted", "Запис видалено з реєстру"),
+        "Запись обновлена в реестре": ("Registry entry updated", "Запис оновлено в реєстрі"),
+        "Выберите существующий файл": ("Choose an existing file", "Виберіть наявний файл"),
+        "Файл добавлен в автозагрузку": ("File added to startup", "Файл додано до автозапуску"),
+        "Файл удален из автозагрузки": ("File removed from startup", "Файл видалено з автозапуску"),
+        "Файл не найден": ("File not found", "Файл не знайдено"),
+        "Задача создана в планировщике": ("Task created in Task Scheduler", "Завдання створено в планувальнику"),
+        "Задача удалена из планировщика": ("Task deleted from Task Scheduler", "Завдання видалено з планувальника"),
+        "Задача запущена": ("Task started", "Завдання запущено"),
+        "Задача отключена": ("Task disabled", "Завдання вимкнено"),
+        "Задача включена": ("Task enabled", "Завдання увімкнено"),
+        "Служба запущена": ("Service started", "Службу запущено"),
+        "Служба остановлена": ("Service stopped", "Службу зупинено"),
+        "Служба перезапущена": ("Service restarted", "Службу перезапущено"),
+        "Укажите правильный путь к существующему файлу.":
+            ("Provide a valid path to an existing file.", "Укажіть правильний шлях до наявного файлу."),
+        "Не найдено процессов, блокирующих этот файл.\n(Возможно, он не заблокирован или заблокирован ядром).":
+            ("No processes locking this file were found.\n(It may be unlocked or locked by the kernel.)",
+             "Не знайдено процесів, які блокують цей файл.\n(Можливо, він не заблокований або заблокований ядром.)"),
+        "Сначала проведите анализ файла.": ("Analyze the file first.", "Спочатку проаналізуйте файл."),
+        "Файл успешно удален!": ("File deleted successfully!", "Файл успішно видалено!"),
+        "Рабочий стол и панель задач на секунду исчезнут.\nПерезапустить explorer.exe?":
+            ("The desktop and taskbar will disappear briefly.\nRestart explorer.exe?",
+             "Робочий стіл і панель завдань на мить зникнуть.\nПерезапустити explorer.exe?"),
+        "Explorer перезапущен!": ("Explorer restarted!", "Провідник перезапущено!"),
+        "Отчёт автозагрузки": ("Startup report", "Звіт автозапуску"),
+        "Сетевые порты": ("Network ports", "Мережеві порти"),
+        "Открытые порты (LISTENING):": ("Open ports (LISTENING):", "Відкриті порти (LISTENING):"),
+        "Активные соединения (ESTABLISHED):": ("Active connections (ESTABLISHED):", "Активні з'єднання (ESTABLISHED):"),
+        "Задача выполнена.": ("Task completed.", "Завдання виконано."),
+        "На GitHub пока нет опубликованных релизов.":
+            ("There are no published GitHub releases yet.", "На GitHub ще немає опублікованих релізів."),
+        "Готово! Все безопасные исправления применены.":
+            ("Done! All safe fixes have been applied.", "Готово! Усі безпечні виправлення застосовано."),
+        "Рекомендуется перезагрузить компьютер.":
+            ("Restarting the computer is recommended.", "Рекомендується перезавантажити комп'ютер."),
+    }
+
+    # A safe fallback prevents untranslated Russian fragments in dynamic status
+    # messages assembled with f-strings.  Full phrases above take priority.
+    FALLBACK_WORDS = {
+        "en": {"Процесс": "Process", "процесс": "process", "Файл": "File", "файл": "file", "Задача": "Task", "задача": "task", "Служба": "Service", "служба": "service", "Не удалось": "Could not", "удалить": "delete", "добавить": "add", "запустить": "start", "остановить": "stop", "перезапустить": "restart", "создать": "create", "выбрать": "select", "Включено": "Enabled", "Отключено": "Disabled", "Пользовательская": "User", "Системная": "System", "Выполняется": "Running", "Готова": "Ready", "найдено": "found", "действий": "actions", "ошибок": "errors"},
+        "uk": {"Процесс": "Процес", "процесс": "процес", "Файл": "Файл", "файл": "файл", "Задача": "Завдання", "задача": "завдання", "Служба": "Служба", "служба": "служба", "Не удалось": "Не вдалося", "удалить": "видалити", "добавить": "додати", "запустить": "запустити", "остановить": "зупинити", "перезапустить": "перезапустити", "создать": "створити", "выбрать": "вибрати", "Включено": "Увімкнено", "Отключено": "Вимкнено", "Пользовательская": "Користувацька", "Системная": "Системна", "Выполняется": "Виконується", "Готова": "Готова", "найдено": "знайдено", "действий": "дій", "ошибок": "помилок"},
+    }
+
+    def __init__(self):
+        self.language = "en"
+        self._first_run = True
+        self.load()
+
+    def load(self):
+        try:
+            with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as settings_file:
+                settings = json.load(settings_file)
+            language = settings.get("language", "en")
+            self.language = language if language in self.LANGUAGES else "en"
+            self._first_run = "language" not in settings
+        except (OSError, ValueError, TypeError):
+            self.language = "en"
+            self._first_run = True
+
+    @property
+    def first_run(self):
+        return self._first_run
+
+    def set_language(self, language, save=True):
+        self.language = language if language in self.LANGUAGES else "en"
+        self._first_run = False
+        if save:
+            self.save()
+
+    def save(self):
+        try:
+            os.makedirs(os.path.dirname(LANGUAGE_CONFIG_PATH), exist_ok=True)
+            settings = {}
+            try:
+                with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as settings_file:
+                    settings = json.load(settings_file)
+            except (OSError, ValueError, TypeError):
+                pass
+            settings["language"] = self.language
+            temporary_path = LANGUAGE_CONFIG_PATH + ".tmp"
+            with open(temporary_path, "w", encoding="utf-8") as settings_file:
+                json.dump(settings, settings_file, ensure_ascii=False, indent=2)
+            os.replace(temporary_path, LANGUAGE_CONFIG_PATH)
+        except OSError:
+            pass
+
+    def translate(self, source):
+        if not isinstance(source, str) or self.language == "ru" or not source:
+            return source
+        translated = self.TRANSLATIONS.get(source) or REPAIR_CATALOG_TRANSLATIONS.get(source)
+        if translated:
+            return translated[0 if self.language == "en" else 1]
+        # Only touch strings containing Cyrillic; paths, values and user input
+        # therefore remain untouched.
+        if not re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", source):
+            return source
+        for russian, replacement in self.FALLBACK_WORDS[self.language].items():
+            source = re.sub(r"(?<![А-Яа-яЁёІіЇїЄєҐґ])" + re.escape(russian) + r"(?![А-Яа-яЁёІіЇїЄєҐґ])", replacement, source)
+        return source
+
+
+# Repair-card text is kept separately to make the large repair catalogue easy
+# to maintain.  Every title and description shown on those cards is localized.
+REPAIR_CATALOG_TRANSLATIONS = {
+    "Сброс пароля": ("Password reset", "Скидання пароля"),
+    "Починка запуска программ (.exe)": ("Fix program launching (.exe)", "Виправлення запуску програм (.exe)"),
+    "Починка ярлыков (.lnk)": ("Fix shortcuts (.lnk)", "Виправлення ярликів (.lnk)"),
+    "Удаление троянских DLL-инъекций": ("Remove Trojan DLL injections", "Видалення троянських DLL-ін'єкцій"),
+    "Разблокировка антивирусов": ("Unblock antivirus software", "Розблокування антивірусів"),
+    "Восстановление Безопасного режима": ("Restore Safe Mode", "Відновлення безпечного режиму"),
+    "Включение Восстановления системы": ("Enable System Restore", "Увімкнення відновлення системи"),
+    "Воскрешение Защитника Windows": ("Restore Windows Defender", "Відновлення Захисника Windows"),
+    "Починка служб обновлений": ("Fix update services", "Виправлення служб оновлення"),
+    "Снятие авто-входа локеров": ("Remove locker auto-sign-in", "Вимкнення авто-входу блокувальників"),
+    "Принудительное включение Брандмауэра": ("Force-enable Firewall", "Примусове ввімкнення брандмауера"),
+    "Проверяет UAC, брандмауэр, Defender и hosts без изменений": ("Checks UAC, Firewall, Defender and hosts without making changes", "Перевіряє UAC, брандмауер, Defender і hosts без змін"),
+    "Восстанавливает службу WMI": ("Restores the WMI service", "Відновлює службу WMI"),
+    "Проверяет и запускает критичные службы": ("Checks and starts critical services", "Перевіряє та запускає критичні служби"),
+    "Проверяет хранилище сертификатов": ("Checks the certificate store", "Перевіряє сховище сертифікатів"),
+    "Сбрасывает компоненты Центра обновления Windows": ("Resets Windows Update components", "Скидає компоненти Центру оновлення Windows"),
+    "Исправляет ассоциации ярлыков": ("Fixes shortcut associations", "Виправляє асоціації ярликів"),
+    "Очищает очередь печати и запускает службу": ("Clears the print queue and starts the service", "Очищає чергу друку та запускає службу"),
+    "Включает базовую самооборону процесса": ("Enables basic process self-defense", "Вмикає базовий самозахист процесу"),
+    "Полностью восстанавливает SafeBoot Minimal и Network": ("Fully restores SafeBoot Minimal and Network", "Повністю відновлює SafeBoot Minimal і Network"),
+    "Восстанавливает права системных папок": ("Restores system-folder permissions", "Відновлює права системних папок"),
+    "Исправляет ассоциацию .exe": ("Fixes the .exe association", "Виправляє асоціацію .exe"),
+    "Защищает файл программы атрибутами": ("Protects the program file with attributes", "Захищає файл програми атрибутами"),
+    "Проверяет и усиливает права администратора": ("Checks and strengthens administrator rights", "Перевіряє та посилює права адміністратора"),
+    "Разблокирует msconfig": ("Unblocks msconfig", "Розблоковує msconfig"),
+    "Включает Microsoft Defender": ("Enables Microsoft Defender", "Вмикає Microsoft Defender"),
+    "Включает восстановление системы": ("Enables System Restore", "Вмикає відновлення системи"),
+    "Отключает AutoPlay": ("Disables AutoPlay", "Вимикає AutoPlay"),
+    "Проверяет загрузочные записи": ("Checks boot records", "Перевіряє завантажувальні записи"),
+    "Проверяет расширения Chrome": ("Checks Chrome extensions", "Перевіряє розширення Chrome"),
+    "Сканирует ключи автозагрузки": ("Scans startup keys", "Сканує ключі автозапуску"),
+    "Очищает журналы событий Windows": ("Clears Windows event logs", "Очищає журнали подій Windows"),
+    "Удаляет временные файлы системы": ("Deletes temporary system files", "Видаляє тимчасові системні файли"),
+    "Очищает кеш Prefetch": ("Clears the Prefetch cache", "Очищає кеш Prefetch"),
+    "Очищает корзину": ("Empties the Recycle Bin", "Очищає кошик"),
+    "Очищает кеш иконок для исправления отображения": ("Clears the icon cache to fix display issues", "Очищає кеш іконок для виправлення відображення"),
+    "Очищает автозагрузку от подозрительных записей": ("Cleans suspicious startup entries", "Очищає автозапуск від підозрілих записів"),
+    "Очищает планировщик задач от вредоносных задач": ("Cleans malicious scheduled tasks", "Очищає планувальник від шкідливих завдань"),
+    "Завершает подозрительные процессы из черного списка": ("Ends suspicious blacklisted processes", "Завершує підозрілі процеси з чорного списку"),
+    "Отключает автозапуск со съемных носителей": ("Disables AutoRun from removable media", "Вимикає автозапуск зі знімних носіїв"),
+    "Удаляет Scancode Map, разблокируя заблокированную клавиатуру": ("Removes Scancode Map to unlock the keyboard", "Видаляє Scancode Map, розблоковуючи клавіатуру"),
+    "Отключает залипание и фильтрацию клавиш": ("Disables Sticky Keys and Filter Keys", "Вимикає залипання та фільтрацію клавіш"),
+    "Открывает диалоговое окно для быстрого запуска программ (аналог Win+R).": ("Opens the quick program-launch dialog (like Win+R).", "Відкриває діалог швидкого запуску програм (як Win+R)."),
+    "Горячие клавиши": ("Hotkeys", "Гарячі клавіші"),
+    "Разблокирует системные комбинации Win+...": ("Unblocks system Win+ shortcuts", "Розблоковує системні комбінації Win+..."),
+    "Запуск regedit.exe": ("Launch regedit.exe", "Запуск regedit.exe"), "Проводник": ("Explorer", "Провідник"),
+    "Запуск explorer.exe": ("Launch explorer.exe", "Запуск explorer.exe"), "Запуск taskmgr.exe": ("Launch taskmgr.exe", "Запуск taskmgr.exe"),
+    "Восстановление загрузчика (MBR/BCD)": ("Bootloader recovery (MBR/BCD)", "Відновлення завантажувача (MBR/BCD)"),
+    "Браузер": ("Browser", "Браузер"), "Открыть браузер": ("Open browser", "Відкрити браузер"),
+    "Управление пользователями": ("User management", "Керування користувачами"), "Очистка системы": ("System cleanup", "Очищення системи"),
+    "Очистка диска": ("Disk Cleanup", "Очищення диска"), "Ассоциации": ("Associations", "Асоціації"),
+    "Программы по умолчанию": ("Default apps", "Програми за замовчуванням"), "Управление паролями": ("Password management", "Керування паролями"),
+    "Управление дисками": ("Disk management", "Керування дисками"), "Сохранение winRE": ("WinRE backup", "Збереження WinRE"),
+    "Настройки среды восстановления": ("Recovery environment settings", "Налаштування середовища відновлення"),
+    "Выйти из пользователя": ("Sign out", "Вийти з користувача"), "Завершение текущего сеанса.": ("Ends the current session.", "Завершує поточний сеанс."),
+    "Войти в winRE": ("Enter WinRE", "Увійти до WinRE"), "Загрузка среды восстановления Windows.": ("Starts the Windows Recovery Environment.", "Запускає середовище відновлення Windows."),
+    "Вернуть русский язык": ("Restore Russian keyboard", "Повернути російську розкладку"),
+    "Восстанавливает стандартную раскладку после вирусной блокировки.": ("Restores the standard keyboard layout after a virus lock.", "Відновлює стандартну розкладку після вірусного блокування."),
+    "Проверяет целостность системных файлов.": ("Checks the integrity of system files.", "Перевіряє цілісність системних файлів."),
+    "Восстановить LogonUI": ("Restore LogonUI", "Відновити LogonUI"),
+    "Некоторые вирусы могут заменять данный файл для своих целей.": ("Some viruses may replace this file for their own purposes.", "Деякі віруси можуть замінювати цей файл для власних цілей."),
+    "Экстренное восстановление": ("Emergency recovery", "Екстрене відновлення"),
+    "Экстренная функция восстановления системы при блокировках вирусами.": ("Emergency system recovery for virus lockouts.", "Екстрене відновлення системи у разі вірусних блокувань."),
+    "Выключить тестовый режим": ("Disable test mode", "Вимкнути тестовий режим"),
+    "Вирусы могут использовать автозагрузку через драйвера. Выключение тестового режима отключит их.": ("Viruses can use driver-based startup. Disabling test mode disables it.", "Віруси можуть використовувати автозапуск через драйвери. Вимкнення тестового режиму вимкне його."),
+    "Заменить sethc и utilman": ("Replace sethc and utilman", "Замінити sethc і utilman"),
+    "Заменяет программы экрана блокировки нашей утилитой. При повторном нажатии восстанавливаются.": ("Replaces lock-screen tools with this utility; running it again restores them.", "Замінює програми екрана блокування цією утилітою; повторний запуск їх відновлює."),
+    "Полный доступ к файлу": ("Full file access", "Повний доступ до файлу"),
+    "Позволяет разблокировать доступ к системным и скрытым файлам.": ("Lets you unlock access to system and hidden files.", "Дозволяє розблокувати доступ до системних і прихованих файлів."),
+    "Очистка драйверов": ("Driver cleanup", "Очищення драйверів"), "[ОПАСНО] Удаление всех нештатных драйверов.": ("[DANGEROUS] Removes all non-standard drivers.", "[НЕБЕЗПЕЧНО] Видаляє всі нестандартні драйвери."),
+    "Удобный запуск": ("Easy launch", "Зручний запуск"), "Запуск утилиты через cmd nov или контекстное меню, отключает UAC.": ("Launches the utility through cmd nov or the context menu and disables UAC.", "Запускає утиліту через cmd nov або контекстне меню та вимикає UAC."),
+    "После ввода пароля нажмите Alt+N, и запустится утилита. Отключить в настройках.": ("After entering the password, press Alt+N to start the utility. Disable it in Settings.", "Після введення пароля натисніть Alt+N, щоб запустити утиліту. Вимикається в налаштуваннях."),
+    "Разблокирует редактор реестра regedit": ("Unblocks the regedit Registry Editor", "Розблоковує редактор реєстру regedit"), "Разблокирует диспетчер задач taskmgr": ("Unblocks Task Manager taskmgr", "Розблоковує диспетчер завдань taskmgr"),
+    "Панель управления": ("Control Panel", "Панель керування"), "Разблокирует панель управления": ("Unblocks Control Panel", "Розблоковує панель керування"),
+    "Свойства системы": ("System properties", "Властивості системи"), "Разблокирует свойства системы и диспетчер устройств": ("Unblocks System Properties and Device Manager", "Розблоковує властивості системи та диспетчер пристроїв"),
+    "Разблокирует командную строку и regedit": ("Unblocks Command Prompt and regedit", "Розблоковує командний рядок і regedit"),
+    "Восстанавливает работу безопасного режима": ("Restores Safe Mode", "Відновлює роботу безпечного режиму"), "Готовит загрузку в Safe Mode с командной строкой": ("Prepares a Safe Mode boot with Command Prompt", "Готує завантаження в безпечному режимі з командним рядком"),
+    "Восстанавливает стандартные настройки UAC": ("Restores default UAC settings", "Відновлює стандартні налаштування UAC"), "Админские ресурсы": ("Admin shares", "Адміністративні ресурси"),
+    "Восстанавливает административные сетевые ресурсы": ("Restores administrative network shares", "Відновлює адміністративні мережеві ресурси"), "Политики": ("Policies", "Політики"),
+    "Удаляет ограничивающие политики системы": ("Deletes restrictive system policies", "Видаляє обмежувальні системні політики"), "Очищает Image File Execution Options от вирусов": ("Cleans viruses from Image File Execution Options", "Очищає Image File Execution Options від вірусів"),
+    "Оболочка Explorer": ("Explorer shell", "Оболонка Провідника"), "Восстанавливает стандартные настройки проводника": ("Restores default Explorer settings", "Відновлює стандартні налаштування Провідника"),
+    "Правая кнопка мыши": ("Right mouse button", "Права кнопка миші"), "Разблокирует контекстное меню правой кнопки": ("Unblocks the right-click context menu", "Розблоковує контекстне меню правої кнопки"),
+    "Видимость дисков": ("Drive visibility", "Видимість дисків"), "Восстанавливает отображение скрытых дисков": ("Restores hidden-drive visibility", "Відновлює відображення прихованих дисків"),
+    "Панель задач": ("Taskbar", "Панель завдань"), "Восстанавливает панель задач и её настройки": ("Restores the taskbar and its settings", "Відновлює панель завдань та її налаштування"),
+    "Значки трея": ("Tray icons", "Значки трея"), "Восстанавливает отображение значков в системном трее": ("Restores system-tray icon display", "Відновлює відображення значків у системному треї"),
+    "Значки стола": ("Desktop icons", "Значки робочого столу"), "Восстанавливает иконки на рабочем столе": ("Restores desktop icons", "Відновлює значки робочого столу"),
+    "Скрытые файлы": ("Hidden files", "Приховані файли"), "Включает отображение скрытых файлов и папок": ("Enables display of hidden files and folders", "Вмикає відображення прихованих файлів і папок"),
+    "Свойства папки": ("Folder options", "Властивості папки"), "Разблокирует меню свойств папки": ("Unblocks the Folder Options menu", "Розблоковує меню властивостей папки"),
+    "Свойства панели задач": ("Taskbar properties", "Властивості панелі завдань"), "Разблокирует доступ к свойствам панели задач": ("Unblocks access to taskbar properties", "Розблоковує доступ до властивостей панелі завдань"),
+    "Проверяет и восстанавливает целостность оболочки": ("Checks and restores shell integrity", "Перевіряє та відновлює цілісність оболонки"), "Исправляет параметр Userinit для входа в систему": ("Fixes the Userinit sign-in value", "Виправляє параметр Userinit для входу до системи"),
+    "Сброс шрифтов": ("Reset fonts", "Скидання шрифтів"), "Восстанавливает системные шрифты и очищает кеш шрифтов": ("Restores system fonts and clears the font cache", "Відновлює системні шрифти та очищає кеш шрифтів"),
+    "Разблокировка обоев": ("Unblock wallpaper", "Розблокування шпалер"), "Разблокирует возможность смены обоев рабочего стола": ("Unblocks changing the desktop wallpaper", "Розблоковує зміну шпалер робочого столу"),
+    "Восстановление темы": ("Restore theme", "Відновлення теми"), "Восстанавливает стандартную тему оформления Windows": ("Restores the default Windows theme", "Відновлює стандартну тему Windows"),
+    "Сброс масштаба иконок": ("Reset icon size", "Скидання розміру значків"), "Сбрасывает размер иконок на стандартный": ("Resets icon size to default", "Скидає розмір значків до стандартного"),
+    "Возврат курсора": ("Restore cursor", "Відновлення курсора"), "Восстанавливает стандартный курсор мыши": ("Restores the default mouse cursor", "Відновлює стандартний курсор миші"),
+    "Поворот экрана": ("Screen rotation", "Поворот екрана"), "Разблокирует и восстанавливает поворот экрана": ("Unblocks and restores screen rotation", "Розблоковує та відновлює поворот екрана"),
+    "Включает и настраивает сглаживание шрифтов ClearType": ("Enables and configures ClearType font smoothing", "Вмикає та налаштовує згладжування шрифтів ClearType"),
+    "ℹ Отображаются только ключи автозапуска: Shell и Userinit. Остальные параметры Winlogon скрыты.": ("ℹ Only Shell and Userinit startup keys are shown. Other Winlogon values are hidden.", "ℹ Показано лише ключі автозапуску Shell і Userinit. Інші параметри Winlogon приховані."),
+}
+
+language_manager = LanguageManager()
 
 # как в Тачках: немного турбо
 
@@ -4607,6 +5064,114 @@ if GUI_MODE:
     from PySide6.QtGui import QColor, QIcon, QFont, QPixmap
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QTimer
 
+    def _remember_source(widget, property_name, value):
+        """Return the unlocalized value retained on a Qt object."""
+        source = widget.property(property_name)
+        if source is None:
+            source = value
+            widget.setProperty(property_name, source)
+        return source
+
+
+    def localize_widget_tree(root):
+        """Translate all display text below *root* without changing user data."""
+        if getattr(root, "_novir_localizing", False):
+            return
+        try:
+            root._novir_localizing = True
+            objects = [root] + root.findChildren(QObject)
+            for widget in objects:
+                try:
+                    class_name = widget.metaObject().className()
+                    if hasattr(widget, "windowTitle") and hasattr(widget, "setWindowTitle"):
+                        title = _remember_source(widget, "_novir_source_window_title", widget.windowTitle())
+                        widget.setWindowTitle(language_manager.translate(title))
+                    if class_name in {"QLabel", "QPushButton", "QCheckBox", "QRadioButton", "QGroupBox", "QAction"}:
+                        source = _remember_source(widget, "_novir_source_text", widget.text())
+                        widget.setText(language_manager.translate(source))
+                    if class_name == "QLineEdit":
+                        source = _remember_source(widget, "_novir_source_placeholder", widget.placeholderText())
+                        widget.setPlaceholderText(language_manager.translate(source))
+                    if hasattr(widget, "toolTip") and hasattr(widget, "setToolTip"):
+                        source = _remember_source(widget, "_novir_source_tooltip", widget.toolTip())
+                        widget.setToolTip(language_manager.translate(source))
+                    if class_name == "QComboBox":
+                        source_items = widget.property("_novir_source_items")
+                        if source_items is None:
+                            source_items = [widget.itemText(index) for index in range(widget.count())]
+                            widget.setProperty("_novir_source_items", source_items)
+                        previous_state = widget.blockSignals(True)
+                        for index, source in enumerate(source_items):
+                            if index < widget.count():
+                                widget.setItemText(index, language_manager.translate(source))
+                        widget.blockSignals(previous_state)
+                    if class_name in {"QTableWidget", "QTreeWidget"}:
+                        header = widget.horizontalHeaderItem(0) if hasattr(widget, "horizontalHeaderItem") else None
+                        if header is not None:
+                            source_headers = widget.property("_novir_source_headers")
+                            if source_headers is None:
+                                source_headers = [widget.horizontalHeaderItem(index).text() if widget.horizontalHeaderItem(index) else "" for index in range(widget.columnCount())]
+                                widget.setProperty("_novir_source_headers", source_headers)
+                            for index, source in enumerate(source_headers):
+                                item = widget.horizontalHeaderItem(index)
+                                if item:
+                                    item.setText(language_manager.translate(source))
+                    if class_name == "QTabWidget":
+                        source_tabs = widget.property("_novir_source_tabs")
+                        if source_tabs is None:
+                            source_tabs = [widget.tabText(index) for index in range(widget.count())]
+                            widget.setProperty("_novir_source_tabs", source_tabs)
+                        for index, source in enumerate(source_tabs):
+                            if index < widget.count():
+                                widget.setTabText(index, language_manager.translate(source))
+                except (AttributeError, RuntimeError, TypeError):
+                    # A widget can be destroyed while a dialog is closing.
+                    continue
+        finally:
+            try:
+                root._novir_localizing = False
+            except (AttributeError, RuntimeError):
+                pass
+
+
+    class TranslationEventFilter(QObject):
+        """Localize main windows and every late-created dialog on first display."""
+        def eventFilter(self, watched, event):
+            if event.type() in (QEvent.Show, QEvent.WindowActivate):
+                localize_widget_tree(watched)
+            return super().eventFilter(watched, event)
+
+
+    class LanguageSelectionDialog(QDialog):
+        """Shown once, before the main NoVir window is created."""
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("Choose language")
+            self.setModal(True)
+            self.setFixedWidth(420)
+            self.setStyleSheet("QDialog { background: #000; color: #fff; } QPushButton { min-height: 40px; font-weight: bold; }")
+            layout = QVBoxLayout(self)
+            title = QLabel("Choose language / Оберіть мову / Выберите язык")
+            title.setWordWrap(True)
+            title.setStyleSheet("font-size: 18px; font-weight: bold;")
+            layout.addWidget(title)
+            description = QLabel("Choose the interface language. You can change it later in Settings.")
+            description.setWordWrap(True)
+            layout.addWidget(description)
+            for label, code in (("English", "en"), ("Українська", "uk"), ("Русский", "ru")):
+                button = QPushButton(label)
+                button.clicked.connect(lambda checked=False, value=code: self._select(value))
+                layout.addWidget(button)
+
+        def _select(self, language):
+            language_manager.set_language(language)
+            self.accept()
+
+        def reject(self):
+            # Closing the chooser accepts the documented default: English.
+            language_manager.set_language("en")
+            super().reject()
+
     class Worker(QThread):
 
 
@@ -6090,8 +6655,9 @@ if GUI_MODE:
 
         def _run_support_dialog(self):
             import webbrowser
+            tr = language_manager.translate
             dlg = QDialog(self)
-            dlg.setWindowTitle("Поддержать автора")
+            dlg.setWindowTitle(tr("Поддержать автора"))
             dlg.setMinimumWidth(480)
             dlg.setStyleSheet(
                 "QDialog { background-color: #000000; color: #ffffff; }"
@@ -6111,7 +6677,7 @@ if GUI_MODE:
             layout.setSpacing(14)
 
             # Title
-            title = QLabel("ПОДДЕРЖАТЬ АВТОРА")
+            title = QLabel(tr("ПОДДЕРЖАТЬ АВТОРА"))
             title.setStyleSheet("font-size: 18px; font-weight: bold; letter-spacing: 3px;")
             layout.addWidget(title)
 
@@ -6121,18 +6687,18 @@ if GUI_MODE:
             layout.addWidget(sep)
 
             # Description
-            desc = QLabel("Всё идёт напрямую на карту ПриватБанк.")
+            desc = QLabel(tr("Всё идёт напрямую на карту ПриватБанк."))
             desc.setStyleSheet("color: #888888; font-size: 12px;")
             desc.setWordWrap(True)
             layout.addWidget(desc)
 
             # Currency selector
             row_curr = QHBoxLayout()
-            lbl_curr = QLabel("Страна:")
+            lbl_curr = QLabel(tr("Страна:"))
             lbl_curr.setFixedWidth(100)
             from PySide6.QtWidgets import QComboBox, QSpinBox
             combo_curr = QComboBox()
-            combo_curr.addItems(["Украина (грн)", "Россия (руб)", "Весь мир (USD/EUR)"])
+            combo_curr.addItems([tr("Украина (грн)"), tr("Россия (руб)"), tr("Весь мир (USD/EUR)")])
             row_curr.addWidget(lbl_curr)
             row_curr.addWidget(combo_curr)
             layout.addLayout(row_curr)
@@ -6145,7 +6711,7 @@ if GUI_MODE:
             sep2.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep2)
 
-            lbl_card_info = QLabel("Номер карты ПриватБанк:")
+            lbl_card_info = QLabel(tr("Номер карты ПриватБанк:"))
             lbl_card_info.setStyleSheet("color: #888888; font-size: 11px;")
             layout.addWidget(lbl_card_info)
 
@@ -6158,13 +6724,13 @@ if GUI_MODE:
             )
             layout.addWidget(card_field)
 
-            lbl_copy_hint = QLabel("Нажмите на номер, чтобы скопировать")
+            lbl_copy_hint = QLabel(tr("Нажмите на номер, чтобы скопировать"))
             lbl_copy_hint.setStyleSheet("color: #555555; font-size: 10px;")
             layout.addWidget(lbl_copy_hint)
 
             def copy_card():
                 QApplication.clipboard().setText(card_field.text().replace(" ", ""))
-                lbl_copy_hint.setText("✓ Номер скопирован!")
+                lbl_copy_hint.setText(tr("✓ Номер скопирован!"))
                 lbl_copy_hint.setStyleSheet("color: #ffffff; font-size: 10px;")
             card_field.mousePressEvent = lambda e: copy_card()
 
@@ -6176,24 +6742,24 @@ if GUI_MODE:
             # Buttons
             btn_layout = QHBoxLayout()
 
-            btn_action = QPushButton("ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →")
+            btn_action = QPushButton(tr("ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →"))
             btn_action.setFixedHeight(44)
             
             def do_action():
-                curr_text = combo_curr.currentText()
+                curr_index = combo_curr.currentIndex()
                 copy_card()
                 self._user_supported = True
-                if "Украина" in curr_text:
+                if curr_index == 0:
                     webbrowser.open("https://next.privat24.ua/money-transfer/card")
-                elif "Россия" in curr_text:
+                elif curr_index == 1:
                     webbrowser.open("https://www.bestchange.ru/sberbank-to-privat24-uah.html")
-                elif "Весь мир" in curr_text:
+                else:
                     webbrowser.open("https://paysend.com/")
                 dlg.accept()
                 
             btn_action.clicked.connect(do_action)
 
-            btn_cancel = QPushButton("ОТМЕНА")
+            btn_cancel = QPushButton(tr("ОТМЕНА"))
             btn_cancel.setFixedHeight(44)
             btn_cancel.clicked.connect(dlg.reject)
 
@@ -6203,18 +6769,18 @@ if GUI_MODE:
 
             # Update logic when currency changes
             def update_suffix(curr_text):
-                lbl_copy_hint.setText("Нажмите, чтобы скопировать")
+                lbl_copy_hint.setText(tr("Нажмите, чтобы скопировать"))
                 lbl_copy_hint.setStyleSheet("color: #555555; font-size: 10px;")
                 
-                if "Россия" in curr_text:
-                    desc.setText("Прямые переводы отключены. Но вы можете перевести деньги со Сбербанка/Тинькофф напрямую на мою карту ПриватБанка через обменники (например, BestChange).")
-                    btn_action.setText("ПЕРЕЙТИ НА BESTCHANGE  →")
-                elif "Весь мир" in curr_text:
-                    desc.setText("Для переводов из США, Европы и других стран используйте сервисы Paysend, TransferGo или Wise. Отправляйте напрямую на мою карту ПриватБанка.")
-                    btn_action.setText("ПЕРЕЙТИ НА PAYSEND  →")
+                if combo_curr.currentIndex() == 1:
+                    desc.setText(tr("Прямые переводы отключены. Но вы можете перевести деньги со Сбербанка/Тинькофф напрямую на мою карту ПриватБанка через обменники (например, BestChange)."))
+                    btn_action.setText(tr("ПЕРЕЙТИ НА BESTCHANGE  →"))
+                elif combo_curr.currentIndex() == 2:
+                    desc.setText(tr("Для переводов из США, Европы и других стран используйте сервисы Paysend, TransferGo или Wise. Отправляйте напрямую на мою карту ПриватБанка."))
+                    btn_action.setText(tr("ПЕРЕЙТИ НА PAYSEND  →"))
                 else:
-                    desc.setText("Всё идёт напрямую на карту ПриватБанк. Спасибо за поддержку!")
-                    btn_action.setText("ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →")
+                    desc.setText(tr("Всё идёт напрямую на карту ПриватБанк. Спасибо за поддержку!"))
+                    btn_action.setText(tr("ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →"))
             
             combo_curr.currentTextChanged.connect(update_suffix)
             update_suffix(combo_curr.currentText())
@@ -6306,7 +6872,7 @@ if GUI_MODE:
             '''
             if theme_name == "Minimal B&W":
                 self.setStyleSheet(bw_style)
-            elif theme_name == "Тёмная тема (Стандартная)":
+            elif theme_name in ("Тёмная тема (Стандартная)", "Dark Theme (Default)", "Темна тема (Стандартна)"):
                 self.setStyleSheet("""
                     QWidget { background-color: #000000; color: #ffffff; font-family: Consolas; font-size: 13px; }
                     QPushButton { background-color: #111111; color: #ffffff; border: 1px solid #222222; padding: 6px 14px; }
@@ -6323,7 +6889,7 @@ if GUI_MODE:
                     QScrollBar::handle:vertical { background: #222222; }
                     QCheckBox { color: #ffffff; }
                 """)
-            elif theme_name == "МАТОВЫЙ":
+            elif theme_name in ("МАТОВЫЙ", "MATTE", "МАТОВА"):
                 self.setStyleSheet("""
                     QWidget { background-color: #000000; color: #ffffff; font-family: Consolas; font-size: 13px; }
                     QPushButton { background-color: #222222; color: #ffffff; border: 1px solid #2a2a2a; padding: 6px 14px; }
@@ -6339,7 +6905,7 @@ if GUI_MODE:
                     QScrollBar::handle:vertical { background: #333333; }
                     QCheckBox { color: #ffffff; }
                 """)
-            elif theme_name == "ПРОЗРАЧНЫЙ":
+            elif theme_name in ("ПРОЗРАЧНЫЙ", "TRANSPARENT", "ПРОЗОРА"):
                 self.setAttribute(Qt.WA_TranslucentBackground, True)
                 self.setStyleSheet("""
                     QWidget { background-color: rgba(20, 20, 25, 180); color: #ffffff; font-family: Consolas; font-size: 13px; }
@@ -8736,8 +9302,26 @@ if GUI_MODE:
             self.cb_theme.currentTextChanged.connect(self.apply_theme)
             layout.addWidget(self.cb_theme)
 
+            lbl_language = QLabel("Язык интерфейса")
+            lbl_language.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
+            layout.addWidget(lbl_language)
+
+            self.cb_language = QComboBox()
+            # These native names intentionally remain readable in every locale.
+            self.cb_language.addItems(["English", "Українська", "Русский"])
+            self.cb_language.setCurrentIndex({"en": 0, "uk": 1, "ru": 2}[language_manager.language])
+            self.cb_language.setStyleSheet(self.cb_theme.styleSheet())
+            self.cb_language.currentIndexChanged.connect(self.change_language)
+            layout.addWidget(self.cb_language)
+
             layout.addStretch()
             return page
+
+        def change_language(self, index):
+            language_manager.set_language(("en", "uk", "ru")[index])
+            # Re-use the retained source strings, so changing the language does
+            # not require an application restart.
+            localize_widget_tree(self)
 
         def create_whats_new_page(self):
             """Устаревший метод — перенаправляет на create_program_page"""
@@ -9329,20 +9913,21 @@ if GUI_MODE:
             """One-click safe recovery mode: runs a curated set of non-destructive fixes."""
             from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar, QPushButton
             from PySide6.QtCore import Qt, QTimer
+            tr = language_manager.translate
 
             dlg = QDialog(self)
             dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
-            dlg.setWindowTitle("NoVir — Починить всё")
+            dlg.setWindowTitle(tr("NoVir — Починить всё"))
             dlg.setMinimumWidth(460)
             dlg.setMinimumHeight(300)
             dlg.setStyleSheet("QDialog{background:#000000;} QLabel{color:#ffffff;} QProgressBar{border:1px solid #444;background:#111;height:12px;} QProgressBar::chunk{background:#ffffff;}")
             lay = QVBoxLayout(dlg)
 
-            lbl_title = QLabel("Запуск комплексного восстановления...")
+            lbl_title = QLabel(tr("Запуск комплексного восстановления..."))
             lbl_title.setStyleSheet("font-size:14px; font-weight:bold; color:#ffffff;")
             lay.addWidget(lbl_title)
 
-            lbl_step = QLabel("Подготовка...")
+            lbl_step = QLabel(tr("Подготовка..."))
             lbl_step.setStyleSheet("color:#aaaaaa; font-size:12px;")
             lay.addWidget(lbl_step)
 
@@ -9355,7 +9940,7 @@ if GUI_MODE:
             lbl_log.setWordWrap(True)
             lay.addWidget(lbl_log)
 
-            btn_close = QPushButton("Закрыть")
+            btn_close = QPushButton(tr("Закрыть"))
             btn_close.setEnabled(False)
             btn_close.setStyleSheet("QPushButton{background:#000;color:#fff;border:2px solid #fff;padding:6px 20px;font-weight:bold;}"
                                     "QPushButton:hover{background:#fff;color:#000;}"
@@ -9377,8 +9962,8 @@ if GUI_MODE:
             def next_step():
                 if step_idx[0] >= len(STEPS):
                     bar.setValue(100)
-                    lbl_step.setText("Готово! Все безопасные исправления применены.")
-                    lbl_log.setText("Рекомендуется перезагрузить компьютер.")
+                    lbl_step.setText(tr("Готово! Все безопасные исправления применены."))
+                    lbl_log.setText(tr("Рекомендуется перезагрузить компьютер."))
                     btn_close.setEnabled(True)
                     return
                 
@@ -9386,16 +9971,17 @@ if GUI_MODE:
                 name, func = STEPS[i]
                 
                 pct = int((i / len(STEPS)) * 100)
-                lbl_step.setText(f"Шаг {i+1}/{len(STEPS)}: {name}")
+                localized_name = tr(name)
+                lbl_step.setText(f"{tr('Шаг')} {i+1}/{len(STEPS)}: {localized_name}")
                 bar.setValue(pct)
                 logger.log("FixAll", "info", name)
                 
                 if func:
                     try:
                         func()
-                        lbl_log.setText(f"OK: {name} — выполнено")
+                        lbl_log.setText(f"OK: {localized_name} — {tr('выполнено')}")
                     except Exception as _e:
-                        lbl_log.setText(f"ПРОПУСК: {name} — {_e}")
+                        lbl_log.setText(f"{tr('ПРОПУСК:')} {localized_name} — {_e}")
                 
                 step_idx[0] += 1
                 QTimer.singleShot(400, next_step)
@@ -9492,6 +10078,12 @@ def main():
     
     if GUI_MODE:
         app = QApplication(sys.argv)
+        # The filter localizes every main window and dialog at display time.
+        # Keep a reference on QApplication so Python cannot collect it.
+        app._novir_translation_filter = TranslationEventFilter(app)
+        app.installEventFilter(app._novir_translation_filter)
+        if language_manager.first_run:
+            LanguageSelectionDialog().exec()
         window = NoVirGUI()
         window.show()
         sys.exit(app.exec())

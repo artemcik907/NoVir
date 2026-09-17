@@ -348,6 +348,29 @@ class LanguageManager:
         "Служба": ("Service", "Служба"), "Диск": ("Drive", "Диск"),
         "Размер": ("Size", "Розмір"), "Используется": ("Used", "Використано"),
         "Мой компьютер": ("This PC", "Цей комп'ютер"),
+        "Компьютер": ("This PC", "Цей комп'ютер"),
+        "Назад": ("Back", "Назад"),
+        "Обновить список": ("Refresh list", "Оновити список"),
+        "Атрибуты": ("Attributes", "Атрибути"),
+        "Локальный диск": ("Local disk", "Локальний диск"),
+        "Папка": ("Folder", "Папка"),
+        "Открыть": ("Open", "Відкрити"),
+        "Разблокировать (Unlocker)": ("Unlock (Unlocker)", "Розблокувати (Unlocker)"),
+        "Стать владельцем (Take Ownership)": ("Take ownership", "Стати власником"),
+        "Удалить принудительно (Force Delete)": ("Force delete", "Примусово видалити"),
+        "Неверный путь": ("Invalid path", "Неправильний шлях"),
+        "Нет доступа:": ("Access denied:", "Немає доступу:"),
+        "Разблокировка": ("Unlock", "Розблокування"),
+        "Файл разблокирован!": ("File unlocked!", "Файл розблоковано!"),
+        "Не удалось разблокировать или файл не заблокирован.": ("Unable to unlock the file, or it is not locked.", "Не вдалося розблокувати файл або він не заблокований."),
+        "Модуль novir_native недоступен.": ("The novir_native module is unavailable.", "Модуль novir_native недоступний."),
+        "Владелец": ("Owner", "Власник"),
+        "Права получены!": ("Permissions obtained!", "Права отримано!"),
+        "Не удалось получить права.": ("Unable to obtain permissions.", "Не вдалося отримати права."),
+        "Удаление": ("Deletion", "Видалення"),
+        "Удалить безвозвратно?": ("Delete permanently?", "Видалити безповоротно?"),
+        "Удаление заблокировано": ("Deletion blocked", "Видалення заблоковано"),
+        "Путь не прошел проверку безопасности.": ("The path did not pass the safety check.", "Шлях не пройшов перевірку безпеки."),
         "Редактор реестра": ("Registry Editor", "Редактор реєстру"),
         "Пользователи": ("Users", "Користувачі"),
         "Создание нового пользователя": ("Create a new user", "Створення нового користувача"),
@@ -490,6 +513,9 @@ class LanguageManager:
              "Відновлює завантажувальний сектор і конфігурацію завантажувача Windows."),
         "Запустить восстановление": ("Start recovery", "Запустити відновлення"),
         "Введите имя пользователя.": ("Enter a user name.", "Введіть ім'я користувача."),
+        "В выбранных действиях есть операции повышенного риска. Они могут удалить данные, перезапустить службы или изменить системные настройки.\n\n":
+            ("The selected actions include high-risk operations. They can delete data, restart services or change system settings.\n\n",
+             "Серед вибраних дій є операції підвищеного ризику. Вони можуть видалити дані, перезапустити служби або змінити системні налаштування.\n\n"),
         "Диск успешно удалён из списка отображения.":
             ("The drive was removed from the display list.", "Диск успішно видалено зі списку відображення."),
         "Заполните все поля": ("Fill in all fields", "Заповніть усі поля"),
@@ -882,10 +908,17 @@ _DELETION_WHITELIST = [
     "c:\\windows\\system32\\grouppolicyusers",
 ]
 
-# Extended whitelist for paths that require additional user confirmation before deletion
+# User locations that NoVir may clean after a confirmation.  Do not allow the
+# whole profile: the file explorer must never become a general-purpose
+# destructive delete tool for Documents, Desktop, Pictures, or other data.
+_CURRENT_USER_PROFILE = os.environ.get("USERPROFILE", "")
 _DELETION_WHITELIST_EXTENDED = [
-    "c:\\users",
-    "c:\\documents and settings",
+    path for path in (
+        os.environ.get("TEMP", ""),
+        os.environ.get("TMP", ""),
+        os.path.join(_CURRENT_USER_PROFILE, "AppData", "Local", "Temp") if _CURRENT_USER_PROFILE else "",
+        os.path.join(_CURRENT_USER_PROFILE, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup") if _CURRENT_USER_PROFILE else "",
+    ) if path
 ]
 
 def _path_in_whitelist(real_path, whitelist_key):
@@ -1111,6 +1144,7 @@ def reg_delete_value(key_path, value_name, hive=None):
         # Метод 1: Прямое удаление
         for access in [winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_32KEY]:
             try:
+                rollback_mgr.snapshot_value(hive, key_path, value_name)
                 key = winreg.OpenKey(hive, key_path, 0, access)
                 winreg.DeleteValue(key, value_name)
                 winreg.CloseKey(key)
@@ -1121,7 +1155,7 @@ def reg_delete_value(key_path, value_name, hive=None):
         
         if not success:
             # Метод 2: Через REG DELETE
-            cmd = f'reg delete "{hive_name}\\{key_path}" /v "{value_name}" /f'
+            rollback_mgr.snapshot_value(hive, key_path, value_name)
             res, _, _ = run_command(["reg", "delete", f"{hive_name}\\{key_path}", "/v", value_name, "/f"])
             if res: success = True
             
@@ -2816,15 +2850,20 @@ def Process_Blacklist_Kill():
         print(f"{Colors.YELLOW}[!] psutil не установлен — проверка процессов недоступна{Colors.RESET}")
         return False
     
-    suspicious_processes = [
+    if not confirm_high_risk_action(
+        "Опасная операция: завершение процессов",
+        "Будут завершены только процессы с подозрительным именем вне системных и Program Files папок. Несохранённые данные могут быть потеряны.",
+    ):
+        logger.log("Process_Blacklist_Kill", "warning", "Операция отменена пользователем")
+        return False
+
+    suspicious_processes = {
         'svchost.exe', 'temp.exe', 'hack.exe', 'virus.exe', 'trojan.exe',
         'malware.exe', 'miner.exe', 'crypt.exe', 'payload.exe', 'dropper.exe',
         'loader.exe', 'injector.exe', 'rat.exe', 'backdoor.exe', 'keylogger.exe',
         'stealer.exe', 'unknown.exe', 'update.exe', 'winlogon.exe', 'lsass.exe',
         'csrss.exe', 'services.exe', 'taskhostw.exe', 'spoolsv.exe'
-    ]
-    
-    legitimate_owners = ['SYSTEM', 'LOCAL SERVICE', 'NETWORK SERVICE', 'NT AUTHORITY\\SYSTEM', 'NT AUTHORITY\\LOCAL SERVICE', 'NT AUTHORITY\\NETWORK SERVICE']
+    }
     
     whitelist_paths = [
         os.path.join(os.environ['SystemRoot'], 'system32').lower(),
@@ -2848,23 +2887,26 @@ def Process_Blacklist_Kill():
         try:
             proc_name = str(proc_info.get('name', '')).lower()
             
-            if any(sus in proc_name for sus in suspicious_processes):
+            if proc_name in suspicious_processes:
                 exe_path = str(proc_info.get('exe', '') or proc_info.get('path', '')).lower()
-                owner = str(proc_info.get('username', '')).upper()
-                
                 is_legitimate = False
                 
                 # Проверка системных процессов (должны быть в system32 и от SYSTEM)
                 critical_system = ['svchost.exe', 'winlogon.exe', 'lsass.exe', 'csrss.exe', 'services.exe', 'taskhostw.exe', 'spoolsv.exe']
-                if any(crit in proc_name for crit in critical_system):
-                    if ('system32' in exe_path or 'syswow64' in exe_path) and any(legit in owner for legit in legitimate_owners):
+                if proc_name in critical_system:
+                    # Never terminate a known Windows core process just because
+                    # its owner cannot be queried (access is often denied).
+                    if any(exe_path.startswith(path) for path in whitelist_paths):
                         is_legitimate = True
                 
                 # Проверка остальных по белому списку путей
                 elif any(exe_path.startswith(path) for path in whitelist_paths):
                     is_legitimate = True
                 
-                if not is_legitimate:
+                # With no executable path we cannot distinguish a system
+                # process from a spoof.  Leave it untouched instead of risking
+                # a false-positive termination.
+                if not is_legitimate and exe_path:
                     if DRY_RUN:
                         print(f"{Colors.CYAN}[DRY-RUN] Был бы убит процесс: {proc_name} (PID: {proc_info['pid']}, Path: {exe_path}){Colors.RESET}")
                     else:
@@ -4854,6 +4896,22 @@ HIGH_RISK_FUNCTION_NAMES = {
     "Restore_From_Backup",
     "SafeMode_Boot_Restore_Service",
     "SafeMode_Next_Boot_Setup",
+    "Emergency_Recovery",
+    "Replace_Sethc_Utilman",
+    "Driver_Cleanup",
+    "Easy_Launcher",
+    "Process_Blacklist_Kill",
+    "TrustedInstaller_Restore",
+    "Policies_Nuke",
+    "Temp_Deep_Clean",
+    "Prefetch_Wipe",
+    "RecycleBin_Empty",
+    "Startup_Clean",
+    "WinUpdate_Reset",
+    "Print_Spooler_Fix",
+    "Firewall_State_Reset",
+    "Route_Reset",
+    "IP_Reset",
 }
 
 def run_self_check():
@@ -8534,6 +8592,24 @@ if GUI_MODE:
 
         def run_task_list(self, func_list):
             """Запускает список функций последовательно в фоновом потоке"""
+            high_risk = [fn for fn in func_list if getattr(fn, "__name__", "") in HIGH_RISK_FUNCTION_NAMES]
+            if high_risk:
+                names = "\n".join(f"• {fn.__name__}" for fn in high_risk)
+                warning = (
+                    language_manager.translate(
+                        "В выбранных действиях есть операции повышенного риска. Они могут удалить данные, перезапустить службы или изменить системные настройки.\n\n"
+                    )
+                    + f"{names}\n\n" + language_manager.translate("Продолжить?")
+                )
+                if QMessageBox.warning(
+                    self,
+                    language_manager.translate("Внимание"),
+                    warning,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                ) != QMessageBox.Yes:
+                    return
+
             def combined():
                 results = []
                 for fn in func_list:
@@ -9322,6 +9398,8 @@ if GUI_MODE:
             # Re-use the retained source strings, so changing the language does
             # not require an application restart.
             localize_widget_tree(self)
+            if hasattr(self, "page_explorer"):
+                self.page_explorer.retranslate_ui()
 
         def create_whats_new_page(self):
             """Устаревший метод — перенаправляет на create_program_page"""

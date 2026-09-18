@@ -105,6 +105,23 @@ class ExplorerTab(QWidget):
         self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_table.customContextMenuRequested.connect(self.show_context_menu)
 
+        
+        # Search bar
+        search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText(tr("Поиск файлов..."))
+        self.search_edit.setStyleSheet("QLineEdit { background-color: #111; color: #fff; border: 1px solid #333; padding: 4px; }")
+        self.search_edit.textChanged.connect(self.filter_files)
+        
+        self.btn_hidden = QPushButton(tr("Скрытые"))
+        self.btn_hidden.setCheckable(True)
+        self.btn_hidden.setFixedSize(80, 28)
+        self.btn_hidden.setStyleSheet("QPushButton { background-color: #111; color: #888; border: 1px solid #333; } QPushButton:checked { color: #fff; border-color: #fff; }")
+        self.btn_hidden.clicked.connect(self.refresh_files)
+        
+        search_layout.addWidget(self.search_edit)
+        search_layout.addWidget(self.btn_hidden)
+        self.layout.addLayout(search_layout)
         self.layout.addWidget(self.file_table)
 
     def retranslate_ui(self):
@@ -162,7 +179,15 @@ class ExplorerTab(QWidget):
                 for entry in it:
                     try:
                         if entry.is_dir():
-                            dirs.append(entry.name)
+                            try:
+                                import ctypes
+                                attrs = ctypes.windll.kernel32.GetFileAttributesW(entry.path)
+                                if attrs != -1 and (attrs & 2) and (not getattr(self, "btn_hidden", None) or not self.btn_hidden.isChecked()):
+                                    pass  # skip hidden
+                                else:
+                                    dirs.append(entry.name)
+                            except:
+                                dirs.append(entry.name)
                         else:
                             try:
                                 stat = entry.stat()
@@ -211,6 +236,13 @@ class ExplorerTab(QWidget):
             self.file_table.setItem(row, 2, QTableWidgetItem(size_str))
             self.file_table.setItem(row, 3, QTableWidgetItem(""))
             row += 1
+
+    def filter_files(self, text=""):
+        for row in range(self.file_table.rowCount()):
+            item = self.file_table.item(row, 0)
+            if item:
+                name = item.text().lower()
+                self.file_table.setRowHidden(row, bool(text) and text.lower() not in name)
 
     def go_back(self):
         if self.current_path == self.ROOT_PATH:
@@ -273,6 +305,8 @@ class ExplorerTab(QWidget):
         
         if self.current_path != self.ROOT_PATH:
             action_rename = menu.addAction(tr("Переименовать"))
+            action_copy_file = menu.addAction(tr("Копировать файл"))
+            action_move_file = menu.addAction(tr("Переместить файл"))
             action_copy_path = menu.addAction(tr("Копировать путь"))
             menu.addSeparator()
             action_unlock = menu.addAction(tr("Разблокировать (Unlocker)"))
@@ -283,6 +317,26 @@ class ExplorerTab(QWidget):
             
             if action == action_open:
                 self.on_item_double_clicked(name_item)
+            elif action == action_copy_file:
+                import shutil
+                from PySide6.QtWidgets import QInputDialog, QFileDialog
+                dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
+                if dest_dir:
+                    try:
+                        shutil.copy2(path, dest_dir)
+                        self.refresh_files()
+                    except Exception as e:
+                        QMessageBox.warning(self, tr("Ошибка"), str(e))
+            elif action == action_move_file:
+                import shutil
+                from PySide6.QtWidgets import QFileDialog
+                dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
+                if dest_dir:
+                    try:
+                        shutil.move(path, dest_dir)
+                        self.refresh_files()
+                    except Exception as e:
+                        QMessageBox.warning(self, tr("Ошибка"), str(e))
             elif action == action_rename:
                 from PySide6.QtWidgets import QInputDialog
                 new_name, ok = QInputDialog.getText(self, tr("Переименование"), tr("Новое имя:"), QLineEdit.Normal, os.path.basename(path))

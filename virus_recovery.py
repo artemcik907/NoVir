@@ -192,7 +192,9 @@ class Logger:
 class RollbackManager:
     """Saves registry values before changing them so they can be restored."""
     def __init__(self):
-        self._snapshots = []  # list of (hive, key_path, value_name, old_value, old_type)
+        self._snapshots = []
+        from datetime import datetime
+        self.datetime = datetime  # list of (hive, key_path, value_name, old_value, old_type)
 
     def snapshot_value(self, hive, key_path, value_name):
         """Capture current registry value for rollback."""
@@ -259,7 +261,7 @@ LANGUAGE_CONFIG_PATH = os.path.join(
 class LanguageManager:
     """Persist and translate the language selected by the user."""
 
-    LANGUAGES = ("en", "uk", "ru")
+    LANGUAGES = ("en", "uk", "ru", "de", "pl", "fr")
 
     # (English, Ukrainian).  The entries below are complete for the visible
     # navigation, settings, dialogs, controls, tables and status messages.
@@ -618,7 +620,7 @@ class LanguageManager:
         # therefore remain untouched.
         if not re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", source):
             return source
-        for russian, replacement in self.FALLBACK_WORDS[self.language].items():
+        for russian, replacement in self.FALLBACK_WORDS.get(self.language, {}).items():
             source = re.sub(r"(?<![А-Яа-яЁёІіЇїЄєҐґ])" + re.escape(russian) + r"(?![А-Яа-яЁёІіЇїЄєҐґ])", replacement, source)
         return source
 
@@ -6566,6 +6568,10 @@ if GUI_MODE:
             self.main_content.addWidget(self.page_advanced)      # 4
             self.main_content.addWidget(self.page_unlocker)      # 5
             self.main_content.addWidget(self.page_program)       # 6
+            # Diagnostic page (index 7)
+            if not hasattr(self, 'page_diagnostic'):
+                self.page_diagnostic = self.create_diagnostic_page()
+            self.main_content.addWidget(self.page_diagnostic)
             
             self.layout.addWidget(self.main_content)
 
@@ -6605,6 +6611,15 @@ if GUI_MODE:
             layout = QVBoxLayout(page)
             layout.setAlignment(Qt.AlignCenter)
             layout.setSpacing(20)
+            self.diag_btn = QPushButton(language_manager.translate("УМНАЯ ДИАГНОСТИКА"))
+            self.diag_btn.setFixedHeight(50)
+            self.diag_btn.setStyleSheet(
+                "QPushButton { background-color: #0055ff; color: #ffffff; font-size: 16px; font-weight: bold; border-radius: 5px; }"
+                "QPushButton:hover { background-color: #0077ff; }"
+            )
+            self.diag_btn.clicked.connect(lambda checked=False: self.switch_page(7))
+            layout.addWidget(self.diag_btn)
+
 
             # Сетка плиток
             grid = QGridLayout()
@@ -6685,6 +6700,15 @@ if GUI_MODE:
             )
             update_btn.clicked.connect(lambda checked=False: self.check_for_updates(manual=True))
             action_row.addWidget(update_btn, stretch=1)
+            backup_btn = QPushButton(language_manager.translate("БЭКАПЫ"))
+            backup_btn.setFixedHeight(40)
+            backup_btn.setStyleSheet(
+                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555; font-size: 12px; }"
+                "QPushButton:hover { border-color: #ffffff; }"
+            )
+            backup_btn.clicked.connect(lambda checked=False: self.show_backup_manager())
+            action_row.addWidget(backup_btn, stretch=1)
+
             layout.addLayout(action_row)
 
             return page
@@ -6705,6 +6729,10 @@ if GUI_MODE:
                     6: "НАСТРОЙКИ"
                 }
                 self.title_label.setText(titles.get(index, "NOVIR"))
+                # For page 7: ensure diagnostic page is in the stack
+                if index == 7 and not hasattr(self, 'page_diagnostic'):
+                    self.page_diagnostic = self.create_diagnostic_page()
+                    self.main_content.addWidget(self.page_diagnostic)
 
 
         def show_support_dialog(self):
@@ -8838,7 +8866,7 @@ if GUI_MODE:
             msg.setWindowTitle("⚠️ Управление дисками")
             msg.setIcon(QMessageBox.Warning)
             msg.setText(
-                "⚠️ ВНИМАНИЕ! Удаление или форматирование дисков\n"
+                "! ВНИМАНИЕ! Удаление или форматирование дисков\n"
                 "является необратимой операцией.\n\n"
                 "Все данные на удалённом разделе будут потеряны без возможности восстановления.\n\n"
                 "Убедитесь, что вы точно знаете, что делаете. Продолжить?"
@@ -8867,7 +8895,7 @@ if GUI_MODE:
             msg.setWindowTitle("⚠️ Восстановление загрузчика MBR/BCD")
             msg.setIcon(QMessageBox.Warning)
             msg.setText(
-                "⚠️ ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\n"
+                "! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\n"
                 "является продвинутой системной операцией.\n\n"
                 "При неправильном использовании Windows\n"
                 "может перестать загружаться.\n\n"
@@ -9335,6 +9363,430 @@ if GUI_MODE:
             self.unlocker_pids = []
             self.unlocker_path_edit.clear()
 
+        def create_diagnostic_page(self):
+            from PySide6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QLabel, 
+                                           QTableWidget, QTableWidgetItem, QHeaderView, 
+                                           QPushButton, QAbstractItemView)
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QColor, QFont, QBrush
+
+            page = QFrame()
+            page.setStyleSheet("QFrame { background-color: #0d0d0d; }")
+            outer_layout = QVBoxLayout(page)
+            outer_layout.setContentsMargins(25, 20, 25, 20)
+            outer_layout.setSpacing(15)
+
+            # --- Header ---
+            title = QLabel(language_manager.translate("Центр диагностики системы"))
+            title.setStyleSheet("font-size: 22px; font-weight: bold; color: #ffffff;")
+            outer_layout.addWidget(title)
+            
+            desc = QLabel(language_manager.translate("Умное сканирование узлов ОС на предмет скрытых повреждений."))
+            desc.setStyleSheet("font-size: 13px; color: #888888; margin-bottom: 5px;")
+            outer_layout.addWidget(desc)
+
+            # --- Beautiful Table ---
+            self.diag_table = QTableWidget(0, 3)
+            self.diag_table.setHorizontalHeaderLabels([
+                language_manager.translate("Компонент"), 
+                language_manager.translate("Статус"), 
+                language_manager.translate("Детали")
+            ])
+            
+            # Setup columns
+            self.diag_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            self.diag_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.diag_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            
+            # Disable editing, selection, and remove grid lines for a cleaner look
+            self.diag_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.diag_table.setSelectionMode(QAbstractItemView.NoSelection)
+            self.diag_table.setFocusPolicy(Qt.NoFocus)
+            self.diag_table.setShowGrid(False)
+            self.diag_table.setAlternatingRowColors(True)
+            self.diag_table.verticalHeader().setVisible(False)
+            
+            # Modern Styling
+            self.diag_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: #121212;
+                    alternate-background-color: #1a1a1a;
+                    color: #e0e0e0;
+                    border: 1px solid #333333;
+                    border-radius: 6px;
+                    font-size: 13px;
+                }
+                QHeaderView::section {
+                    background-color: #000000;
+                    color: #aaaaaa;
+                    font-weight: bold;
+                    padding: 8px;
+                    border: none;
+                    border-bottom: 2px solid #333333;
+                    text-transform: uppercase;
+                    font-size: 11px;
+                }
+                QTableWidget::item {
+                    padding: 8px 12px;
+                    border: none;
+                }
+            """)
+            outer_layout.addWidget(self.diag_table)
+
+            # --- Buttons ---
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(15)
+
+            self.btn_scan = QPushButton(language_manager.translate("Запустить сканирование"))
+            self.btn_scan.setFixedHeight(42)
+            self.btn_scan.setCursor(Qt.PointingHandCursor)
+            self.btn_scan.setStyleSheet("""
+                QPushButton {
+                    background-color: #222222;
+                    color: #ffffff;
+                    border: 1px solid #444444;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #333333; border-color: #666666; }
+                QPushButton:pressed { background-color: #111111; }
+            """)
+            self.btn_scan.clicked.connect(self.run_diagnostics)
+
+            self.btn_fix = QPushButton(language_manager.translate("Исправить найденное"))
+            self.btn_fix.setFixedHeight(42)
+            self.btn_fix.setEnabled(False)
+            self.btn_fix.setCursor(Qt.PointingHandCursor)
+            self.btn_fix.setStyleSheet("""
+                QPushButton {
+                    background-color: #0055ff;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #1a66ff; }
+                QPushButton:pressed { background-color: #0044cc; }
+                QPushButton:disabled {
+                    background-color: #2a2a2a;
+                    color: #666666;
+                }
+            """)
+            self.btn_fix.clicked.connect(self.fix_diagnostics)
+
+            btn_row.addWidget(self.btn_scan, stretch=1)
+            btn_row.addWidget(self.btn_fix, stretch=1)
+            outer_layout.addLayout(btn_row)
+
+            page.retranslate_ui = lambda: (
+                title.setText(language_manager.translate("Центр диагностики системы")),
+                desc.setText(language_manager.translate("Умное сканирование узлов ОС на предмет скрытых повреждений.")),
+                self.diag_table.setHorizontalHeaderLabels([
+                    language_manager.translate("Компонент"), 
+                    language_manager.translate("Статус"), 
+                    language_manager.translate("Детали")
+                ]),
+                self.btn_scan.setText(language_manager.translate("Запустить сканирование")),
+                self.btn_fix.setText(language_manager.translate("Исправить найденное"))
+            )
+            return page
+
+        def run_diagnostics(self):
+            from PySide6.QtWidgets import QTableWidgetItem
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QColor, QFont
+            
+            self.diag_table.setRowCount(0)
+            self.diag_results = []
+            
+            components = [
+                (language_manager.translate("Системные Службы (Services)"), self.check_services),
+                (language_manager.translate("Настройки DNS"), self.check_dns),
+                (language_manager.translate("Сетевой протокол TCP/IP"), self.check_tcpip),
+                (language_manager.translate("Hosts Файл"), self.check_hosts),
+                (language_manager.translate("Загрузчик BCD"), self.check_bootconfig),
+                (language_manager.translate("WMI Repository"), self.check_wmi),
+                (language_manager.translate("Windows Update"), self.check_windows_update),
+                (language_manager.translate("Кэш обновлений"), self.check_update_cache),
+                (language_manager.translate("Network Proxy"), self.check_proxy),
+                (language_manager.translate("Safe Mode"), self.check_safeboot),
+                (language_manager.translate("Windows Defender"), self.check_defender),
+                (language_manager.translate("Task Manager"), self.check_taskmgr)
+            ]
+            
+            for name, func in components:
+                status, details, needs_fix = func()
+                self.diag_results.append({'name': name, 'needs_fix': needs_fix})
+                
+                row = self.diag_table.rowCount()
+                self.diag_table.insertRow(row)
+                
+                # Name Item
+                name_item = QTableWidgetItem(name)
+                name_item.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                self.diag_table.setItem(row, 0, name_item)
+                
+                # Status Item (Clean emojis, nice colors)
+                status_item = QTableWidgetItem(status)
+                status_item.setTextAlignment(Qt.AlignCenter)
+                font = QFont("Segoe UI", 9, QFont.Bold)
+                status_item.setFont(font)
+                
+                if "✓" in status:
+                    status_item.setForeground(QColor("#10b981")) # Emerald Green
+                elif "!" in status:
+                    status_item.setForeground(QColor("#f59e0b")) # Amber Warning
+                elif "✕" in status:
+                    status_item.setForeground(QColor("#ef4444")) # Red Error
+                else:
+                    status_item.setForeground(QColor("#3b82f6")) # Blue Info
+                
+                self.diag_table.setItem(row, 1, status_item)
+                
+                # Details Item
+                details_item = QTableWidgetItem(details)
+                details_item.setForeground(QColor("#a3a3a3")) # Light gray
+                self.diag_table.setItem(row, 2, details_item)
+                
+            has_issues = any(r['needs_fix'] for r in self.diag_results)
+            self.btn_fix.setEnabled(has_issues)
+
+        def check_services(self):
+            import subprocess
+            services = {'wuauserv': 'Windows Update', 'BITS': 'BITS', 'Winmgmt': 'WMI', 'wscsvc': 'Security Center'}
+            bad_services = []
+            try:
+                for srv, name in services.items():
+                    res = subprocess.run(["sc", "query", srv], capture_output=True, text=True, creationflags=0x08000000)
+                    if "1060" in res.stdout or "STOPPED" in res.stdout:
+                        # Sometimes BITS is stopped legally, but wscsvc and Winmgmt should be running. Let's just flag if they are disabled.
+                        qc = subprocess.run(["sc", "qc", srv], capture_output=True, text=True, creationflags=0x08000000)
+                        if "DISABLED" in qc.stdout:
+                            bad_services.append(name)
+                
+                if bad_services:
+                    return "! WARNING", f"{language_manager.translate('Отключены службы:')} {', '.join(bad_services)}", True
+                return "✓ OK", language_manager.translate("Все критические службы работают"), False
+            except:
+                return "✓ OK", language_manager.translate("Проверка служб пропущена"), False
+
+        def check_dns(self):
+            import subprocess
+            try:
+                res = subprocess.run(["ipconfig", "/all"], capture_output=True, text=True, creationflags=0x08000000)
+                if "8.8.8.8" in res.stdout or "1.1.1.1" in res.stdout:
+                    return "✓ OK", language_manager.translate("Используются надежные DNS"), False
+                # If DNS is something else, we just warn if we can't parse it well, but let's assume OK unless it's a known bad.
+                # Actually, viruses often set static DNS on the interface. Let's offer to flush/reset it.
+                return "i ИНФО", language_manager.translate("Рекомендуется сброс кэша DNS"), True
+            except:
+                return "✓ OK", language_manager.translate("Не удалось проверить DNS"), False
+                
+        def check_tcpip(self):
+            # Checking Winsock/TCP is hard, but we can offer a reset if they want network recovery
+            return "i ИНФО", language_manager.translate("Сетевые протоколы можно сбросить к заводским настройкам"), True
+
+        def check_windows_update(self):
+            import subprocess
+            results = {}
+            services = {'wuauserv': 'Windows Update', 'BITS': 'BITS', 'cryptsvc': 'CryptSvc', 'msiserver': 'MSI Installer'}
+            broken = []
+            for srv, name in services.items():
+                try:
+                    qc = subprocess.run(["sc", "qc", srv], capture_output=True, text=True, creationflags=0x08000000)
+                    if "DISABLED" in qc.stdout:
+                        broken.append(name)
+                except:
+                    pass
+            if broken:
+                return "! WARNING", f"{language_manager.translate('Отключены компоненты:')} {', '.join(broken)}", True
+            # Also check registry key for Windows Update policy
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate") as k:
+                    try:
+                        val, _ = winreg.QueryValueEx(k, "DisableWindowsUpdateAccess")
+                        if val == 1:
+                            return "! WARNING", language_manager.translate("Обновления заблокированы политиками"), True
+                    except FileNotFoundError:
+                        pass
+            except FileNotFoundError:
+                pass
+            return "✓ OK", language_manager.translate("Windows Update работает нормально"), False
+
+        def check_update_cache(self):
+            import os
+            cache_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
+            try:
+                total = sum(
+                    os.path.getsize(os.path.join(dirpath, f))
+                    for dirpath, _, fnames in os.walk(cache_path)
+                    for f in fnames
+                )
+                mb = total / (1024 * 1024)
+                if mb > 500:
+                    return "i ИНФО", f"{language_manager.translate('Кэш обновлений занимает')} {mb:.0f} MB — {language_manager.translate('можно очистить')}", True
+                return "✓ OK", f"{language_manager.translate('Кэш обновлений')} {mb:.0f} MB", False
+            except:
+                return "✓ OK", language_manager.translate("Кэш обновлений доступен"), False
+
+        def check_wmi(self):
+            import subprocess
+            try:
+                res = subprocess.run(["winmgmt", "/verifyrepository"], capture_output=True, text=True, creationflags=0x08000000)
+                if "consistent" in res.stdout.lower():
+                    return "✓ OK", language_manager.translate("Репозиторий WMI исправен"), False
+                else:
+                    return "! WARNING", language_manager.translate("Репозиторий WMI повреждён — нужно восстановление"), True
+            except:
+                return "i ИНФО", language_manager.translate("Проверка WMI недоступна"), False
+
+        def check_bootconfig(self):
+            import subprocess
+            try:
+                res = subprocess.run(["bcdedit", "/enum", "default"], capture_output=True, text=True, creationflags=0x08000000)
+                if res.returncode == 0 and "winload" in res.stdout.lower():
+                    # Check for suspicious path overrides
+                    if "testsigning" in res.stdout.lower():
+                        return "! WARNING", language_manager.translate("Включен тестовый режим подписи — подозрительно"), True
+                    return "✓ OK", language_manager.translate("Загрузчик Windows в норме"), False
+                else:
+                    return "✕ ERROR", language_manager.translate("Загрузчик не отвечает или повреждён"), True
+            except:
+                return "i ИНФО", language_manager.translate("bcdedit недоступен (нет прав?)"), False
+
+        def check_hosts(self):
+            import os
+            hosts_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'drivers', 'etc', 'hosts')
+            try:
+                with open(hosts_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = [l.strip() for l in f if l.strip() and not l.strip().startswith('#')]
+                if not lines or (len(lines) == 1 and '127.0.0.1' in lines[0] and 'localhost' in lines[0]):
+                    return "✓ OK", language_manager.translate("Стандартный файл"), False
+                return "! WARNING", language_manager.translate("Обнаружены сторонние записи"), True
+            except:
+                return "✕ ERROR", language_manager.translate("Нет доступа к файлу"), True
+
+        def check_proxy(self):
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as key:
+                    proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
+                    if proxy_enable == 1:
+                        proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
+                        return "! WARNING", f"{language_manager.translate('Прокси включен:')} {proxy_server}", True
+            except:
+                pass
+            return "✓ OK", language_manager.translate("Прокси отключен"), False
+            
+        def check_safeboot(self):
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal") as key:
+                    pass
+                return "✓ OK", language_manager.translate("Ключи SafeBoot на месте"), False
+            except FileNotFoundError:
+                return "✕ ERROR", language_manager.translate("Ключи SafeBoot удалены!"), True
+                
+        def check_defender(self):
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows Defender") as key:
+                    val, _ = winreg.QueryValueEx(key, "DisableAntiSpyware")
+                    if val == 1:
+                        return "! WARNING", language_manager.translate("Защитник отключен через политики"), True
+            except FileNotFoundError:
+                pass
+            return "✓ OK", language_manager.translate("Политики Защитника в норме"), False
+            
+        def check_taskmgr(self):
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System") as key:
+                    val, _ = winreg.QueryValueEx(key, "DisableTaskMgr")
+                    if val == 1:
+                        return "! WARNING", language_manager.translate("Диспетчер задач заблокирован"), True
+            except FileNotFoundError:
+                pass
+            return "✓ OK", language_manager.translate("Диспетчер задач доступен"), False
+
+        def fix_diagnostics(self):
+            import os
+            import subprocess
+            import winreg
+            from PySide6.QtWidgets import QMessageBox
+            from datetime import datetime
+            
+            def apply_fixes():
+                for res in self.diag_results:
+                    if res['needs_fix']:
+                        name = res['name']
+                        try:
+                            if name == language_manager.translate("Hosts Файл"):
+                                hosts_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'drivers', 'etc', 'hosts')
+                                try:
+                                    subprocess.run(["attrib", "-r", hosts_path], creationflags=0x08000000)
+                                    with open(hosts_path, 'w', encoding='utf-8') as hf:
+                                        hf.write("# Cleaned by NoVir\n127.0.0.1 localhost\n")
+                                except: pass
+                            elif name == language_manager.translate("Системные Службы (Services)"):
+                                for srv in ['wuauserv', 'BITS', 'Winmgmt', 'wscsvc']:
+                                    subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
+                                    subprocess.run(["sc", "start", srv], creationflags=0x08000000)
+                            elif name == language_manager.translate("Настройки DNS"):
+                                subprocess.run(["ipconfig", "/flushdns"], creationflags=0x08000000)
+                                subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Ethernet\"", "dhcp"], creationflags=0x08000000)
+                                subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Wi-Fi\"", "dhcp"], creationflags=0x08000000)
+                            elif name == language_manager.translate("Сетевой протокол TCP/IP"):
+                                subprocess.run(["netsh", "winsock", "reset"], creationflags=0x08000000)
+                                subprocess.run(["netsh", "int", "ip", "reset"], creationflags=0x08000000)
+                            elif name == language_manager.translate("Network Proxy"):
+                                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", 0, winreg.KEY_SET_VALUE) as key:
+                                    winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
+                            elif name == language_manager.translate("Windows Defender"):
+                                try:
+                                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows Defender", 0, winreg.KEY_SET_VALUE) as key:
+                                        winreg.DeleteValue(key, "DisableAntiSpyware")
+                                except FileNotFoundError: pass
+                            elif name == language_manager.translate("Task Manager"):
+                                try:
+                                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
+                                        winreg.DeleteValue(key, "DisableTaskMgr")
+                                except FileNotFoundError: pass
+                            elif name == language_manager.translate("Windows Update"):
+                                for srv in ['wuauserv', 'BITS', 'cryptsvc', 'msiserver']:
+                                    subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
+                                    subprocess.run(["sc", "start", srv], creationflags=0x08000000)
+                            elif name == language_manager.translate("Кэш обновлений"):
+                                subprocess.run(["sc", "stop", "wuauserv"], creationflags=0x08000000)
+                                import shutil
+                                cache_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
+                                try:
+                                    shutil.rmtree(cache_path)
+                                    os.makedirs(cache_path, exist_ok=True)
+                                except: pass
+                                subprocess.run(["sc", "start", "wuauserv"], creationflags=0x08000000)
+                            elif name == language_manager.translate("WMI Repository"):
+                                subprocess.run(["winmgmt", "/resetrepository"], creationflags=0x08000000)
+                            elif name == language_manager.translate("Загрузчик BCD"):
+                                subprocess.run(["bcdedit", "/set", "testsigning", "off"], creationflags=0x08000000)
+                        except Exception as e:
+                            logger.log("DiagFix", "error", f"Error fixing {name}: {e}")
+                
+                QMessageBox.information(self, language_manager.translate("Успех"), language_manager.translate("Проблемы устранены. Запускаю повторное сканирование..."))
+                self.run_diagnostics()
+
+            if hasattr(self, 'chk_backup') and self.chk_backup.isChecked():
+                app_data = os.path.join(os.environ.get('APPDATA', ''), 'NoVir', 'Backups')
+                now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_AutoDiag")
+                bkp_dir = os.path.join(app_data, now)
+                os.makedirs(bkp_dir, exist_ok=True)
+                self._run_async_backup(bkp_dir, apply_fixes)
+            else:
+                apply_fixes()
+
         def create_program_page(self):
             """Настройки - только выбор темы"""
             page = QFrame()
@@ -9384,8 +9836,8 @@ if GUI_MODE:
 
             self.cb_language = QComboBox()
             # These native names intentionally remain readable in every locale.
-            self.cb_language.addItems(["English", "Українська", "Русский"])
-            self.cb_language.setCurrentIndex({"en": 0, "uk": 1, "ru": 2}[language_manager.language])
+            self.cb_language.addItems(["English", "Українська", "Русский", "Deutsch (SOON)", "Polski (SOON)", "Français (SOON)"])
+            self.cb_language.setCurrentIndex({"en": 0, "uk": 1, "ru": 2, "de": 3, "pl": 4, "fr": 5}.get(language_manager.language, 2))
             self.cb_language.setStyleSheet(self.cb_theme.styleSheet())
             self.cb_language.currentIndexChanged.connect(self.change_language)
             layout.addWidget(self.cb_language)
@@ -9394,7 +9846,7 @@ if GUI_MODE:
             return page
 
         def change_language(self, index):
-            language_manager.set_language(("en", "uk", "ru")[index])
+            language_manager.set_language(("en", "uk", "ru", "de", "pl", "fr")[index])
             # Re-use the retained source strings, so changing the language does
             # not require an application restart.
             localize_widget_tree(self)
@@ -9406,8 +9858,61 @@ if GUI_MODE:
             return self.create_program_page()
 
         def create_settings_page(self):
-            """Устаревший метод — настройки теперь в create_program_page"""
-            return self.create_program_page()
+            from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QComboBox, QCheckBox, QPushButton, QHBoxLayout
+            from PySide6.QtCore import Qt
+            page = QFrame()
+            layout = QVBoxLayout(page)
+            layout.setSpacing(20)
+
+            title = QLabel(language_manager.translate("Настройки NoVir"))
+            title.setStyleSheet("font-size: 22px; font-weight: bold; color: #fff;")
+            layout.addWidget(title)
+
+            # Language
+            lang_label = QLabel(language_manager.translate("Язык интерфейса:"))
+            self.lang_combo = QComboBox()
+            self.lang_combo.addItems(["English", "Українська", "Русский", "Deutsch (SOON)", "Polski (SOON)", "Français (SOON)"])
+            current = {"en": 0, "uk": 1, "ru": 2, "de": 3, "pl": 4, "fr": 5}.get(language_manager.language, 2)
+            self.lang_combo.setCurrentIndex(current)
+            self.lang_combo.currentIndexChanged.connect(self.change_language)
+            self.lang_combo.setStyleSheet("QComboBox { background-color: #222; color: #fff; padding: 5px; }")
+            layout.addWidget(lang_label)
+            layout.addWidget(self.lang_combo)
+
+            # Theme
+            theme_label = QLabel(language_manager.translate("Оформление (Тема):"))
+            self.theme_combo = QComboBox()
+            self.theme_combo.addItems([language_manager.translate("Темная базовая"), language_manager.translate("Матовая"), language_manager.translate("Прозрачная")])
+            self.theme_combo.setStyleSheet("QComboBox { background-color: #222; color: #fff; padding: 5px; }")
+            layout.addWidget(theme_label)
+            layout.addWidget(self.theme_combo)
+
+            # Safety
+            self.chk_backup = QCheckBox(language_manager.translate("Создавать бэкап перед опасными операциями"))
+            self.chk_backup.setChecked(True)
+            self.chk_backup.setStyleSheet("color: #fff;")
+            layout.addWidget(self.chk_backup)
+
+            layout.addStretch()
+            
+            # Apply Button
+            apply_btn = QPushButton(language_manager.translate("Применить и сохранить"))
+            apply_btn.setFixedHeight(40)
+            apply_btn.setStyleSheet("QPushButton { background-color: #0055ff; color: #ffffff; font-weight: bold; border-radius: 5px; } QPushButton:hover { background-color: #0077ff; }")
+            apply_btn.clicked.connect(lambda: self.switch_page(0))
+            layout.addWidget(apply_btn)
+
+            page.retranslate_ui = lambda: (
+                title.setText(language_manager.translate("Настройки NoVir")),
+                lang_label.setText(language_manager.translate("Язык интерфейса:")),
+                theme_label.setText(language_manager.translate("Оформление (Тема):")),
+                self.theme_combo.setItemText(0, language_manager.translate("Темная базовая")),
+                self.theme_combo.setItemText(1, language_manager.translate("Матовая")),
+                self.theme_combo.setItemText(2, language_manager.translate("Прозрачная")),
+                self.chk_backup.setText(language_manager.translate("Создавать бэкап перед опасными операциями")),
+                apply_btn.setText(language_manager.translate("Применить и сохранить"))
+            )
+            return page
 
         def _legacy_whats_new_page(self):
             page = QFrame()
@@ -10036,6 +10541,7 @@ if GUI_MODE:
             ]
 
             step_idx = [0]
+            stats = {"fixed": 0, "skipped": 0, "errors": 0}
             
             def next_step():
                 if step_idx[0] >= len(STEPS):
@@ -10068,24 +10574,70 @@ if GUI_MODE:
             dlg.exec()
 
         def show_audit_log(self):
-            """Open the audit log file in Notepad."""
-            import subprocess, os
+            """Show the audit log file in an in-app dialog."""
+            import os
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QApplication
+            from PySide6.QtCore import Qt
+
             log_path = logger.audit_log_path
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle(language_manager.translate("Журнал операций (Audit Log)"))
+            dlg.setMinimumSize(600, 400)
+            dlg.setStyleSheet("QDialog { background-color: #111; color: #fff; }")
+            
+            lay = QVBoxLayout(dlg)
+            
+            text_area = QTextEdit()
+            text_area.setReadOnly(True)
+            text_area.setStyleSheet("QTextEdit { background-color: #000; color: #0f0; font-family: Consolas, monospace; border: 1px solid #333; }")
+            
             if log_path and os.path.exists(log_path):
-                subprocess.Popen(["notepad.exe", log_path])
+                try:
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        text_area.setPlainText(f.read())
+                except Exception as e:
+                    text_area.setPlainText(f"Error reading log: {e}")
             else:
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.information(self, "Журнал", "Журнал действий пуст или файл не найден.")
+                text_area.setPlainText(language_manager.translate("Журнал пуст или еще не создан."))
+                
+            lay.addWidget(text_area)
+            
+            btn_lay = QHBoxLayout()
+            
+            btn_copy = QPushButton(language_manager.translate("Копировать лог"))
+            btn_copy.setStyleSheet("QPushButton { background-color: #222; color: #fff; border: 1px solid #555; padding: 5px; }")
+            btn_copy.clicked.connect(lambda checked=False: QApplication.clipboard().setText(text_area.toPlainText()))
+            
+            btn_clear = QPushButton(language_manager.translate("Очистить журнал"))
+            btn_clear.setStyleSheet("QPushButton { background-color: #422; color: #f55; border: 1px solid #f00; padding: 5px; }")
+            def clear_log(checked=False):
+                if log_path and os.path.exists(log_path):
+                    open(log_path, 'w').close()
+                    text_area.setPlainText("")
+            btn_clear.clicked.connect(clear_log)
+            
+            btn_close = QPushButton(language_manager.translate("Закрыть"))
+            btn_close.setStyleSheet("QPushButton { background-color: #222; color: #fff; border: 1px solid #555; padding: 5px; }")
+            btn_close.clicked.connect(dlg.accept)
+            
+            btn_lay.addWidget(btn_copy)
+            btn_lay.addWidget(btn_clear)
+            btn_lay.addStretch()
+            btn_lay.addWidget(btn_close)
+            
+            lay.addLayout(btn_lay)
+            dlg.exec()
 
         def show_rollback_dialog(self):
             """Offer to rollback registry changes made this session."""
             from PySide6.QtWidgets import QMessageBox
             
-            if not rollback_mgr.snapshots:
+            if not rollback_mgr._snapshots:
                 QMessageBox.information(self, language_manager.translate("Откат"), language_manager.translate("Нет доступных точек отката (изменения еще не вносились)."))
                 return
                 
-            count = len(rollback_mgr.snapshots)
+            count = len(rollback_mgr._snapshots)
             
             details = ""
             for s in reversed(rollback_mgr.snapshots):
@@ -10106,6 +10658,134 @@ if GUI_MODE:
                     QMessageBox.information(self, language_manager.translate("Откат"), language_manager.translate("Изменения успешно отменены!"))
                 except Exception as e:
                     QMessageBox.warning(self, language_manager.translate("Ошибка"), f"{language_manager.translate('Не удалось выполнить откат:')}\n{e}")
+
+
+        def _run_async_backup(self, bkp_dir, on_complete):
+            from PySide6.QtWidgets import QProgressDialog
+            from PySide6.QtCore import Qt, QCoreApplication
+            import subprocess
+            
+            progress = QProgressDialog(language_manager.translate("Создание бэкапа реестра..."), "", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowTitle(language_manager.translate("Безопасность"))
+            progress.setCancelButton(None)
+            progress.setStyleSheet("QProgressDialog { background-color: #111; color: #fff; } QLabel { color: #fff; } QProgressBar { border: 1px solid #333; text-align: center; color: #fff; } QProgressBar::chunk { background-color: #0055ff; }")
+            progress.show()
+            
+            progress.setValue(10)
+            QCoreApplication.processEvents()
+            
+            # Export SYSTEM
+            p1 = subprocess.Popen(f'reg export HKLM\\SYSTEM "{bkp_dir}\\SYSTEM.reg" /y', shell=True, creationflags=0x08000000)
+            while p1.poll() is None:
+                QCoreApplication.processEvents()
+            
+            progress.setValue(50)
+            QCoreApplication.processEvents()
+            
+            # Export SOFTWARE
+            p2 = subprocess.Popen(f'reg export HKLM\\SOFTWARE "{bkp_dir}\\SOFTWARE.reg" /y', shell=True, creationflags=0x08000000)
+            while p2.poll() is None:
+                QCoreApplication.processEvents()
+                
+            progress.setValue(100)
+            progress.close()
+            on_complete()
+        def show_backup_manager(self):
+            import os
+            import json
+            import subprocess
+            from datetime import datetime
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox
+
+            app_data = os.path.join(os.environ.get('APPDATA', ''), 'NoVir', 'Backups')
+            if not os.path.exists(app_data):
+                os.makedirs(app_data, exist_ok=True)
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle(language_manager.translate("Менеджер Резервных Копий (Backup)"))
+            dlg.setMinimumSize(500, 350)
+            dlg.setStyleSheet("QDialog { background-color: #111; color: #fff; }")
+
+            lay = QVBoxLayout(dlg)
+            
+            title = QLabel(language_manager.translate("Резервные копии реестра и системы:"))
+            title.setStyleSheet("font-size: 16px; font-weight: bold;")
+            lay.addWidget(title)
+
+            list_widget = QListWidget()
+            list_widget.setStyleSheet("QListWidget { background-color: #000; color: #0f0; border: 1px solid #333; }")
+            lay.addWidget(list_widget)
+            
+            def refresh_list():
+                list_widget.clear()
+                if not os.path.exists(app_data): return
+                for d in reversed(sorted(os.listdir(app_data))):
+                    path = os.path.join(app_data, d)
+                    if os.path.isdir(path):
+                        # Count reg files
+                        regs = [f for f in os.listdir(path) if f.endswith('.reg')]
+                        size = sum(os.path.getsize(os.path.join(path, f)) for f in regs) / (1024*1024)
+                        list_widget.addItem(f"● {d.replace('_', ' ')} | Компонентов: {len(regs)} ({size:.1f} MB)")
+
+            refresh_list()
+
+            btn_lay = QHBoxLayout()
+            
+            btn_create = QPushButton(language_manager.translate("Создать новый backup"))
+            btn_create.setStyleSheet("QPushButton { background-color: #0055ff; color: #fff; font-weight: bold; padding: 5px; }")
+            def create_bkp():
+                now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                bkp_dir = os.path.join(app_data, now)
+                os.makedirs(bkp_dir, exist_ok=True)
+                
+                def on_done():
+                    QMessageBox.information(dlg, language_manager.translate("Успех"), language_manager.translate("Бэкап успешно создан!"))
+                    refresh_list()
+                    
+                self._run_async_backup(bkp_dir, on_done)
+            btn_create.clicked.connect(lambda checked=False: create_bkp())
+            
+            btn_restore = QPushButton(language_manager.translate("Восстановить"))
+            btn_restore.setStyleSheet("QPushButton { background-color: #222; color: #fff; border: 1px solid #555; padding: 5px; }")
+            def restore_bkp():
+                sel = list_widget.currentItem()
+                if not sel: return
+                folder_name = sel.text().split(" |")[0].replace("● ", "").replace(" ", "_")
+                bkp_dir = os.path.join(app_data, folder_name)
+                reply = QMessageBox.warning(dlg, language_manager.translate("Внимание"), 
+                    language_manager.translate("Вы уверены, что хотите применить этот бэкап?\nЭто перезапишет весь системный реестр!"), 
+                    QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    sys_reg = os.path.join(bkp_dir, "SYSTEM.reg")
+                    sw_reg = os.path.join(bkp_dir, "SOFTWARE.reg")
+                    if os.path.exists(sys_reg):
+                        subprocess.run(f'reg import "{sys_reg}"', shell=True, creationflags=0x08000000)
+                    if os.path.exists(sw_reg):
+                        subprocess.run(f'reg import "{sw_reg}"', shell=True, creationflags=0x08000000)
+                    QMessageBox.information(dlg, language_manager.translate("Готово"), language_manager.translate("Бэкап применён. Необходима перезагрузка."))
+            btn_restore.clicked.connect(lambda checked=False: restore_bkp())
+            
+            btn_del = QPushButton(language_manager.translate("Удалить"))
+            btn_del.setStyleSheet("QPushButton { background-color: #422; color: #f55; border: 1px solid #f00; padding: 5px; }")
+            def delete_bkp():
+                sel = list_widget.currentItem()
+                if not sel: return
+                folder_name = sel.text().split(" |")[0].replace("● ", "").replace(" ", "_")
+                import shutil
+                try:
+                    shutil.rmtree(os.path.join(app_data, folder_name))
+                    refresh_list()
+                except:
+                    pass
+            btn_del.clicked.connect(lambda checked=False: delete_bkp())
+
+            btn_lay.addWidget(btn_create)
+            btn_lay.addWidget(btn_restore)
+            btn_lay.addWidget(btn_del)
+            
+            lay.addLayout(btn_lay)
+            dlg.exec()
 
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""

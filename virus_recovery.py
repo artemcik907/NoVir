@@ -266,298 +266,309 @@ class LanguageManager:
     # (English, Ukrainian).  The entries below are complete for the visible
     # navigation, settings, dialogs, controls, tables and status messages.
     TRANSLATIONS = {
-        "Отмена": ("Cancel", "Скасувати"),
-        "ОТМЕНА": ("CANCEL", "СКАСУВАТИ"),
-        "Закрыть": ("Close", "Закрити"),
-        "Готово": ("Done", "Готово"),
-        "Ошибка": ("Error", "Помилка"),
-        "Успех": ("Success", "Успіх"),
-        "Внимание": ("Warning", "Увага"),
-        "Подтверждение": ("Confirmation", "Підтвердження"),
-        "Результат": ("Result", "Результат"),
-        "Нет выбора": ("Nothing selected", "Нічого не вибрано"),
-        "< НАЗАД": ("< BACK", "< НАЗАД"),
-        "АВТОЗАГРУЗКА": ("STARTUP", "АВТОЗАПУСК"),
-        "ПРОВОДНИК": ("EXPLORER", "ПРОВІДНИК"),
-        "СНЯТИЕ ОГРАНИЧЕНИЙ": ("REMOVE RESTRICTIONS", "ЗНЯТТЯ ОБМЕЖЕНЬ"),
-        "ДОП. ВОЗМОЖНОСТИ": ("EXTRA TOOLS", "ДОДАТКОВІ МОЖЛИВОСТІ"),
-        "АНЛОКЕР": ("UNLOCKER", "РОЗБЛОКУВАЛЬНИК"),
-        "НАСТРОЙКИ": ("SETTINGS", "НАЛАШТУВАННЯ"),
-        "ПОДДЕРЖАТЬ АВТОРА": ("SUPPORT THE AUTHOR", "ПІДТРИМАТИ АВТОРА"),
-        "Страна:": ("Country:", "Країна:"),
-        "Украина (грн)": ("Ukraine (UAH)", "Україна (грн)"),
-        "Россия (руб)": ("Russia (RUB)", "Росія (руб)"),
-        "Весь мир (USD/EUR)": ("Worldwide (USD/EUR)", "Увесь світ (USD/EUR)"),
-        "Номер карты ПриватБанк:": ("PrivatBank card number:", "Номер картки ПриватБанк:"),
-        "Нажмите на номер, чтобы скопировать": ("Click the number to copy it", "Натисніть номер, щоб скопіювати"),
-        "Нажмите, чтобы скопировать": ("Click to copy", "Натисніть, щоб скопіювати"),
-        "✓ Номер скопирован!": ("✓ Number copied!", "✓ Номер скопійовано!"),
-        "ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →": ("TRANSFER VIA PRIVATBANK  →", "ПЕРЕКАЗ ЧЕРЕЗ ПРИВАТБАНК  →"),
-        "ПЕРЕЙТИ НА BESTCHANGE  →": ("GO TO BESTCHANGE  →", "ПЕРЕЙТИ ДО BESTCHANGE  →"),
-        "ПЕРЕЙТИ НА PAYSEND  →": ("GO TO PAYSEND  →", "ПЕРЕЙТИ ДО PAYSEND  →"),
-        "Всё идёт напрямую на карту ПриватБанк.":
-            ("All support goes directly to the PrivatBank card.", "Уся підтримка надходить безпосередньо на картку ПриватБанк."),
-        "Всё идёт напрямую на карту ПриватБанк. Спасибо за поддержку!":
-            ("All support goes directly to the PrivatBank card. Thank you!", "Уся підтримка надходить безпосередньо на картку ПриватБанк. Дякуємо!"),
-        "Прямые переводы отключены. Но вы можете перевести деньги со Сбербанка/Тинькофф напрямую на мою карту ПриватБанка через обменники (например, BestChange).":
-            ("Direct transfers are unavailable. You can transfer from Sberbank or Tinkoff to the PrivatBank card through exchangers such as BestChange.", "Прямі перекази недоступні. Ви можете переказати кошти зі Сбербанку або Тінькофф на картку ПриватБанку через обмінники, наприклад BestChange."),
-        "Для переводов из США, Европы и других стран используйте сервисы Paysend, TransferGo или Wise. Отправляйте напрямую на мою карту ПриватБанка.":
-            ("For transfers from the US, Europe and other countries, use Paysend, TransferGo or Wise to send directly to the PrivatBank card.", "Для переказів зі США, Європи та інших країн використовуйте Paysend, TransferGo або Wise, щоб надіслати кошти безпосередньо на картку ПриватБанку."),
-        "ПОЧИНИТЬ ВСЁ": ("FIX ALL", "ВИПРАВИТИ ВСЕ"),
-        "ЖУРНАЛ": ("LOG", "ЖУРНАЛ"),
-        "ОТКАТ": ("ROLLBACK", "ВІДКАТ"),
-        "ОБНОВИТЬ": ("UPDATE", "ОНОВИТИ"),
-        "ТЕМА ОФОРМЛЕНИЯ": ("APPEARANCE", "ТЕМА ОФОРМЛЕННЯ"),
-        "Тёмная тема (Стандартная)": ("Dark Theme (Default)", "Темна тема (Стандартна)"),
-        "МАТОВЫЙ": ("MATTE", "МАТОВА"),
-        "ПРОЗРАЧНЫЙ": ("TRANSPARENT", "ПРОЗОРА"),
-        "Язык интерфейса": ("Interface language", "Мова інтерфейсу"),
-        "Выберите язык": ("Choose language", "Оберіть мову"),
-        "Выберите язык интерфейса. Его можно изменить позже в настройках.":
-            ("Choose the interface language. You can change it later in Settings.",
-             "Оберіть мову інтерфейсу. Її можна змінити пізніше в налаштуваннях."),
-        "Диспетчер задач NoVir": ("NoVir Task Manager", "Диспетчер завдань NoVir"),
-        "Диспетчер задач": ("Task Manager", "Диспетчер завдань"),
-        "Современный контроль процессов, быстрые действия и аккуратный интерфейс в одном окне":
-            ("Modern process control, quick actions and a clean interface in one window",
-             "Сучасний контроль процесів, швидкі дії та охайний інтерфейс в одному вікні"),
-        "Обновить": ("Refresh", "Оновити"),
-        "Заморозить": ("Freeze", "Призупинити"),
-        "Разморозить": ("Resume", "Відновити"),
-        "Убить": ("Kill", "Завершити"),
-        "Заблокировать": ("Block", "Заблокувати"),
-        "Разблокировать": ("Unblock", "Розблокувати"),
-        "Открыть путь": ("Open location", "Відкрити розташування"),
-        "Критичный": ("Critical", "Критичний"),
-        "Некритичный": ("Not critical", "Некритичний"),
-        "Обновить список процессов": ("Refresh process list", "Оновити список процесів"),
-        "Остановить выбранный процесс": ("Suspend selected process", "Призупинити вибраний процес"),
-        "Разрешить работу процесса": ("Resume process execution", "Відновити роботу процесу"),
-        "Принудительно завершить процесс": ("Force-close selected process", "Примусово завершити вибраний процес"),
-        "Заблокировать процесс через IFEO": ("Block process through IFEO", "Заблокувати процес через IFEO"),
-        "Снять IFEO-блокировку": ("Remove IFEO block", "Зняти блокування IFEO"),
-        "Открыть каталог процесса": ("Open process folder", "Відкрити папку процесу"),
-        "Сделать процесс критичным": ("Make process critical", "Зробити процес критичним"),
-        "Снять статус критичности": ("Remove critical status", "Зняти критичний статус"),
-        "Выберите процесс и выполните нужное действие: обновить, заморозить, завершить или заблокировать":
-            ("Select a process, then refresh, freeze, end or block it.",
-             "Виберіть процес, а потім оновіть, призупиніть, завершіть або заблокуйте його."),
-        "Имя": ("Name", "Ім'я"), "Путь": ("Path", "Шлях"),
-        "Пользователь": ("User", "Користувач"), "Угроза": ("Threat", "Загроза"),
-        "Тип": ("Type", "Тип"), "Значение": ("Value", "Значення"),
-        "Параметр": ("Entry", "Параметр"), "Файл": ("File", "Файл"),
-        "Расположение": ("Location", "Розташування"), "Состояние": ("Status", "Стан"),
-        "Служба": ("Service", "Служба"), "Диск": ("Drive", "Диск"),
-        "Размер": ("Size", "Розмір"), "Используется": ("Used", "Використано"),
-        "Мой компьютер": ("This PC", "Цей комп'ютер"),
-        "Компьютер": ("This PC", "Цей комп'ютер"),
-        "Назад": ("Back", "Назад"),
-        "Обновить список": ("Refresh list", "Оновити список"),
-        "Атрибуты": ("Attributes", "Атрибути"),
-        "Локальный диск": ("Local disk", "Локальний диск"),
-        "Папка": ("Folder", "Папка"),
-        "Открыть": ("Open", "Відкрити"),
-        "Разблокировать (Unlocker)": ("Unlock (Unlocker)", "Розблокувати (Unlocker)"),
-        "Стать владельцем (Take Ownership)": ("Take ownership", "Стати власником"),
-        "Удалить принудительно (Force Delete)": ("Force delete", "Примусово видалити"),
-        "Неверный путь": ("Invalid path", "Неправильний шлях"),
-        "Нет доступа:": ("Access denied:", "Немає доступу:"),
-        "Разблокировка": ("Unlock", "Розблокування"),
-        "Файл разблокирован!": ("File unlocked!", "Файл розблоковано!"),
-        "Не удалось разблокировать или файл не заблокирован.": ("Unable to unlock the file, or it is not locked.", "Не вдалося розблокувати файл або він не заблокований."),
-        "Модуль novir_native недоступен.": ("The novir_native module is unavailable.", "Модуль novir_native недоступний."),
-        "Владелец": ("Owner", "Власник"),
-        "Права получены!": ("Permissions obtained!", "Права отримано!"),
-        "Не удалось получить права.": ("Unable to obtain permissions.", "Не вдалося отримати права."),
-        "Удаление": ("Deletion", "Видалення"),
-        "Удалить безвозвратно?": ("Delete permanently?", "Видалити безповоротно?"),
-        "Удаление заблокировано": ("Deletion blocked", "Видалення заблоковано"),
-        "Путь не прошел проверку безопасности.": ("The path did not pass the safety check.", "Шлях не пройшов перевірку безпеки."),
-        "Редактор реестра": ("Registry Editor", "Редактор реєстру"),
-        "Пользователи": ("Users", "Користувачі"),
-        "Создание нового пользователя": ("Create a new user", "Створення нового користувача"),
-        "Имя пользователя:": ("User name:", "Ім'я користувача:"),
-        "Пароль:": ("Password:", "Пароль:"),
-        "С правами администратора": ("Administrator privileges", "З правами адміністратора"),
-        "Создать\nпользователя": ("Create\nuser", "Створити\nкористувача"),
-        "Требовать нажатие CTRL+ALT+DEL при входе":
-            ("Require CTRL+ALT+DEL at sign-in", "Вимагати CTRL+ALT+DEL під час входу"),
-        "Удаление дисков": ("Drive removal", "Видалення дисків"),
-        "Диски": ("Drives", "Диски"), "Удалить диск": ("Remove drive", "Видалити диск"),
-        "Снятие ограничений": ("Remove restrictions", "Зняття обмежень"),
-        "Интерфейс": ("Interface", "Інтерфейс"), "Система": ("System", "Система"),
-        "Запуск утилит": ("Run utilities", "Запуск утиліт"), "Клавиатура": ("Keyboard", "Клавіатура"),
-        "Очистка": ("Cleanup", "Очищення"), "Продвинутое": ("Advanced", "Розширене"),
-        "Безопасность": ("Security", "Безпека"), "Хардкор (Трояны)": ("Hardcore (Trojans)", "Хардкор (Трояни)"),
-        "☑ Выбрать всё": ("☑ Select all", "☑ Вибрати все"),
-        "☐ Снять всё": ("☐ Clear all", "☐ Зняти все"),
-        "✓ Подтвердить выбранное": ("✓ Apply selected", "✓ Застосувати вибране"),
-        "Дополнительные инструменты": ("Additional tools", "Додаткові інструменти"),
-        "Сканер ограничений системы": ("System restriction scanner", "Сканер системних обмежень"),
-        "Находит активные блокировки (реестр, групповые политики, системные ключи)":
-            ("Finds active blocks in the registry, group policies and system keys",
-             "Знаходить активні блокування в реєстрі, групових політиках і системних ключах"),
-        "Сканировать": ("Scan", "Сканувати"),
-        "Снять выбранные": ("Remove selected", "Зняти вибрані"),
-        "Снять всё": ("Remove all", "Зняти все"),
-        "Нажмите «Сканировать» для поиска ограничений":
-            ("Click “Scan” to look for restrictions", "Натисніть «Сканувати», щоб знайти обмеження"),
-        "Встроенные утилиты": ("Built-in utilities", "Вбудовані утиліти"),
-        "Запустить": ("Run", "Запустити"), "Остановить": ("Stop", "Зупинити"),
-        "Перезапустить": ("Restart", "Перезапустити"), "Отключить": ("Disable", "Вимкнути"),
-        "Включить": ("Enable", "Увімкнути"), "Добавить": ("Add", "Додати"),
-        "Удалить": ("Delete", "Видалити"), "Изменить": ("Edit", "Змінити"),
-        "Сохранить": ("Save", "Зберегти"), "Обзор...": ("Browse...", "Огляд..."),
-        "Открыть файл": ("Open file", "Відкрити файл"), "Копировать путь": ("Copy path", "Копіювати шлях"),
-        "Копировать значение": ("Copy value", "Копіювати значення"),
-        "Разблокировка файлов (Unlocker)": ("File Unlocker", "Розблокування файлів"),
-        "Выберите заблокированный файл. Программа найдет процессы, которые его удерживают, и позволит их завершить.":
-            ("Select a locked file. The app will find the processes holding it and let you end them.",
-             "Виберіть заблокований файл. Програма знайде процеси, які його утримують, і дозволить їх завершити."),
-        "Анализ файла": ("Analyze file", "Аналіз файлу"),
-        "Разблокировать (Убить процессы)": ("Unlock (end processes)", "Розблокувати (завершити процеси)"),
-        "Уничтожить (Убить + Удалить файл)": ("Destroy (end + delete file)", "Знищити (завершити + видалити файл)"),
-        "Выберите файл:": ("Select a file:", "Виберіть файл:"),
-        "Папка автозагрузки:": ("Startup folder:", "Папка автозапуску:"),
-        "Путь к программе:": ("Program path:", "Шлях до програми:"),
-        "Имя задачи:": ("Task name:", "Ім'я завдання:"),
-        "Триггер:": ("Trigger:", "Тригер:"),
-        "Создать задачу": ("Create task", "Створити завдання"),
-        "Планировщик задач": ("Task Scheduler", "Планувальник завдань"),
-        "Все задачи": ("All tasks", "Усі завдання"),
-        "Только пользовательские": ("User tasks only", "Лише користувацькі"),
-        "Только подозрительные": ("Suspicious only", "Лише підозрілі"),
-        "Папка автозагрузки": ("Startup folder", "Папка автозапуску"),
-        "Реестр": ("Registry", "Реєстр"),
-        "Добавить файл": ("Add file", "Додати файл"), "Открыть папку": ("Open folder", "Відкрити папку"),
-        "▶ Запустить": ("▶ Run", "▶ Запустити"), "⏸ Отключить": ("⏸ Disable", "⏸ Вимкнути"),
-        "✓ Включить": ("✓ Enable", "✓ Увімкнути"), "↻ Обновить": ("↻ Refresh", "↻ Оновити"),
-        "Выберите запись для удаления": ("Select an entry to delete", "Виберіть запис для видалення"),
-        "Выберите запись для редактирования": ("Select an entry to edit", "Виберіть запис для редагування"),
-        "Выберите файл для удаления": ("Select a file to delete", "Виберіть файл для видалення"),
-        "Выберите задачу для удаления": ("Select a task to delete", "Виберіть завдання для видалення"),
-        "Выберите задачу для запуска": ("Select a task to run", "Виберіть завдання для запуску"),
-        "Выберите задачу для отключения": ("Select a task to disable", "Виберіть завдання для вимкнення"),
-        "Выберите задачу для включения": ("Select a task to enable", "Виберіть завдання для увімкнення"),
-        "Выберите службу для запуска": ("Select a service to start", "Виберіть службу для запуску"),
-        "Выберите службу для остановки": ("Select a service to stop", "Виберіть службу для зупинки"),
-        "Выберите службу для перезапуска": ("Select a service to restart", "Виберіть службу для перезапуску"),
-        "Отметьте хотя бы одно действие для выполнения.":
-            ("Select at least one action to run.", "Позначте принаймні одну дію для виконання."),
-        "Выполнить": ("Run", "Виконати"), "выбранных действий?": ("selected actions?", "вибраних дій?"),
-        "Что заблокировано": ("What is blocked", "Що заблоковано"),
-        "Ключ реестра / GPO": ("Registry key / GPO", "Ключ реєстру / GPO"),
-        "Статус": ("Status", "Статус"),
-        "Ограничений не найдено!": ("No restrictions found!", "Обмежень не знайдено!"),
-        "Найдено": ("Found", "Знайдено"), "блокировок": ("blocks", "блокувань"),
-        "Не выбрано ни одного ограничения.": ("No restrictions selected.", "Не вибрано жодного обмеження."),
-        "Продолжить?": ("Continue?", "Продовжити?"),
-        "Информация о системе": ("System information", "Відомості про систему"),
-        "Перезапуск Explorer": ("Restart Explorer", "Перезапуск Провідника"),
-        "Обновление": ("Update", "Оновлення"),
-        "Релиз GitHub": ("GitHub release", "Реліз GitHub"),
-        "Выберите что скачать:": ("Choose what to download:", "Оберіть, що завантажити:"),
-        "Выберите версию для загрузки:": ("Choose a version to download:", "Оберіть версію для завантаження:"),
-        "Скачать Installer": ("Download installer", "Завантажити інсталятор"),
-        "Скачать Portable (.exe)": ("Download portable (.exe)", "Завантажити портативну версію (.exe)"),
-        "Запуск комплексного восстановления...": ("Starting full recovery...", "Запуск комплексного відновлення..."),
-        "Подготовка...": ("Preparing...", "Підготовка..."),
-        "NoVir — Починить всё": ("NoVir — Fix all", "NoVir — Виправити все"),
-        "Шаг": ("Step", "Крок"),
-        "выполнено": ("completed", "виконано"),
-        "ПРОПУСК:": ("SKIPPED:", "ПРОПУЩЕНО:"),
-        "Снятие блокировки реестра": ("Remove Registry Editor block", "Зняття блокування редактора реєстру"),
-        "Снятие блокировки диспетчера": ("Remove Task Manager block", "Зняття блокування диспетчера завдань"),
-        "Восстановление ярлыков": ("Restore shortcuts", "Відновлення ярликів"),
-        "Сброс ассоциаций файлов": ("Reset file associations", "Скидання асоціацій файлів"),
-        "Очистка автозапуска": ("Clean startup", "Очищення автозапуску"),
-        "Готово!": ("Done!", "Готово!"),
-        "↩ Откат изменений": ("↩ Roll back changes", "↩ Відкотити зміни"),
-        "ОТКАТИТЬ": ("ROLL BACK", "ВІДКОТИТИ"),
-        "Журнал действий пуст или файл не найден.":
-            ("The action log is empty or the file was not found.", "Журнал дій порожній або файл не знайдено."),
-        "Нечего откатывать: изменений реестра в этой сессии не зафиксировано.":
-            ("Nothing to roll back: no registry changes were recorded in this session.",
-             "Немає чого відкотити: у цій сесії не зафіксовано змін реєстру."),
-        "Данный модуль запускается как отдельное окно утилиты и работает в едином стиле приложения.":
-            ("This module opens in its own utility window and uses the same application style.",
-             "Цей модуль відкривається в окремому вікні утиліти та використовує єдиний стиль програми."),
-        "Добавить запись в реестр": ("Add registry entry", "Додати запис до реєстру"),
-        "Изменить запись в реестре": ("Edit registry entry", "Змінити запис у реєстрі"),
-        "Раздел реестра:": ("Registry hive:", "Розділ реєстру:"),
-        "Текущий пользователь": ("Current user", "Поточний користувач"),
-        "Все пользователи": ("All users", "Усі користувачі"),
-        "Добавить файл в автозагрузку": ("Add startup file", "Додати файл до автозапуску"),
-        "Создать задачу в планировщике": ("Create scheduled task", "Створити завдання в планувальнику"),
-        "При входе в систему": ("At sign-in", "Під час входу до системи"),
-        "При запуске системы": ("At system startup", "Під час запуску системи"),
-        "Ежедневно": ("Daily", "Щодня"),
-        "Принудительно перезагрузить список задач из системы":
-            ("Force-reload the task list from the system", "Примусово перезавантажити список завдань із системи"),
-        "Меню служб": ("Services menu", "Меню служб"),
-        "Загрузка задач планировщика...": ("Loading scheduled tasks...", "Завантаження завдань планувальника..."),
-        "Открывает собственный редактор реестра в стиле системного окна.":
-            ("Opens NoVir's built-in registry editor in a system-window style.",
-             "Відкриває вбудований редактор реєстру NoVir у стилі системного вікна."),
-        "Открывает отдельное окно восстановления загрузчика MBR/BCD.":
-            ("Opens a separate MBR/BCD bootloader recovery window.",
-             "Відкриває окреме вікно відновлення завантажувача MBR/BCD."),
-        "Открывает собственный менеджер учетных записей.":
-            ("Opens the built-in account manager.", "Відкриває вбудований менеджер облікових записів."),
-        "Открывает отдельное окно управления дисками и разделами.":
-            ("Opens a separate window for managing disks and partitions.",
-             "Відкриває окреме вікно керування дисками та розділами."),
-        "Открывает окно управления учетными записями и паролями.":
-            ("Opens the account and password management window.",
-             "Відкриває вікно керування обліковими записами та паролями."),
-        "Восстанавливает загрузочный сектор и конфигурацию загрузчика Windows.":
-            ("Restores the Windows boot sector and bootloader configuration.",
-             "Відновлює завантажувальний сектор і конфігурацію завантажувача Windows."),
-        "Запустить восстановление": ("Start recovery", "Запустити відновлення"),
-        "Введите имя пользователя.": ("Enter a user name.", "Введіть ім'я користувача."),
-        "В выбранных действиях есть операции повышенного риска. Они могут удалить данные, перезапустить службы или изменить системные настройки.\n\n":
-            ("The selected actions include high-risk operations. They can delete data, restart services or change system settings.\n\n",
-             "Серед вибраних дій є операції підвищеного ризику. Вони можуть видалити дані, перезапустити служби або змінити системні налаштування.\n\n"),
-        "Диск успешно удалён из списка отображения.":
-            ("The drive was removed from the display list.", "Диск успішно видалено зі списку відображення."),
-        "Заполните все поля": ("Fill in all fields", "Заповніть усі поля"),
-        "Запись добавлена в реестр": ("Registry entry added", "Запис додано до реєстру"),
-        "Запись удалена из реестра": ("Registry entry deleted", "Запис видалено з реєстру"),
-        "Запись обновлена в реестре": ("Registry entry updated", "Запис оновлено в реєстрі"),
-        "Выберите существующий файл": ("Choose an existing file", "Виберіть наявний файл"),
-        "Файл добавлен в автозагрузку": ("File added to startup", "Файл додано до автозапуску"),
-        "Файл удален из автозагрузки": ("File removed from startup", "Файл видалено з автозапуску"),
-        "Файл не найден": ("File not found", "Файл не знайдено"),
-        "Задача создана в планировщике": ("Task created in Task Scheduler", "Завдання створено в планувальнику"),
-        "Задача удалена из планировщика": ("Task deleted from Task Scheduler", "Завдання видалено з планувальника"),
-        "Задача запущена": ("Task started", "Завдання запущено"),
-        "Задача отключена": ("Task disabled", "Завдання вимкнено"),
-        "Задача включена": ("Task enabled", "Завдання увімкнено"),
-        "Служба запущена": ("Service started", "Службу запущено"),
-        "Служба остановлена": ("Service stopped", "Службу зупинено"),
-        "Служба перезапущена": ("Service restarted", "Службу перезапущено"),
-        "Укажите правильный путь к существующему файлу.":
-            ("Provide a valid path to an existing file.", "Укажіть правильний шлях до наявного файлу."),
-        "Не найдено процессов, блокирующих этот файл.\n(Возможно, он не заблокирован или заблокирован ядром).":
-            ("No processes locking this file were found.\n(It may be unlocked or locked by the kernel.)",
-             "Не знайдено процесів, які блокують цей файл.\n(Можливо, він не заблокований або заблокований ядром.)"),
-        "Сначала проведите анализ файла.": ("Analyze the file first.", "Спочатку проаналізуйте файл."),
-        "Файл успешно удален!": ("File deleted successfully!", "Файл успішно видалено!"),
-        "Рабочий стол и панель задач на секунду исчезнут.\nПерезапустить explorer.exe?":
-            ("The desktop and taskbar will disappear briefly.\nRestart explorer.exe?",
-             "Робочий стіл і панель завдань на мить зникнуть.\nПерезапустити explorer.exe?"),
-        "Explorer перезапущен!": ("Explorer restarted!", "Провідник перезапущено!"),
-        "Отчёт автозагрузки": ("Startup report", "Звіт автозапуску"),
-        "Сетевые порты": ("Network ports", "Мережеві порти"),
-        "Открытые порты (LISTENING):": ("Open ports (LISTENING):", "Відкриті порти (LISTENING):"),
-        "Активные соединения (ESTABLISHED):": ("Active connections (ESTABLISHED):", "Активні з'єднання (ESTABLISHED):"),
-        "Задача выполнена.": ("Task completed.", "Завдання виконано."),
-        "На GitHub пока нет опубликованных релизов.":
-            ("There are no published GitHub releases yet.", "На GitHub ще немає опублікованих релізів."),
-        "Готово! Все безопасные исправления применены.":
-            ("Done! All safe fixes have been applied.", "Готово! Усі безпечні виправлення застосовано."),
-        "Рекомендуется перезагрузить компьютер.":
-            ("Restarting the computer is recommended.", "Рекомендується перезавантажити комп'ютер."),
+        'Отмена': ('Cancel', 'Скасувати', 'Stornieren', 'Anulować', 'Annuler'),
+        'ОТМЕНА': ('CANCEL', 'СКАСУВАТИ', 'STORNIERUNG', 'ANULOWANIE', 'ANNULATION'),
+        'Закрыть': ('Close', 'Закрити', 'Schließen', 'Zamknąć', 'Fermer'),
+        'Готово': ('Done', 'Готово', 'Bereit', 'Gotowy', 'Prêt'),
+        'Ошибка': ('Error', 'Помилка', 'Fehler', 'Błąd', 'Erreur'),
+        'Успех': ('Success', 'Успіх', 'Erfolg', 'Sukces', 'Succès'),
+        'Внимание': ('Warning', 'Увага', 'Aufmerksamkeit', 'Uwaga', 'Attention'),
+        'Подтверждение': ('Confirmation', 'Підтвердження', 'Bestätigung', 'Potwierdzenie', 'Confirmation'),
+        'Результат': ('Result', 'Результат', 'Ergebnis', 'Wynik', 'Résultat'),
+        'Нет выбора': ('Nothing selected', 'Нічого не вибрано', 'Keine Wahl', 'Nie ma wyboru', 'Pas le choix'),
+        '< НАЗАД': ('< BACK', '< НАЗАД', '< ZURÜCK', '< POWRÓT', '< RETOUR'),
+        'АВТОЗАГРУЗКА': ('STARTUP', 'АВТОЗАПУСК', 'AUTOLOAD', 'AUTOŁADOWANIE', 'CHARGEMENT AUTOMATIQUE'),
+        'ПРОВОДНИК': ('EXPLORER', 'ПРОВІДНИК', 'LEITER', 'DYRYGENT', 'CONDUCTEUR'),
+        'СНЯТИЕ ОГРАНИЧЕНИЙ': ('REMOVE RESTRICTIONS', 'ЗНЯТТЯ ОБМЕЖЕНЬ', 'EINSCHRÄNKUNGEN ENTFERNEN', 'USUWANIE OGRANICZEŃ', 'SUPPRESSION DES RESTRICTIONS'),
+        'ДОП. ВОЗМОЖНОСТИ': ('EXTRA TOOLS', 'ДОДАТКОВІ МОЖЛИВОСТІ', 'ZUSÄTZLICHE MÖGLICHKEITEN', 'DODATKOWE MOŻLIWOŚCI', 'POSSIBILITÉS SUPPLÉMENTAIRES'),
+        'АНЛОКЕР': ('UNLOCKER', 'РОЗБЛОКУВАЛЬНИК', 'UNLOCKER', 'ODBLOKOWANIE', 'DÉBLOQUEUR'),
+        'НАСТРОЙКИ': ('SETTINGS', 'НАЛАШТУВАННЯ', 'EINSTELLUNGEN', 'USTAWIENIA', 'PARAMÈTRES'),
+        'УМНАЯ ДИАГНОСТИКА': ('SMART DIAGNOSTICS', 'РОЗУМНА ДІАГНОСТИКА', 'SMART DIAGNOSE', 'INTELIGENTNA DIAGNOSTYKA', 'DIAGNOSTIC INTELLIGENT'),
+        'БЭКАПЫ': ('BACKUPS', 'БЕКАПИ', 'BACKUPS', 'KOPIE ZAPASOWE', 'SAUVEGARDES'),
+        'ПОДДЕРЖАТЬ АВТОРА': ('SUPPORT THE AUTHOR', 'ПІДТРИМАТИ АВТОРА', 'UNTERSTÜTZEN SIE DEN AUTOR', 'WSPIERAJ AUTORA', "SOUTENEZ L'AUTEUR"),
+        'Менеджер Резервных Копий (Backup)': ('Backup Manager', 'Менеджер Резервних Копій (Backup)', 'Backup-Manager', 'Menedżer kopii zapasowych', 'Gestionnaire de sauvegardes'),
+        'Резервные копии реестра и системы:': ('Registry and system backups:', 'Резервні копії реєстру та системи:', 'Registrierungs- und Systemsicherungen:', 'Kopie zapasowe rejestru i systemu:', 'Sauvegardes du registre et du système :'),
+        'Компонентов:': ('Components:', 'Компонентів:', 'Komponenten:', 'Komponenty:', 'Composants:'),
+        'СОЗДАТЬ НОВЫЙ BACKUP': ('CREATE NEW BACKUP', 'СТВОРИТИ НОВИЙ BACKUP', 'NEUES BACKUP ERSTELLEN', 'UTWÓRZ NOWĄ KOPIĘ ZAPASOWĄ', 'CRÉER UNE NOUVELLE SAUVEGARDE'),
+        'ВОССТАНОВИТЬ': ('RESTORE', 'ВІДНОВИТИ', 'WIEDERHERSTELLEN', 'PRZYWRÓĆ', 'RESTAURER'),
+        'Центр диагностики системы': ('System Diagnostics Center', 'Центр діагностики системи', 'Systemdiagnosezentrum', 'Centrum diagnostyki systemu', 'Centre de diagnostic du système'),
+        'Умное сканирование узлов ОС на предмет скрытых повреждений.': ('Smart scanning of OS nodes for hidden damage.', 'Розумне сканування вузлів ОС на предмет прихованих пошкоджень.', 'Intelligentes Scannen von Betriebssystemknoten auf versteckte Schäden.', 'Inteligentne skanowanie węzłów systemu operacyjnego w poszukiwaniu ukrytych uszkodzeń.', 'Analyse intelligente des nœuds du système d\'exploitation pour détecter les dommages cachés.'),
+        'Компонент': ('COMPONENT', 'КОМПОНЕНТ', 'KOMPONENTE', 'KOMPONENT', 'COMPOSANT'),
+        'Детали': ('DETAILS', 'ДЕТАЛІ', 'DETAILS', 'SZCZEGÓŁY', 'DÉTAILS'),
+        'Запустить сканирование': ('START SCANNING', 'ЗАПУСТИТИ СКАНУВАННЯ', 'SCAN STARTEN', 'ROZPOCZNIJ SKANOWANIE', 'LANCER L\'ANALYSE'),
+        'Исправить найденное': ('FIX FOUND ISSUES', 'ВИПРАВИТИ ЗНАЙДЕНЕ', 'GEFUNDENE PROBLEME BEHEBEN', 'NAPRAW ZNALEZIONE', 'RÉPARER CE QUI A ÉTÉ TROUVÉ'),
+        'Страна:': ('Country:', 'Країна:', 'Land:', 'Kraj:', 'Pays:'),
+        'Командная строка': ('Command Prompt', 'Командний рядок', 'Eingabeaufforderung', 'Wiersz polecenia', 'Invite de commande'),
+        'Открывает встроенный эмулятор командной строки (CMD).': ('Opens a built-in Command Prompt (CMD) emulator.', 'Відкриває вбудований емулятор командного рядка (CMD).', 'Öffnet einen integrierten Eingabeaufforderungs-Emulator (CMD).', 'Otwiera wbudowany emulator wiersza poleceń (CMD).', 'Ouvre un émulateur d\'invite de commande intégré (CMD).'),
+        'Командная строка NoVir': ('NoVir Command Prompt', 'Командний рядок NoVir', 'NoVir Eingabeaufforderung', 'Wiersz polecenia NoVir', 'Invite de commande NoVir'),
+        'Украина (грн)': ('Ukraine (UAH)', 'Україна (грн)', 'Ukraine (UAH)', 'Ukraina (UAH)', 'Ukraine (UAH)'),
+        'Россия (руб)': ('Russia (RUB)', 'Росія (руб)', 'Russland (reiben)', 'Rosja (pocierać)', 'Russie (frotter)'),
+        'Весь мир (USD/EUR)': ('Worldwide (USD/EUR)', 'Увесь світ (USD/EUR)', 'Ganze Welt (USD/EUR)', 'Cały świat (USD/EUR)', 'Monde entier (USD/EUR)'),
+        'Номер карты ПриватБанк:': ('PrivatBank card number:', 'Номер картки ПриватБанк:', 'PrivatBank-Kartennummer:', 'Numer karty PrivatBanku:', 'Numéro de carte PrivatBank\xa0:'),
+        'Нажмите на номер, чтобы скопировать': ('Click the number to copy it', 'Натисніть номер, щоб скопіювати', 'Klicken Sie auf die Nummer, um sie zu kopieren', 'Kliknij numer, który chcesz skopiować', 'Cliquez sur le numéro à copier'),
+        'Нажмите, чтобы скопировать': ('Click to copy', 'Натисніть, щоб скопіювати', 'Klicken Sie zum Kopieren', 'Kliknij, aby skopiować', 'Cliquez pour copier'),
+        '✓ Номер скопирован!': ('✓ Number copied!', '✓ Номер скопійовано!', '✓ Nummer kopiert!', '✓ Numer skopiowany!', '✓ Numéro copié !'),
+        'ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →': ('TRANSFER VIA PRIVATBANK  →', 'ПЕРЕКАЗ ЧЕРЕЗ ПРИВАТБАНК  →', 'ÜBERTRAGUNG DURCH PRIVATBANK →', 'PRZELEW PRZEZ PRIVATBANK →', 'TRANSFERT VIA BANQUE PRIVÉE →'),
+        'ПЕРЕЙТИ НА BESTCHANGE  →': ('GO TO BESTCHANGE  →', 'ПЕРЕЙТИ ДО BESTCHANGE  →', 'GEHE ZU BESTCHANGE →', 'PRZEJDŹ DO NAJLEPSZEJ ZMIANY →', 'ALLER À BESTCHANGE →'),
+        'ПЕРЕЙТИ НА PAYSEND  →': ('GO TO PAYSEND  →', 'ПЕРЕЙТИ ДО PAYSEND  →', 'GEHE ZU ZAHLUNGSENDE →', 'PRZEJDŹ DO PAYSEND →', 'ALLER À PAYSEND →'),
+        'Всё идёт напрямую на карту ПриватБанк.': ('All support goes directly to the PrivatBank card.', 'Уся підтримка надходить безпосередньо на картку ПриватБанк.', 'Alles geht direkt auf die PrivatBank-Karte.', 'Wszystko trafia bezpośrednio na kartę PrivatBank.', 'Tout va directement sur la carte PrivatBank.'),
+        'Всё идёт напрямую на карту ПриватБанк. Спасибо за поддержку!': ('All support goes directly to the PrivatBank card. Thank you!', 'Уся підтримка надходить безпосередньо на картку ПриватБанк. Дякуємо!', 'Alles geht direkt auf die PrivatBank-Karte. Danke für die Unterstützung!', 'Wszystko trafia bezpośrednio na kartę PrivatBank. Dziękuję za wsparcie!', 'Tout va directement sur la carte PrivatBank. Merci pour votre soutien\xa0!'),
+        'Прямые переводы отключены. Но вы можете перевести деньги со Сбербанка/Тинькофф напрямую на мою карту ПриватБанка через обменники (например, BestChange).': ('Direct transfers are unavailable. You can transfer from Sberbank or Tinkoff to the PrivatBank card through exchangers such as BestChange.', 'Прямі перекази недоступні. Ви можете переказати кошти зі Сбербанку або Тінькофф на картку ПриватБанку через обмінники, наприклад BestChange.', 'Direktübertragungen sind deaktiviert. Aber Sie können Geld von Sberbank/Tinkoff über Geldwechsler (z. B. BestChange) direkt auf meine PrivatBank-Karte überweisen.', 'Transfery bezpośrednie są wyłączone. Ale możesz przelać pieniądze z Sberbank/Tinkoff bezpośrednio na moją kartę PrivatBank za pośrednictwem wymienników (na przykład BestChange).', "Les transferts directs sont désactivés. Mais vous pouvez transférer de l'argent de Sberbank/Tinkoff directement vers ma carte PrivatBank via des échangeurs (par exemple, BestChange)."),
+        'Для переводов из США, Европы и других стран используйте сервисы Paysend, TransferGo или Wise. Отправляйте напрямую на мою карту ПриватБанка.': ('For transfers from the US, Europe and other countries, use Paysend, TransferGo or Wise to send directly to the PrivatBank card.', 'Для переказів зі США, Європи та інших країн використовуйте Paysend, TransferGo або Wise, щоб надіслати кошти безпосередньо на картку ПриватБанку.', 'Für Überweisungen aus den USA, Europa und anderen Ländern nutzen Sie die Dienste Paysend, TransferGo oder Wise. Direkt an meine PrivatBank-Karte senden.', 'W przypadku przelewów z USA, Europy i innych krajów skorzystaj z usług Paysend, TransferGo lub Wise. Wyślij bezpośrednio na moją kartę PrivatBank.', "Pour les transferts depuis les États-Unis, l'Europe et d'autres pays, utilisez les services Paysend, TransferGo ou Wise. Envoyez directement sur ma carte PrivatBank."),
+        'ПОЧИНИТЬ ВСЁ': ('FIX ALL', 'ВИПРАВИТИ ВСЕ', 'ALLES REPARIEREN', 'NAPRAW WSZYSTKO', 'RÉPARER TOUT'),
+        'ЖУРНАЛ': ('LOG', 'ЖУРНАЛ', 'MAGAZIN', 'MAGAZYN', 'REVUE'),
+        'ОТКАТ': ('ROLLBACK', 'ВІДКАТ', 'ABRUFEN', 'PRZYPOMNIENIE SOBIE CZEGOŚ', 'RAPPEL'),
+        'ОБНОВИТЬ': ('UPDATE', 'ОНОВИТИ', 'AKTUALISIEREN', 'AKTUALIZACJA', 'MISE À JOUR'),
+        'ТЕМА ОФОРМЛЕНИЯ': ('APPEARANCE', 'ТЕМА ОФОРМЛЕННЯ', 'THEMA', 'TEMAT', 'THÈME'),
+        'Тёмная тема (Стандартная)': ('Dark Theme (Default)', 'Темна тема (Стандартна)', 'Dunkles Thema (Standard)', 'Ciemny motyw (standardowy)', 'Thème sombre (standard)'),
+        'МАТОВЫЙ': ('MATTE', 'МАТОВА', 'MATT', 'MATOWY', 'MAT'),
+        'ПРОЗРАЧНЫЙ': ('TRANSPARENT', 'ПРОЗОРА', 'TRANSPARENT', 'PRZEZROCZYSTY', 'TRANSPARENT'),
+        'Язык интерфейса': ('Interface language', 'Мова інтерфейсу', 'Schnittstellensprache', 'Język interfejsu', "Langue de l'interface"),
+        'Выберите язык': ('Choose language', 'Оберіть мову', 'Sprache auswählen', 'Wybierz język', 'Sélectionnez la langue'),
+        'Выберите язык интерфейса. Его можно изменить позже в настройках.': ('Choose the interface language. You can change it later in Settings.', 'Оберіть мову інтерфейсу. Її можна змінити пізніше в налаштуваннях.', 'Wählen Sie die Sprache der Benutzeroberfläche aus. Es kann später in den Einstellungen geändert werden.', 'Wybierz język interfejsu. Można to później zmienić w ustawieniach.', "Sélectionnez la langue de l'interface. Il pourra être modifié ultérieurement dans les paramètres."),
+        'Диспетчер задач NoVir': ('NoVir Task Manager', 'Диспетчер завдань NoVir', 'NoVir Task-Manager', 'Menedżer zadań NoVir', 'Gestionnaire de tâches NoVir'),
+        'Диспетчер задач': ('Task Manager', 'Диспетчер завдань', 'Task-Manager', 'Menedżer zadań', 'Gestionnaire de tâches'),
+        'Современный контроль процессов, быстрые действия и аккуратный интерфейс в одном окне': ('Modern process control, quick actions and a clean interface in one window', 'Сучасний контроль процесів, швидкі дії та охайний інтерфейс в одному вікні', 'Moderne Prozesssteuerung, schnelle Aktionen und übersichtliche Oberfläche in einem Fenster', 'Nowoczesna kontrola procesu, szybkie działania i schludny interfejs w jednym oknie', 'Contrôle de processus moderne, actions rapides et interface soignée dans une seule fenêtre'),
+        'Обновить': ('Refresh', 'Оновити', 'Aktualisieren', 'Aktualizacja', 'Mise à jour'),
+        'Заморозить': ('Freeze', 'Призупинити', 'Einfrieren', 'Zamrażać', 'Geler'),
+        'Разморозить': ('Resume', 'Відновити', 'Auftauen', 'Rozmrażać', 'Décongeler'),
+        'Убить': ('Kill', 'Завершити', 'Töten', 'Zabić', 'Tuer'),
+        'Заблокировать': ('Block', 'Заблокувати', 'Block', 'Blok', 'Bloc'),
+        'Разблокировать': ('Unblock', 'Розблокувати', 'Entsperren', 'Odblokować', 'Débloquer'),
+        'Открыть путь': ('Open location', 'Відкрити розташування', 'Öffne den Weg', 'Otwórz drogę', 'Ouvrir la voie'),
+        'Критичный': ('Critical', 'Критичний', 'Kritisch', 'Krytyczny', 'Critique'),
+        'Некритичный': ('Not critical', 'Некритичний', 'Unkritisch', 'Bezkrytyczny', 'Non critique'),
+        'Обновить список процессов': ('Refresh process list', 'Оновити список процесів', 'Prozessliste aktualisieren', 'Odśwież listę procesów', 'Actualiser la liste des processus'),
+        'Остановить выбранный процесс': ('Suspend selected process', 'Призупинити вибраний процес', 'Stoppen Sie den ausgewählten Prozess', 'Zatrzymaj wybrany proces', 'Arrêter le processus sélectionné'),
+        'Разрешить работу процесса': ('Resume process execution', 'Відновити роботу процесу', 'Lassen Sie den Prozess laufen', 'Zezwól na uruchomienie procesu', "Autoriser le processus à s'exécuter"),
+        'Принудительно завершить процесс': ('Force-close selected process', 'Примусово завершити вибраний процес', 'Erzwingen Sie die Beendigung eines Prozesses', 'Wymuś zakończenie procesu', "Forcer la fin d'un processus"),
+        'Заблокировать процесс через IFEO': ('Block process through IFEO', 'Заблокувати процес через IFEO', 'Blockieren Sie einen Prozess über IFEO', 'Zablokuj proces za pośrednictwem IFEO', 'Bloquer un processus via IFEO'),
+        'Снять IFEO-блокировку': ('Remove IFEO block', 'Зняти блокування IFEO', 'Entfernen Sie die IFEO-Blockierung', 'Usuń blokadę IFEO', 'Supprimer le blocage IFEO'),
+        'Открыть каталог процесса': ('Open process folder', 'Відкрити папку процесу', 'Prozessverzeichnis öffnen', 'Otwórz katalog procesów', 'Ouvrir le répertoire des processus'),
+        'Сделать процесс критичным': ('Make process critical', 'Зробити процес критичним', 'Machen Sie den Prozess kritisch', 'Spraw, aby proces był krytyczny', 'Rendre le processus critique'),
+        'Снять статус критичности': ('Remove critical status', 'Зняти критичний статус', 'Kritikalitätsstatus entfernen', 'Usuń stan krytyczny', 'Supprimer le statut de criticité'),
+        'Выберите процесс и выполните нужное действие: обновить, заморозить, завершить или заблокировать': ('Select a process, then refresh, freeze, end or block it.', 'Виберіть процес, а потім оновіть, призупиніть, завершіть або заблокуйте його.', 'Wählen Sie den Prozess aus und führen Sie die gewünschte Aktion aus: Aktualisieren, Einfrieren, Beenden oder Blockieren', 'Wybierz proces i wykonaj żądaną akcję: zaktualizuj, zamroź, zakończ lub zablokuj', "Sélectionnez le processus et effectuez l'action souhaitée\xa0: mettre à jour, geler, terminer ou bloquer"),
+        'Имя': ('Name', "Ім'я", 'Name', 'Nazwa', 'Nom'),
+        'Путь': ('Path', 'Шлях', 'Weg', 'Ścieżka', 'Chemin'),
+        'Пользователь': ('User', 'Користувач', 'Benutzer', 'Użytkownik', 'Utilisateur'),
+        'Угроза': ('Threat', 'Загроза', 'Gefahr', 'Zagrożenie', 'Menace'),
+        'Тип': ('Type', 'Тип', 'Typ', 'Typ', 'Taper'),
+        'Значение': ('Value', 'Значення', 'Bedeutung', 'Oznaczający', 'Signification'),
+        'Параметр': ('Entry', 'Параметр', 'Parameter', 'Parametr', 'Paramètre'),
+        'Файл': ('File', 'Файл', 'Datei', 'Plik', 'Déposer'),
+        'Расположение': ('Location', 'Розташування', 'Standort', 'Lokalizacja', 'Emplacement'),
+        'Состояние': ('Status', 'Стан', 'Zustand', 'Państwo', 'État'),
+        'Служба': ('Service', 'Служба', 'Service', 'Praca', 'Service'),
+        'Диск': ('Drive', 'Диск', 'Scheibe', 'Dysk', 'Disque'),
+        'Размер': ('Size', 'Розмір', 'Größe', 'Rozmiar', 'Taille'),
+        'Используется': ('Used', 'Використано', 'Gebraucht', 'Używany', 'Utilisé'),
+        'Мой компьютер': ('This PC', "Цей комп'ютер", 'Mein Computer', 'Mój komputer', 'Mon ordinateur'),
+        'Компьютер': ('This PC', "Цей комп'ютер", 'Computer', 'Komputer', 'Ordinateur'),
+        'Назад': ('Back', 'Назад', 'Zurück', 'Z powrotem', 'Dos'),
+        'Обновить список': ('Refresh list', 'Оновити список', 'Liste aktualisieren', 'Aktualizuj listę', 'Mettre à jour la liste'),
+        'Атрибуты': ('Attributes', 'Атрибути', 'Attribute', 'Atrybuty', 'Attributs'),
+        'Локальный диск': ('Local disk', 'Локальний диск', 'Lokale Festplatte', 'Dysk lokalny', 'Disque local'),
+        'Папка': ('Folder', 'Папка', 'Ordner', 'Falcówka', 'Dossier'),
+        'Открыть': ('Open', 'Відкрити', 'Offen', 'Otwarte', 'Ouvrir'),
+        'Разблокировать (Unlocker)': ('Unlock (Unlocker)', 'Розблокувати (Unlocker)', 'Entsperren', 'Odblokować', 'Ouvrir'),
+        'Стать владельцем (Take Ownership)': ('Take ownership', 'Стати власником', 'Übernehmen Sie die Verantwortung', 'Przejmij własność', "S'approprier"),
+        'Удалить принудительно (Force Delete)': ('Force delete', 'Примусово видалити', 'Löschen erzwingen', 'Wymuś usunięcie', 'Forcer la suppression'),
+        'Неверный путь': ('Invalid path', 'Неправильний шлях', 'Falscher Weg', 'Zły sposób', 'Mauvaise façon'),
+        'Нет доступа:': ('Access denied:', 'Немає доступу:', 'Kein Zugriff:', 'Dostęp wzbroniony:', "Pas d'accès\xa0:"),
+        'Разблокировка': ('Unlock', 'Розблокування', 'Entsperren', 'Odblokować', 'Ouvrir'),
+        'Файл разблокирован!': ('File unlocked!', 'Файл розблоковано!', 'Die Datei ist entsperrt!', 'Plik jest odblokowany!', 'Le fichier est débloqué !'),
+        'Не удалось разблокировать или файл не заблокирован.': ('Unable to unlock the file, or it is not locked.', 'Не вдалося розблокувати файл або він не заблокований.', 'Konnte nicht entsperrt werden oder die Datei ist nicht gesperrt.', 'Nie można odblokować lub plik nie jest zablokowany.', "Impossible de déverrouiller ou le fichier n'est pas verrouillé."),
+        'Модуль novir_native недоступен.': ('The novir_native module is unavailable.', 'Модуль novir_native недоступний.', 'Das Modul novir_native ist nicht verfügbar.', 'Moduł novir_native jest niedostępny.', "Le module novir_native n'est pas disponible."),
+        'Владелец': ('Owner', 'Власник', 'Eigentümer', 'Właściciel', 'Propriétaire'),
+        'Права получены!': ('Permissions obtained!', 'Права отримано!', 'Rechte erhalten!', 'Prawa otrzymane!', 'Droits reçus !'),
+        'Не удалось получить права.': ('Unable to obtain permissions.', 'Не вдалося отримати права.', 'Es konnten keine Rechte erlangt werden.', 'Nie udało się uzyskać praw.', "Impossible d'obtenir les droits."),
+        'Удаление': ('Deletion', 'Видалення', 'Entfernung', 'Usuwanie', 'Suppression'),
+        'Удалить безвозвратно?': ('Delete permanently?', 'Видалити безповоротно?', 'Endgültig löschen?', 'Usunąć trwale?', 'Supprimer définitivement\xa0?'),
+        'Удаление заблокировано': ('Deletion blocked', 'Видалення заблоковано', 'Entfernung blockiert', 'Usunięcie zablokowane', 'Suppression bloquée'),
+        'Путь не прошел проверку безопасности.': ('The path did not pass the safety check.', 'Шлях не пройшов перевірку безпеки.', 'Der Pfad hat die Sicherheitsprüfung nicht bestanden.', 'Ścieżka nie przeszła kontroli bezpieczeństwa.', "Le chemin n'a pas passé le contrôle de sécurité."),
+        'Редактор реестра': ('Registry Editor', 'Редактор реєстру', 'Registrierungseditor', 'Edytor rejestru', 'Éditeur de registre'),
+        'Пользователи': ('Users', 'Користувачі', 'Benutzer', 'Użytkownicy', 'Utilisateurs'),
+        'Создание нового пользователя': ('Create a new user', 'Створення нового користувача', 'Einen neuen Benutzer erstellen', 'Tworzenie nowego użytkownika', 'Créer un nouvel utilisateur'),
+        'Имя пользователя:': ('User name:', "Ім'я користувача:", 'Benutzername:', 'Nazwa użytkownika:', "Nom d'utilisateur:"),
+        'Пароль:': ('Password:', 'Пароль:', 'Passwort:', 'Hasło:', 'Mot de passe:'),
+        'С правами администратора': ('Administrator privileges', 'З правами адміністратора', 'Mit Administratorrechten', 'Z uprawnieniami administratora', "Avec droits d'administrateur"),
+        'Создать\nпользователя': ('Create\nuser', 'Створити\nкористувача', 'Erstellen\nBenutzer', 'Utwórz\nużytkownik', 'Créer\nutilisateur'),
+        'Требовать нажатие CTRL+ALT+DEL при входе': ('Require CTRL+ALT+DEL at sign-in', 'Вимагати CTRL+ALT+DEL під час входу', 'Bei der Anmeldung muss STRG+ALT+ENTF gedrückt werden', 'Wymagaj naciśnięcia klawiszy CTRL+ALT+DEL podczas logowania', "Nécessite d'appuyer sur CTRL+ALT+DEL lors de la connexion"),
+        'Удаление дисков': ('Drive removal', 'Видалення дисків', 'Laufwerke entfernen', 'Usuwanie dysków', 'Suppression de lecteurs'),
+        'Диски': ('Drives', 'Диски', 'Scheiben', 'Dyski', 'Disques'),
+        'Удалить диск': ('Remove drive', 'Видалити диск', 'Diskette entfernen', 'Wyjmij dysk', 'Supprimer le disque'),
+        'Снятие ограничений': ('Remove restrictions', 'Зняття обмежень', 'Beschränkungen aufheben', 'Usuwanie ograniczeń', 'Supprimer les restrictions'),
+        'Интерфейс': ('Interface', 'Інтерфейс', 'Schnittstelle', 'Interfejs', 'Interface'),
+        'Система': ('System', 'Система', 'System', 'System', 'Système'),
+        'Запуск утилит': ('Run utilities', 'Запуск утиліт', 'Dienstprogramme starten', 'Uruchamianie narzędzi', 'Lancement des utilitaires'),
+        'Клавиатура': ('Keyboard', 'Клавіатура', 'Tastatur', 'Klawiatura', 'Clavier'),
+        'Очистка': ('Cleanup', 'Очищення', 'Reinigung', 'Czyszczenie', 'Nettoyage'),
+        'Продвинутое': ('Advanced', 'Розширене', 'Fortschrittlich', 'Zaawansowany', 'Avancé'),
+        'Безопасность': ('Security', 'Безпека', 'Sicherheit', 'Bezpieczeństwo', 'Sécurité'),
+        'Хардкор (Трояны)': ('Hardcore (Trojans)', 'Хардкор (Трояни)', 'Hardcore (Trojaner)', 'Hardkor (trojany)', 'Hardcore (chevaux de Troie)'),
+        '☑ Выбрать всё': ('☑ Select all', '☑ Вибрати все', '☑ Alles auswählen', '☑ Zaznacz wszystko', '☑ Sélectionnez tout'),
+        '☐ Снять всё': ('☐ Clear all', '☐ Зняти все', '☐ Alles entfernen', '☐ Usuń wszystko', '☐ Supprimez tout'),
+        '✓ Подтвердить выбранное': ('✓ Apply selected', '✓ Застосувати вибране', '✓ Auswahl bestätigen', '✓ Potwierdź wybór', '✓ Confirmer la sélection'),
+        'Дополнительные инструменты': ('Additional tools', 'Додаткові інструменти', 'Zusätzliche Werkzeuge', 'Dodatkowe narzędzia', 'Outils supplémentaires'),
+        'Сканер ограничений системы': ('System restriction scanner', 'Сканер системних обмежень', 'Systemlimit-Scanner', 'Skaner ograniczeń systemu', 'Scanner de limites du système'),
+        'Находит активные блокировки (реестр, групповые политики, системные ключи)': ('Finds active blocks in the registry, group policies and system keys', 'Знаходить активні блокування в реєстрі, групових політиках і системних ключах', 'Findet aktive Sperren (Registrierung, Gruppenrichtlinien, Systemschlüssel)', 'Znajduje aktywne blokady (rejestr, zasady grupowe, klucze systemowe)', 'Recherche les verrous actifs (registre, stratégies de groupe, clés système)'),
+        'Сканировать': ('Scan', 'Сканувати', 'Scan', 'Skandować', 'Balayage'),
+        'Снять выбранные': ('Remove selected', 'Зняти вибрані', 'Ausgewählte löschen', 'Wyczyść wybrane', 'Effacer la sélection'),
+        'Снять всё': ('Remove all', 'Зняти все', 'Alles entfernen', 'Usuń wszystko', 'Supprimer tout'),
+        'Нажмите «Сканировать» для поиска ограничений': ('Click “Scan” to look for restrictions', 'Натисніть «Сканувати», щоб знайти обмеження', 'Klicken Sie auf „Scannen“, um nach Einschränkungen zu suchen', 'Kliknij „Skanuj”, aby wyszukać ograniczenia', 'Cliquez sur "Scan" pour rechercher des restrictions'),
+        'Встроенные утилиты': ('Built-in utilities', 'Вбудовані утиліти', 'Integrierte Dienstprogramme', 'Wbudowane narzędzia', 'Utilitaires intégrés'),
+        'Запустить': ('Run', 'Запустити', 'Start', 'Początek', 'Lancement'),
+        'Остановить': ('Stop', 'Зупинити', 'Stoppen', 'Zatrzymywać się', 'Arrêt'),
+        'Перезапустить': ('Restart', 'Перезапустити', 'Neustart', 'Uruchom ponownie', 'Redémarrage'),
+        'Отключить': ('Disable', 'Вимкнути', 'Deaktivieren', 'Wyłączyć', 'Désactiver'),
+        'Включить': ('Enable', 'Увімкнути', 'Einschalten', 'Włączyć coś', 'Allumer'),
+        'Добавить': ('Add', 'Додати', 'Hinzufügen', 'Dodać', 'Ajouter'),
+        'Удалить': ('Delete', 'Видалити', 'Löschen', 'Usuwać', 'Supprimer'),
+        'Изменить': ('Edit', 'Змінити', 'Ändern', 'Zmiana', 'Changement'),
+        'Сохранить': ('Save', 'Зберегти', 'Speichern', 'Ratować', 'Sauvegarder'),
+        'Обзор...': ('Browse...', 'Огляд...', 'Rezension...', 'Recenzja...', 'Revoir...'),
+        'Открыть файл': ('Open file', 'Відкрити файл', 'Datei öffnen', 'Otwórz plik', 'Ouvrir le fichier'),
+        'Копировать путь': ('Copy path', 'Копіювати шлях', 'Pfad kopieren', 'Skopiuj ścieżkę', 'Copier le chemin'),
+        'Копировать значение': ('Copy value', 'Копіювати значення', 'Wert kopieren', 'Skopiuj wartość', 'Copier la valeur'),
+        'Разблокировка файлов (Unlocker)': ('File Unlocker', 'Розблокування файлів', 'Dateien entsperren (Unlocker)', 'Odblokowywanie plików (Unlocker)', 'Déverrouillage de fichiers (Unlocker)'),
+        'Выберите заблокированный файл. Программа найдет процессы, которые его удерживают, и позволит их завершить.': ('Select a locked file. The app will find the processes holding it and let you end them.', 'Виберіть заблокований файл. Програма знайде процеси, які його утримують, і дозволить їх завершити.', 'Wählen Sie eine gesperrte Datei aus. Das Programm findet die Prozesse, die es anhalten, und ermöglicht deren Beendigung.', 'Wybierz zablokowany plik. Program znajdzie procesy, które go wstrzymują, i umożliwi ich zakończenie.', 'Sélectionnez un fichier verrouillé. Le programme trouvera les processus qui le détiennent et permettra de les terminer.'),
+        'Анализ файла': ('Analyze file', 'Аналіз файлу', 'Dateianalyse', 'Analiza plików', 'Analyse de fichiers'),
+        'Разблокировать (Убить процессы)': ('Unlock (end processes)', 'Розблокувати (завершити процеси)', 'Entsperren (Prozesse töten)', 'Odblokuj (zakończ procesy)', 'Débloquer (Tuer les processus)'),
+        'Уничтожить (Убить + Удалить файл)': ('Destroy (end + delete file)', 'Знищити (завершити + видалити файл)', 'Zerstören (Datei töten + löschen)', 'Zniszcz (Zabij + Usuń plik)', 'Détruire (Tuer + Supprimer le fichier)'),
+        'Выберите файл:': ('Select a file:', 'Виберіть файл:', 'Datei auswählen:', 'Wybierz plik:', 'Sélectionnez le fichier\xa0:'),
+        'Папка автозагрузки:': ('Startup folder:', 'Папка автозапуску:', 'Startordner:', 'Folder startowy:', 'Dossier de démarrage\xa0:'),
+        'Путь к программе:': ('Program path:', 'Шлях до програми:', 'Pfad zum Programm:', 'Ścieżka do programu:', "Chemin d'accès au programme\xa0:"),
+        'Имя задачи:': ('Task name:', "Ім'я завдання:", 'Aufgabenname:', 'Nazwa zadania:', 'Nom de la tâche\xa0:'),
+        'Триггер:': ('Trigger:', 'Тригер:', 'Auslösen:', 'Spust:', 'Déclenchement:'),
+        'Создать задачу': ('Create task', 'Створити завдання', 'Erstellen Sie eine Aufgabe', 'Utwórz zadanie', 'Créer une tâche'),
+        'Планировщик задач': ('Task Scheduler', 'Планувальник завдань', 'Aufgabenplaner', 'Harmonogram zadań', 'Planificateur de tâches'),
+        'Все задачи': ('All tasks', 'Усі завдання', 'Alle Aufgaben', 'Wszystkie zadania', 'Toutes les tâches'),
+        'Только пользовательские': ('User tasks only', 'Лише користувацькі', 'Nur benutzerdefiniert', 'Tylko niestandardowe', 'Personnalisé uniquement'),
+        'Только подозрительные': ('Suspicious only', 'Лише підозрілі', 'Nur verdächtig', 'Tylko podejrzane', 'Seulement suspect'),
+        'Папка автозагрузки': ('Startup folder', 'Папка автозапуску', 'Startordner', 'Folder startowy', 'Dossier de démarrage'),
+        'Реестр': ('Registry', 'Реєстр', 'Registrierung', 'Rejestr', 'Enregistrement'),
+        'Добавить файл': ('Add file', 'Додати файл', 'Datei hinzufügen', 'Dodaj plik', 'Ajouter un fichier'),
+        'Открыть папку': ('Open folder', 'Відкрити папку', 'Ordner öffnen', 'Otwórz folder', 'Ouvrir le dossier'),
+        '▶ Запустить': ('▶ Run', '▶ Запустити', '▶ Starten', '▶ Uruchom', '▶ Lancement'),
+        '⏸ Отключить': ('⏸ Disable', '⏸ Вимкнути', '⏸ Deaktivieren', '⏸ Wyłącz', '⏸ Désactiver'),
+        '✓ Включить': ('✓ Enable', '✓ Увімкнути', '✓ Aktivieren', '✓ Włącz', '✓ Activer'),
+        '↻ Обновить': ('↻ Refresh', '↻ Оновити', '↻ Aktualisieren', '↻ Aktualizacja', '↻ Mise à jour'),
+        'Выберите запись для удаления': ('Select an entry to delete', 'Виберіть запис для видалення', 'Eintrag zum Löschen auswählen', 'Wybierz wpis do usunięcia', "Sélectionnez l'entrée à supprimer"),
+        'Выберите запись для редактирования': ('Select an entry to edit', 'Виберіть запис для редагування', 'Wählen Sie einen Eintrag zum Bearbeiten aus', 'Wybierz wpis do edycji', 'Sélectionnez une entrée à modifier'),
+        'Выберите файл для удаления': ('Select a file to delete', 'Виберіть файл для видалення', 'Wählen Sie die zu löschende Datei aus', 'Wybierz plik do usunięcia', 'Sélectionnez le fichier à supprimer'),
+        'Выберите задачу для удаления': ('Select a task to delete', 'Виберіть завдання для видалення', 'Wählen Sie eine Aufgabe zum Löschen aus', 'Wybierz zadanie do usunięcia', 'Sélectionnez une tâche à supprimer'),
+        'Выберите задачу для запуска': ('Select a task to run', 'Виберіть завдання для запуску', 'Wählen Sie eine auszuführende Aufgabe aus', 'Wybierz zadanie do uruchomienia', 'Sélectionnez une tâche à exécuter'),
+        'Выберите задачу для отключения': ('Select a task to disable', 'Виберіть завдання для вимкнення', 'Wählen Sie eine Aufgabe zum Deaktivieren aus', 'Wybierz zadanie do wyłączenia', 'Sélectionnez une tâche à désactiver'),
+        'Выберите задачу для включения': ('Select a task to enable', 'Виберіть завдання для увімкнення', 'Wählen Sie eine Aufgabe aus, die eingeschlossen werden soll', 'Wybierz zadanie, które chcesz uwzględnić', 'Sélectionnez une tâche à inclure'),
+        'Выберите службу для запуска': ('Select a service to start', 'Виберіть службу для запуску', 'Wählen Sie einen Dienst zum Starten aus', 'Wybierz usługę, aby rozpocząć', 'Sélectionnez un service pour démarrer'),
+        'Выберите службу для остановки': ('Select a service to stop', 'Виберіть службу для зупинки', 'Wählen Sie einen Dienst aus, den Sie stoppen möchten', 'Wybierz usługę, którą chcesz zatrzymać', 'Sélectionnez un service à arrêter'),
+        'Выберите службу для перезапуска': ('Select a service to restart', 'Виберіть службу для перезапуску', 'Wählen Sie den Dienst aus, der neu gestartet werden soll', 'Wybierz usługę, którą chcesz uruchomić ponownie', 'Sélectionnez le service à redémarrer'),
+        'Отметьте хотя бы одно действие для выполнения.': ('Select at least one action to run.', 'Позначте принаймні одну дію для виконання.', 'Markieren Sie mindestens eine Aktion, die abgeschlossen werden soll.', 'Zaznacz co najmniej jedną akcję do wykonania.', 'Cochez au moins une action à réaliser.'),
+        'Выполнить': ('Run', 'Виконати', 'Ausführen', 'Wykonać', 'Exécuter'),
+        'выбранных действий?': ('selected actions?', 'вибраних дій?', 'ausgewählte Aktionen?', 'wybrane działania?', 'actions sélectionnées ?'),
+        'Что заблокировано': ('What is blocked', 'Що заблоковано', 'Was ist blockiert', 'Co jest zablokowane', "Qu'est-ce qui est bloqué"),
+        'Ключ реестра / GPO': ('Registry key / GPO', 'Ключ реєстру / GPO', 'Registrierungsschlüssel/GPO', 'Klucz rejestru/GPO', 'Clé de registre/GPO'),
+        'Статус': ('Status', 'Статус', 'Status', 'Status', 'Statut'),
+        'Ограничений не найдено!': ('No restrictions found!', 'Обмежень не знайдено!', 'Keine Einschränkungen gefunden!', 'Nie znaleziono żadnych ograniczeń!', 'Aucune restriction trouvée\xa0!'),
+        'Найдено': ('Found', 'Знайдено', 'Gefunden', 'Znaleziony', 'Trouvé'),
+        'блокировок': ('blocks', 'блокувань', 'Blockierung', 'bloking', 'blocage'),
+        'Не выбрано ни одного ограничения.': ('No restrictions selected.', 'Не вибрано жодного обмеження.', 'Keine Einschränkungen ausgewählt.', 'Nie wybrano żadnych ograniczeń.', 'Aucune restriction sélectionnée.'),
+        'Продолжить?': ('Continue?', 'Продовжити?', 'Weitermachen?', 'Kontynuować?', 'Continuer?'),
+        'Информация о системе': ('System information', 'Відомості про систему', 'Systeminformationen', 'Informacje o systemie', 'Informations système'),
+        'Перезапуск Explorer': ('Restart Explorer', 'Перезапуск Провідника', 'Explorer neu starten', 'Ponowne uruchamianie Eksploratora', "Redémarrage de l'explorateur"),
+        'Обновление': ('Update', 'Оновлення', 'Aktualisieren', 'Aktualizacja', 'Mise à jour'),
+        'Релиз GitHub': ('GitHub release', 'Реліз GitHub', 'GitHub-Veröffentlichung', 'Wydanie GitHuba', 'Version GitHub'),
+        'Выберите что скачать:': ('Choose what to download:', 'Оберіть, що завантажити:', 'Wählen Sie aus, was Sie herunterladen möchten:', 'Wybierz, co chcesz pobrać:', 'Choisissez ce que vous souhaitez télécharger\xa0:'),
+        'Выберите версию для загрузки:': ('Choose a version to download:', 'Оберіть версію для завантаження:', 'Wählen Sie die Version zum Herunterladen aus:', 'Wybierz wersję do pobrania:', 'Sélectionnez la version à télécharger\xa0:'),
+        'Скачать Installer': ('Download installer', 'Завантажити інсталятор', 'Laden Sie das Installationsprogramm herunter', 'Pobierz instalator', "Télécharger le programme d'installation"),
+        'Скачать Portable (.exe)': ('Download portable (.exe)', 'Завантажити портативну версію (.exe)', 'Portable herunterladen (.exe)', 'Pobierz przenośny (.exe)', 'Télécharger Portable (.exe)'),
+        'Запуск комплексного восстановления...': ('Starting full recovery...', 'Запуск комплексного відновлення...', 'Start einer umfassenden Wiederherstellung...', 'Uruchomienie kompleksowego odzyskiwania...', 'Lancement du redressement global...'),
+        'Подготовка...': ('Preparing...', 'Підготовка...', 'Vorbereitung...', 'Przygotowanie...', 'Préparation...'),
+        'NoVir — Починить всё': ('NoVir — Fix all', 'NoVir — Виправити все', 'NoVir – Alles reparieren', 'NoVir – Napraw wszystko', 'NoVir - Tout réparer'),
+        'Шаг': ('Step', 'Крок', 'Schritt', 'Krok', 'Étape'),
+        'выполнено': ('completed', 'виконано', 'vollendet', 'zakończony', 'complété'),
+        'ПРОПУСК:': ('SKIPPED:', 'ПРОПУЩЕНО:', 'PASSIEREN:', 'PRZECHODZIĆ:', 'PASSER:'),
+        'Снятие блокировки реестра': ('Remove Registry Editor block', 'Зняття блокування редактора реєстру', 'Entfernen einer Registrierungssperre', 'Usuwanie blokady rejestru', 'Supprimer un verrou de registre'),
+        'Снятие блокировки диспетчера': ('Remove Task Manager block', 'Зняття блокування диспетчера завдань', 'Entsperren des Dispatchers', 'Odblokowanie dyspozytora', 'Débloquer le répartiteur'),
+        'Восстановление ярлыков': ('Restore shortcuts', 'Відновлення ярликів', 'Verknüpfungen wiederherstellen', 'Przywracanie skrótów', 'Restauration des raccourcis'),
+        'Сброс ассоциаций файлов': ('Reset file associations', 'Скидання асоціацій файлів', 'Dateizuordnungen zurücksetzen', 'Resetowanie skojarzeń plików', 'Réinitialisation des associations de fichiers'),
+        'Очистка автозапуска': ('Clean startup', 'Очищення автозапуску', 'Autorun-Reinigung', 'Automatyczne czyszczenie', 'Nettoyage automatique'),
+        'Готово!': ('Done!', 'Готово!', 'Bereit!', 'Gotowy!', 'Prêt!'),
+        '↩ Откат изменений': ('↩ Roll back changes', '↩ Відкотити зміни', '↩ Änderungen rückgängig machen', '↩ Wycofywanie zmian', '↩ Annulation des modifications'),
+        'ОТКАТИТЬ': ('ROLL BACK', 'ВІДКОТИТИ', 'WEGROLLEN', 'ODWRÓĆ SIĘ', 'ENROULAGE'),
+        'Журнал действий пуст или файл не найден.': ('The action log is empty or the file was not found.', 'Журнал дій порожній або файл не знайдено.', 'Das Aktivitätsprotokoll ist leer oder die Datei wurde nicht gefunden.', 'Dziennik aktywności jest pusty lub nie znaleziono pliku.', "Le journal d'activité est vide ou le fichier est introuvable."),
+        'Нечего откатывать: изменений реестра в этой сессии не зафиксировано.': ('Nothing to roll back: no registry changes were recorded in this session.', 'Немає чого відкотити: у цій сесії не зафіксовано змін реєстру.', 'Es gibt nichts, was zurückgesetzt werden könnte: In dieser Sitzung wurden keine Registrierungsänderungen aufgezeichnet.', 'Nie ma czego przywracać: w tej sesji nie zarejestrowano żadnych zmian w rejestrze.', "Il n'y a rien à annuler : aucune modification du registre n'a été enregistrée au cours de cette session."),
+        'Данный модуль запускается как отдельное окно утилиты и работает в едином стиле приложения.': ('This module opens in its own utility window and uses the same application style.', 'Цей модуль відкривається в окремому вікні утиліти та використовує єдиний стиль програми.', 'Dieses Modul wird als separates Dienstprogrammfenster ausgeführt und funktioniert im gleichen Anwendungsstil.', 'Moduł ten działa jako osobne okno narzędzia i działa w tym samym stylu aplikacji.', "Ce module s'exécute comme une fenêtre utilitaire distincte et fonctionne dans le même style d'application."),
+        'Добавить запись в реестр': ('Add registry entry', 'Додати запис до реєстру', 'Fügen Sie der Registrierung einen Eintrag hinzu', 'Dodaj wpis do rejestru', 'Ajouter une entrée au registre'),
+        'Изменить запись в реестре': ('Edit registry entry', 'Змінити запис у реєстрі', 'Ändern Sie einen Registrierungseintrag', 'Zmień wpis rejestru', 'Modifier une entrée de registre'),
+        'Раздел реестра:': ('Registry hive:', 'Розділ реєстру:', 'Registrierungsschlüssel:', 'Klucz rejestru:', 'Clé de registre\xa0:'),
+        'Текущий пользователь': ('Current user', 'Поточний користувач', 'Aktueller Benutzer', 'Bieżący użytkownik', 'Utilisateur actuel'),
+        'Все пользователи': ('All users', 'Усі користувачі', 'Alle Benutzer', 'Wszyscy użytkownicy', 'Tous les utilisateurs'),
+        'Добавить файл в автозагрузку': ('Add startup file', 'Додати файл до автозапуску', 'Fügen Sie eine Datei zum Start hinzu', 'Dodaj plik do startupu', 'Ajouter un fichier au démarrage'),
+        'Создать задачу в планировщике': ('Create scheduled task', 'Створити завдання в планувальнику', 'Erstellen Sie eine Aufgabe im Planer', 'Utwórz zadanie w harmonogramie', 'Créer une tâche dans le planificateur'),
+        'При входе в систему': ('At sign-in', 'Під час входу до системи', 'Wenn Sie sich anmelden', 'Kiedy się zalogujesz', 'Lorsque vous vous connectez'),
+        'При запуске системы': ('At system startup', 'Під час запуску системи', 'Wenn das System startet', 'Kiedy system się uruchomi', 'Lorsque le système démarre'),
+        'Ежедневно': ('Daily', 'Щодня', 'Täglich', 'Codziennie', 'Tous les jours'),
+        'Принудительно перезагрузить список задач из системы': ('Force-reload the task list from the system', 'Примусово перезавантажити список завдань із системи', 'Erzwingen Sie das Neuladen der Aufgabenliste vom System', 'Wymuś ponowne załadowanie listy zadań z systemu', 'Forcer le rechargement de la liste des tâches à partir du système'),
+        'Меню служб': ('Services menu', 'Меню служб', 'Servicemenü', 'Menu usług', 'Menu des services'),
+        'Загрузка задач планировщика...': ('Loading scheduled tasks...', 'Завантаження завдань планувальника...', 'Planer-Aufgaben werden geladen...', 'Ładowanie zadań harmonogramu...', 'Chargement des tâches du planificateur...'),
+        'Открывает собственный редактор реестра в стиле системного окна.': ("Opens NoVir's built-in registry editor in a system-window style.", 'Відкриває вбудований редактор реєстру NoVir у стилі системного вікна.', 'Öffnet Ihren eigenen Registrierungseditor im Stil eines Systemfensters.', 'Otwiera własny edytor rejestru w stylu okna systemowego.', "Ouvre votre propre éditeur de registre dans le style d'une fenêtre système."),
+        'Открывает отдельное окно восстановления загрузчика MBR/BCD.': ('Opens a separate MBR/BCD bootloader recovery window.', 'Відкриває окреме вікно відновлення завантажувача MBR/BCD.', 'Öffnet ein separates MBR/BCD-Bootloader-Wiederherstellungsfenster.', 'Otwiera osobne okno odzyskiwania programu ładującego MBR/BCD.', 'Ouvre une fenêtre de récupération distincte du chargeur de démarrage MBR/BCD.'),
+        'Открывает собственный менеджер учетных записей.': ('Opens the built-in account manager.', 'Відкриває вбудований менеджер облікових записів.', 'Öffnet Ihren eigenen Account Manager.', 'Otwiera własnego menedżera kont.', 'Ouvre votre propre gestionnaire de compte.'),
+        'Открывает отдельное окно управления дисками и разделами.': ('Opens a separate window for managing disks and partitions.', 'Відкриває окреме вікно керування дисками та розділами.', 'Öffnet ein separates Fenster zur Festplatten- und Partitionsverwaltung.', 'Otwiera osobne okno zarządzania dyskami i partycjami.', 'Ouvre une fenêtre distincte de gestion des disques et des partitions.'),
+        'Открывает окно управления учетными записями и паролями.': ('Opens the account and password management window.', 'Відкриває вікно керування обліковими записами та паролями.', 'Öffnet das Fenster zur Konto- und Passwortverwaltung.', 'Otwiera okno zarządzania kontem i hasłami.', 'Ouvre la fenêtre de gestion des comptes et des mots de passe.'),
+        'Восстанавливает загрузочный сектор и конфигурацию загрузчика Windows.': ('Restores the Windows boot sector and bootloader configuration.', 'Відновлює завантажувальний сектор і конфігурацію завантажувача Windows.', 'Stellt den Bootsektor und die Windows-Bootloader-Konfiguration wieder her.', 'Przywraca sektor rozruchowy i konfigurację programu rozruchowego systemu Windows.', 'Restaure la configuration du secteur de démarrage et du chargeur de démarrage Windows.'),
+        'Запустить восстановление': ('Start recovery', 'Запустити відновлення', 'Starten Sie die Wiederherstellung', 'Rozpocznij odzyskiwanie', 'Démarrer la récupération'),
+        'Введите имя пользователя.': ('Enter a user name.', "Введіть ім'я користувача.", 'Geben Sie Ihren Benutzernamen ein.', 'Wpisz swoją nazwę użytkownika.', "Entrez votre nom d'utilisateur."),
+        'В выбранных действиях есть операции повышенного риска. Они могут удалить данные, перезапустить службы или изменить системные настройки.\n\n': ('The selected actions include high-risk operations. They can delete data, restart services or change system settings.\n\n', 'Серед вибраних дій є операції підвищеного ризику. Вони можуть видалити дані, перезапустити служби або змінити системні налаштування.\n\n', 'Die ausgewählten Aktivitäten beinhalten Vorgänge mit hohem Risiko. Sie können Daten löschen, Dienste neu starten oder Systemeinstellungen ändern.', 'Wybrane działania zawierają operacje wysokiego ryzyka. Mogą usunąć dane, ponownie uruchomić usługi lub zmienić ustawienia systemu.', 'Les activités sélectionnées contiennent des opérations à haut risque. Ils peuvent supprimer des données, redémarrer des services ou modifier les paramètres du système.'),
+        'Диск успешно удалён из списка отображения.': ('The drive was removed from the display list.', 'Диск успішно видалено зі списку відображення.', 'Der Datenträger wurde erfolgreich aus der Anzeigeliste entfernt.', 'Dysk został pomyślnie usunięty z listy wyświetlania.', "Le disque a été supprimé avec succès de la liste d'affichage."),
+        'Заполните все поля': ('Fill in all fields', 'Заповніть усі поля', 'Füllen Sie alle Felder aus', 'Wypełnij wszystkie pola', 'Remplissez tous les champs'),
+        'Запись добавлена в реестр': ('Registry entry added', 'Запис додано до реєстру', 'Eintrag zur Registrierung hinzugefügt', 'Wpis dodany do rejestru', 'Entrée ajoutée au registre'),
+        'Запись удалена из реестра': ('Registry entry deleted', 'Запис видалено з реєстру', 'Eintrag aus der Registry gelöscht', 'Wpis usunięty z rejestru', 'Entrée supprimée du registre'),
+        'Запись обновлена в реестре': ('Registry entry updated', 'Запис оновлено в реєстрі', 'Der Eintrag wurde in der Registry aktualisiert', 'Wpis został zaktualizowany w rejestrze', "L'entrée a été mise à jour dans le registre"),
+        'Выберите существующий файл': ('Choose an existing file', 'Виберіть наявний файл', 'Wählen Sie eine vorhandene Datei aus', 'Wybierz istniejący plik', 'Sélectionnez un fichier existant'),
+        'Файл добавлен в автозагрузку': ('File added to startup', 'Файл додано до автозапуску', 'Die Datei wurde zum Start hinzugefügt', 'Plik został dodany do startupu', 'Le fichier a été ajouté au démarrage'),
+        'Файл удален из автозагрузки': ('File removed from startup', 'Файл видалено з автозапуску', 'Die Datei wurde aus dem Start entfernt', 'Plik został usunięty podczas uruchamiania', 'Le fichier a été supprimé du démarrage'),
+        'Файл не найден': ('File not found', 'Файл не знайдено', 'Datei nicht gefunden', 'Nie znaleziono pliku', 'Fichier introuvable'),
+        'Задача создана в планировщике': ('Task created in Task Scheduler', 'Завдання створено в планувальнику', 'Die Aufgabe wurde im Scheduler erstellt', 'Zadanie zostało utworzone w harmonogramie', 'La tâche a été créée dans le planificateur'),
+        'Задача удалена из планировщика': ('Task deleted from Task Scheduler', 'Завдання видалено з планувальника', 'Die Aufgabe wurde aus dem Planer entfernt', 'Zadanie zostało usunięte z harmonogramu', 'La tâche a été supprimée du planificateur'),
+        'Задача запущена': ('Task started', 'Завдання запущено', 'Aufgabe gestartet', 'Zadanie rozpoczęte', 'Tâche démarrée'),
+        'Задача отключена': ('Task disabled', 'Завдання вимкнено', 'Aufgabe deaktiviert', 'Zadanie wyłączone', 'Tâche désactivée'),
+        'Задача включена': ('Task enabled', 'Завдання увімкнено', 'Aufgabe aktiviert', 'Zadanie włączone', 'Tâche activée'),
+        'Служба запущена': ('Service started', 'Службу запущено', 'Dienst gestartet', 'Usługa została uruchomiona', 'Service démarré'),
+        'Служба остановлена': ('Service stopped', 'Службу зупинено', 'Der Dienst wurde gestoppt', 'Usługa zatrzymana', 'Service arrêté'),
+        'Служба перезапущена': ('Service restarted', 'Службу перезапущено', 'Dienst neu gestartet', 'Usługa została uruchomiona ponownie', 'Service redémarré'),
+        'Укажите правильный путь к существующему файлу.': ('Provide a valid path to an existing file.', 'Укажіть правильний шлях до наявного файлу.', 'Geben Sie den korrekten Pfad zur vorhandenen Datei an.', 'Podaj poprawną ścieżkę do istniejącego pliku.', 'Fournissez le chemin correct vers le fichier existant.'),
+        'Не найдено процессов, блокирующих этот файл.\n(Возможно, он не заблокирован или заблокирован ядром).': ('No processes locking this file were found.\n(It may be unlocked or locked by the kernel.)', 'Не знайдено процесів, які блокують цей файл.\n(Можливо, він не заблокований або заблокований ядром.)', 'Es wurden keine Prozesse gefunden, die diese Datei sperren.\n(Es darf nicht vom Kernel blockiert oder blockiert werden).', 'Nie znaleziono procesów blokujących ten plik.\n(Nie może być blokowany ani blokowany przez jądro).', "Aucun processus n'a été trouvé pour verrouiller ce fichier.\n(Il ne peut pas être bloqué ou bloqué par le noyau)."),
+        'Сначала проведите анализ файла.': ('Analyze the file first.', 'Спочатку проаналізуйте файл.', 'Analysieren Sie zunächst die Datei.', 'Najpierw przeanalizuj plik.', 'Analysez d’abord le fichier.'),
+        'Файл успешно удален!': ('File deleted successfully!', 'Файл успішно видалено!', 'Die Datei wurde erfolgreich gelöscht!', 'Plik został pomyślnie usunięty!', 'Le fichier a été supprimé avec succès !'),
+        'Рабочий стол и панель задач на секунду исчезнут.\nПерезапустить explorer.exe?': ('The desktop and taskbar will disappear briefly.\nRestart explorer.exe?', 'Робочий стіл і панель завдань на мить зникнуть.\nПерезапустити explorer.exe?', 'Der Desktop und die Taskleiste verschwinden für eine Sekunde.\nexplorer.exe neu starten?', 'Pulpit i pasek zadań znikną na sekundę.\nZrestartować program Explorer.exe?', 'Le bureau et la barre des tâches disparaîtront pendant une seconde.\nRedémarrer explorer.exe ?'),
+        'Explorer перезапущен!': ('Explorer restarted!', 'Провідник перезапущено!', 'Explorer wurde neu gestartet!', 'Eksplorator został ponownie uruchomiony!', 'Explorer a été relancé\xa0!'),
+        'Отчёт автозагрузки': ('Startup report', 'Звіт автозапуску', 'Startbericht', 'Raport startowy', 'Rapport de démarrage'),
+        'Сетевые порты': ('Network ports', 'Мережеві порти', 'Netzwerkports', 'Porty sieciowe', 'Ports réseau'),
+        'Открытые порты (LISTENING):': ('Open ports (LISTENING):', 'Відкриті порти (LISTENING):', 'Offene Ports (LISTENING):', 'Otwórz porty (SŁUCHANIE):', 'Ports ouverts (ECOUTE)\xa0:'),
+        'Активные соединения (ESTABLISHED):': ('Active connections (ESTABLISHED):', "Активні з'єднання (ESTABLISHED):", 'Aktive Verbindungen (HERGESTELLT):', 'Aktywne połączenia (STANOWIONE):', 'Connexions actives (ÉTABLI)\xa0:'),
+        'Задача выполнена.': ('Task completed.', 'Завдання виконано.', 'Die Aufgabe ist erledigt.', 'Zadanie zostało ukończone.', 'La tâche est terminée.'),
+        'На GitHub пока нет опубликованных релизов.': ('There are no published GitHub releases yet.', 'На GitHub ще немає опублікованих релізів.', 'Es gibt noch keine veröffentlichten Veröffentlichungen auf GitHub.', 'Nie ma jeszcze żadnych opublikowanych wersji na GitHubie.', 'Il n’y a pas encore de versions publiées sur GitHub.'),
+        'Готово! Все безопасные исправления применены.': ('Done! All safe fixes have been applied.', 'Готово! Усі безпечні виправлення застосовано.', 'Bereit! Alle sicheren Korrekturen wurden angewendet.', 'Gotowy! Zastosowano wszystkie bezpieczne poprawki.', 'Prêt! Tous les correctifs sûrs ont été appliqués.'),
+        'Рекомендуется перезагрузить компьютер.': ('Restarting the computer is recommended.', "Рекомендується перезавантажити комп'ютер.", 'Es wird empfohlen, Ihren Computer neu zu starten.', 'Zalecane jest ponowne uruchomienie komputera.', 'Il est recommandé de redémarrer votre ordinateur.'),
+        'ПРОДОЛЖИТЬ  →': ('ПРОДОЛЖИТЬ  →', 'ПРОДОЛЖИТЬ  →', 'WEITER →', 'KONTYNUUJ →', 'CONTINUER →'),
+        '! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?': ('! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?', '! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?', '! AUFMERKSAMKEIT! Wiederherstellung des MBR/BCD-Bootloaders\nist eine erweiterte Systemoperation.\n\nBei falscher Verwendung von Windows\nkann den Ladevorgang stoppen.\n\nEs wird empfohlen, einen Wiederherstellungspunkt zu erstellen\nbevor Sie fortfahren. Bist du sicher?', '! UWAGA! Odzyskiwanie bootloadera MBR/BCD\nto zaawansowana operacja systemowa.\n\nPodczas nieprawidłowego korzystania z systemu Windows\nmoże przestać się ładować.\n\nZalecane jest utworzenie punktu przywracania\nprzed kontynuowaniem. Czy jesteś pewien?', "! ATTENTION! Récupération du chargeur de démarrage MBR/BCD\nest une opération système avancée.\n\nEn cas d'utilisation incorrecte de Windows\npeut arrêter le chargement.\n\nIl est recommandé de créer un point de restauration\navant de continuer. Es-tu sûr?"),
+        'NoVir - Восстановление системы': ('NoVir - Восстановление системы', 'NoVir - Восстановление системы', 'NoVir – Systemwiederherstellung', 'NoVir – odzyskiwanie systemu', 'NoVir - Récupération du système'),
+        'Latest — стабильная версия.': ('Latest — стабильная версия.', 'Latest — стабильная версия.', 'Neueste – stabile Version.', 'Najnowsza - stabilna wersja.', 'Dernière version stable.'),
+        'Сканировать снова': ('Сканировать снова', 'Сканировать снова', 'Noch einmal scannen', 'Zeskanuj ponownie', 'Scannez à nouveau'),
+        'Предупреждение PRE-RELEASE': ('Предупреждение PRE-RELEASE', 'Предупреждение PRE-RELEASE', 'Warnung vor der Veröffentlichung', 'Ostrzeżenie przed premierą', 'Avertissement PRÉ-SORTIE'),
+        '⚠️ PRE-RELEASE: версия может содержать ошибки и нестабильные функции. Разработчик не отвечает за возможные проблемы этой версии.': ('⚠️ PRE-RELEASE: версия может содержать ошибки и нестабильные функции. Разработчик не отвечает за возможные проблемы этой версии.', '⚠️ PRE-RELEASE: версия может содержать ошибки и нестабильные функции. Разработчик не отвечает за возможные проблемы этой версии.', '⚠️ VORVERÖFFENTLICHUNG: Die Version kann Fehler und instabile Funktionen enthalten. Der Entwickler übernimmt keine Verantwortung für etwaige Probleme dieser Version.', '⚠️ WERSJA WSTĘPNA: wersja może zawierać błędy i niestabilne funkcje. Deweloper nie ponosi odpowiedzialności za jakiekolwiek problemy, jakie może wystąpić w tej wersji.', "⚠️ PRÉ-RELEASE\xa0: la version peut contenir des bugs et des fonctionnalités instables. Le développeur n'est pas responsable des problèmes que cette version pourrait rencontrer."),
+        'Подтверждение снятия блокировок': ('Подтверждение снятия блокировок', 'Подтверждение снятия блокировок', 'Bestätigung der Blockierungsentfernung', 'Potwierdzenie usunięcia blokady', 'Confirmation de la suppression du blocage'),
+        'Сканирование...': ('Сканирование...', 'Сканирование...', 'Scannen...', 'Łów...', 'Balayage...'),
+        'NoVir — Обновления': ('NoVir — Обновления', 'NoVir — Обновления', 'NoVir – Updates', 'NoVir — aktualizacje', 'NoVir - Mises à jour'),
+        'УДАЛИТЬ': ('УДАЛИТЬ', 'УДАЛИТЬ', 'LÖSCHEN', 'USUWAĆ', 'SUPPRIMER'),
+        '⚠️ Подтверждение удаления': ('⚠️ Подтверждение удаления', '⚠️ Подтверждение удаления', '⚠️Löschbestätigung', '⚠️Potwierdzenie usunięcia', '⚠️Confirmation de suppression'),
+        'Пусто': ('Пусто', 'Пусто', 'Leer', 'Pusty', 'Vide'),
+        '! ВНИМАНИЕ! Удаление или форматирование дисков\nявляется необратимой операцией.\n\nВсе данные на удалённом разделе будут потеряны без возможности восстановления.\n\nУбедитесь, что вы точно знаете, что делаете. Продолжить?': ('! ВНИМАНИЕ! Удаление или форматирование дисков\nявляется необратимой операцией.\n\nВсе данные на удалённом разделе будут потеряны без возможности восстановления.\n\nУбедитесь, что вы точно знаете, что делаете. Продолжить?', '! ВНИМАНИЕ! Удаление или форматирование дисков\nявляется необратимой операцией.\n\nВсе данные на удалённом разделе будут потеряны без возможности восстановления.\n\nУбедитесь, что вы точно знаете, что делаете. Продолжить?', '! AUFMERKSAMKEIT! Entfernen oder Formatieren von Laufwerken\nist ein irreversibler Vorgang.\n\nAlle Daten auf der gelöschten Partition gehen verloren, ohne dass eine Wiederherstellung möglich ist.\n\nStellen Sie sicher, dass Sie genau wissen, was Sie tun. Weitermachen?', '! UWAGA! Usuwanie lub formatowanie dysków\njest operacją nieodwracalną.\n\nWszystkie dane na usuniętej partycji zostaną utracone bez możliwości odzyskania.\n\nUpewnij się, że wiesz dokładnie, co robisz. Kontynuować?', '! ATTENTION! Supprimer ou formater des lecteurs\nest une opération irréversible.\n\nToutes les données de la partition supprimée seront perdues sans possibilité de récupération.\n\nAssurez-vous de savoir exactement ce que vous faites. Continuer?'),
+        'Выбор языка': ('Выбор языка', 'Выбор языка', 'Sprachauswahl', 'Wybór języka', 'Sélection de la langue'),
+        '⚠️ Управление дисками': ('⚠️ Управление дисками', '⚠️ Управление дисками', '⚠️ Datenträgerverwaltung', '⚠️ Zarządzanie dyskami', '⚠️ Gestion des disques'),
+        '⚠️ Восстановление загрузчика MBR/BCD': ('⚠️ Восстановление загрузчика MBR/BCD', '⚠️ Восстановление загрузчика MBR/BCD', '⚠️ MBR/BCD-Bootloader-Wiederherstellung', '⚠️ Odzyskiwanie bootloadera MBR/BCD', '⚠️ Récupération du chargeur de démarrage MBR/BCD'),
     }
 
     # A safe fallback prevents untranslated Russian fragments in dynamic status
@@ -565,6 +576,9 @@ class LanguageManager:
     FALLBACK_WORDS = {
         "en": {"Процесс": "Process", "процесс": "process", "Файл": "File", "файл": "file", "Задача": "Task", "задача": "task", "Служба": "Service", "служба": "service", "Не удалось": "Could not", "удалить": "delete", "добавить": "add", "запустить": "start", "остановить": "stop", "перезапустить": "restart", "создать": "create", "выбрать": "select", "Включено": "Enabled", "Отключено": "Disabled", "Пользовательская": "User", "Системная": "System", "Выполняется": "Running", "Готова": "Ready", "найдено": "found", "действий": "actions", "ошибок": "errors"},
         "uk": {"Процесс": "Процес", "процесс": "процес", "Файл": "Файл", "файл": "файл", "Задача": "Завдання", "задача": "завдання", "Служба": "Служба", "служба": "служба", "Не удалось": "Не вдалося", "удалить": "видалити", "добавить": "додати", "запустить": "запустити", "остановить": "зупинити", "перезапустить": "перезапустити", "создать": "створити", "выбрать": "вибрати", "Включено": "Увімкнено", "Отключено": "Вимкнено", "Пользовательская": "Користувацька", "Системная": "Системна", "Выполняется": "Виконується", "Готова": "Готова", "найдено": "знайдено", "действий": "дій", "ошибок": "помилок"},
+        "de": {"Процесс": "Prozess", "процесс": "prozess", "Файл": "Datei", "файл": "datei", "Задача": "Aufgabe", "задача": "aufgabe", "Служба": "Dienst", "служба": "dienst", "Не удалось": "Konnte nicht", "удалить": "löschen", "добавить": "hinzufügen", "запустить": "starten", "остановить": "stoppen", "перезапустить": "neustarten", "создать": "erstellen", "выбрать": "auswählen", "Включено": "Aktiviert", "Отключено": "Deaktiviert", "Пользовательская": "Benutzer", "Системная": "System", "Выполняется": "Läuft", "Готова": "Bereit", "найдено": "gefunden", "действий": "Aktionen", "ошибок": "Fehler"},
+        "pl": {"Процесс": "Proces", "процесс": "proces", "Файл": "Plik", "файл": "plik", "Задача": "Zadanie", "задача": "zadanie", "Служба": "Usługa", "служба": "usługa", "Не удалось": "Nie udało się", "удалить": "usunąć", "добавить": "dodać", "запустить": "uruchomić", "остановить": "zatrzymać", "перезапустить": "zrestartować", "создать": "utworzyć", "выбрать": "wybrać", "Включено": "Włączone", "Отключено": "Wyłączone", "Пользовательская": "Użytkownik", "Системная": "System", "Выполняется": "Uruchomiony", "Готова": "Gotowy", "найдено": "znaleziono", "действий": "akcji", "ошибок": "błędów"},
+        "fr": {"Процесс": "Processus", "процесс": "processus", "Файл": "Fichier", "файл": "fichier", "Задача": "Tâche", "задача": "tâche", "Служба": "Service", "служба": "service", "Не удалось": "Impossible de", "удалить": "supprimer", "добавить": "ajouter", "запустить": "démarrer", "остановить": "arrêter", "перезапустить": "redémarrer", "создать": "créer", "выбрать": "sélectionner", "Включено": "Activé", "Отключено": "Désactivé", "Пользовательская": "Utilisateur", "Системная": "Système", "Выполняется": "En cours d'exécution", "Готова": "Prêt", "найдено": "trouvé", "действий": "actions", "ошибок": "erreurs"}
     }
 
     def __init__(self):
@@ -615,6 +629,9 @@ class LanguageManager:
             return source
         translated = self.TRANSLATIONS.get(source) or REPAIR_CATALOG_TRANSLATIONS.get(source)
         if translated:
+            lang_idx = {"en": 0, "uk": 1, "de": 2, "pl": 3, "fr": 4}.get(self.language, 0)
+            if lang_idx < len(translated):
+                return translated[lang_idx]
             return translated[0 if self.language == "en" else 1]
         # Only touch strings containing Cyrillic; paths, values and user input
         # therefore remain untouched.
@@ -628,105 +645,139 @@ class LanguageManager:
 # Repair-card text is kept separately to make the large repair catalogue easy
 # to maintain.  Every title and description shown on those cards is localized.
 REPAIR_CATALOG_TRANSLATIONS = {
-    "Сброс пароля": ("Password reset", "Скидання пароля"),
-    "Починка запуска программ (.exe)": ("Fix program launching (.exe)", "Виправлення запуску програм (.exe)"),
-    "Починка ярлыков (.lnk)": ("Fix shortcuts (.lnk)", "Виправлення ярликів (.lnk)"),
-    "Удаление троянских DLL-инъекций": ("Remove Trojan DLL injections", "Видалення троянських DLL-ін'єкцій"),
-    "Разблокировка антивирусов": ("Unblock antivirus software", "Розблокування антивірусів"),
-    "Восстановление Безопасного режима": ("Restore Safe Mode", "Відновлення безпечного режиму"),
-    "Включение Восстановления системы": ("Enable System Restore", "Увімкнення відновлення системи"),
-    "Воскрешение Защитника Windows": ("Restore Windows Defender", "Відновлення Захисника Windows"),
-    "Починка служб обновлений": ("Fix update services", "Виправлення служб оновлення"),
-    "Снятие авто-входа локеров": ("Remove locker auto-sign-in", "Вимкнення авто-входу блокувальників"),
-    "Принудительное включение Брандмауэра": ("Force-enable Firewall", "Примусове ввімкнення брандмауера"),
-    "Проверяет UAC, брандмауэр, Defender и hosts без изменений": ("Checks UAC, Firewall, Defender and hosts without making changes", "Перевіряє UAC, брандмауер, Defender і hosts без змін"),
-    "Восстанавливает службу WMI": ("Restores the WMI service", "Відновлює службу WMI"),
-    "Проверяет и запускает критичные службы": ("Checks and starts critical services", "Перевіряє та запускає критичні служби"),
-    "Проверяет хранилище сертификатов": ("Checks the certificate store", "Перевіряє сховище сертифікатів"),
-    "Сбрасывает компоненты Центра обновления Windows": ("Resets Windows Update components", "Скидає компоненти Центру оновлення Windows"),
-    "Исправляет ассоциации ярлыков": ("Fixes shortcut associations", "Виправляє асоціації ярликів"),
-    "Очищает очередь печати и запускает службу": ("Clears the print queue and starts the service", "Очищає чергу друку та запускає службу"),
-    "Включает базовую самооборону процесса": ("Enables basic process self-defense", "Вмикає базовий самозахист процесу"),
-    "Полностью восстанавливает SafeBoot Minimal и Network": ("Fully restores SafeBoot Minimal and Network", "Повністю відновлює SafeBoot Minimal і Network"),
-    "Восстанавливает права системных папок": ("Restores system-folder permissions", "Відновлює права системних папок"),
-    "Исправляет ассоциацию .exe": ("Fixes the .exe association", "Виправляє асоціацію .exe"),
-    "Защищает файл программы атрибутами": ("Protects the program file with attributes", "Захищає файл програми атрибутами"),
-    "Проверяет и усиливает права администратора": ("Checks and strengthens administrator rights", "Перевіряє та посилює права адміністратора"),
-    "Разблокирует msconfig": ("Unblocks msconfig", "Розблоковує msconfig"),
-    "Включает Microsoft Defender": ("Enables Microsoft Defender", "Вмикає Microsoft Defender"),
-    "Включает восстановление системы": ("Enables System Restore", "Вмикає відновлення системи"),
-    "Отключает AutoPlay": ("Disables AutoPlay", "Вимикає AutoPlay"),
-    "Проверяет загрузочные записи": ("Checks boot records", "Перевіряє завантажувальні записи"),
-    "Проверяет расширения Chrome": ("Checks Chrome extensions", "Перевіряє розширення Chrome"),
-    "Сканирует ключи автозагрузки": ("Scans startup keys", "Сканує ключі автозапуску"),
-    "Очищает журналы событий Windows": ("Clears Windows event logs", "Очищає журнали подій Windows"),
-    "Удаляет временные файлы системы": ("Deletes temporary system files", "Видаляє тимчасові системні файли"),
-    "Очищает кеш Prefetch": ("Clears the Prefetch cache", "Очищає кеш Prefetch"),
-    "Очищает корзину": ("Empties the Recycle Bin", "Очищає кошик"),
-    "Очищает кеш иконок для исправления отображения": ("Clears the icon cache to fix display issues", "Очищає кеш іконок для виправлення відображення"),
-    "Очищает автозагрузку от подозрительных записей": ("Cleans suspicious startup entries", "Очищає автозапуск від підозрілих записів"),
-    "Очищает планировщик задач от вредоносных задач": ("Cleans malicious scheduled tasks", "Очищає планувальник від шкідливих завдань"),
-    "Завершает подозрительные процессы из черного списка": ("Ends suspicious blacklisted processes", "Завершує підозрілі процеси з чорного списку"),
-    "Отключает автозапуск со съемных носителей": ("Disables AutoRun from removable media", "Вимикає автозапуск зі знімних носіїв"),
-    "Удаляет Scancode Map, разблокируя заблокированную клавиатуру": ("Removes Scancode Map to unlock the keyboard", "Видаляє Scancode Map, розблоковуючи клавіатуру"),
-    "Отключает залипание и фильтрацию клавиш": ("Disables Sticky Keys and Filter Keys", "Вимикає залипання та фільтрацію клавіш"),
-    "Открывает диалоговое окно для быстрого запуска программ (аналог Win+R).": ("Opens the quick program-launch dialog (like Win+R).", "Відкриває діалог швидкого запуску програм (як Win+R)."),
-    "Горячие клавиши": ("Hotkeys", "Гарячі клавіші"),
-    "Разблокирует системные комбинации Win+...": ("Unblocks system Win+ shortcuts", "Розблоковує системні комбінації Win+..."),
-    "Запуск regedit.exe": ("Launch regedit.exe", "Запуск regedit.exe"), "Проводник": ("Explorer", "Провідник"),
-    "Запуск explorer.exe": ("Launch explorer.exe", "Запуск explorer.exe"), "Запуск taskmgr.exe": ("Launch taskmgr.exe", "Запуск taskmgr.exe"),
-    "Восстановление загрузчика (MBR/BCD)": ("Bootloader recovery (MBR/BCD)", "Відновлення завантажувача (MBR/BCD)"),
-    "Браузер": ("Browser", "Браузер"), "Открыть браузер": ("Open browser", "Відкрити браузер"),
-    "Управление пользователями": ("User management", "Керування користувачами"), "Очистка системы": ("System cleanup", "Очищення системи"),
-    "Очистка диска": ("Disk Cleanup", "Очищення диска"), "Ассоциации": ("Associations", "Асоціації"),
-    "Программы по умолчанию": ("Default apps", "Програми за замовчуванням"), "Управление паролями": ("Password management", "Керування паролями"),
-    "Управление дисками": ("Disk management", "Керування дисками"), "Сохранение winRE": ("WinRE backup", "Збереження WinRE"),
-    "Настройки среды восстановления": ("Recovery environment settings", "Налаштування середовища відновлення"),
-    "Выйти из пользователя": ("Sign out", "Вийти з користувача"), "Завершение текущего сеанса.": ("Ends the current session.", "Завершує поточний сеанс."),
-    "Войти в winRE": ("Enter WinRE", "Увійти до WinRE"), "Загрузка среды восстановления Windows.": ("Starts the Windows Recovery Environment.", "Запускає середовище відновлення Windows."),
-    "Вернуть русский язык": ("Restore Russian keyboard", "Повернути російську розкладку"),
-    "Восстанавливает стандартную раскладку после вирусной блокировки.": ("Restores the standard keyboard layout after a virus lock.", "Відновлює стандартну розкладку після вірусного блокування."),
-    "Проверяет целостность системных файлов.": ("Checks the integrity of system files.", "Перевіряє цілісність системних файлів."),
-    "Восстановить LogonUI": ("Restore LogonUI", "Відновити LogonUI"),
-    "Некоторые вирусы могут заменять данный файл для своих целей.": ("Some viruses may replace this file for their own purposes.", "Деякі віруси можуть замінювати цей файл для власних цілей."),
-    "Экстренное восстановление": ("Emergency recovery", "Екстрене відновлення"),
-    "Экстренная функция восстановления системы при блокировках вирусами.": ("Emergency system recovery for virus lockouts.", "Екстрене відновлення системи у разі вірусних блокувань."),
-    "Выключить тестовый режим": ("Disable test mode", "Вимкнути тестовий режим"),
-    "Вирусы могут использовать автозагрузку через драйвера. Выключение тестового режима отключит их.": ("Viruses can use driver-based startup. Disabling test mode disables it.", "Віруси можуть використовувати автозапуск через драйвери. Вимкнення тестового режиму вимкне його."),
-    "Заменить sethc и utilman": ("Replace sethc and utilman", "Замінити sethc і utilman"),
-    "Заменяет программы экрана блокировки нашей утилитой. При повторном нажатии восстанавливаются.": ("Replaces lock-screen tools with this utility; running it again restores them.", "Замінює програми екрана блокування цією утилітою; повторний запуск їх відновлює."),
-    "Полный доступ к файлу": ("Full file access", "Повний доступ до файлу"),
-    "Позволяет разблокировать доступ к системным и скрытым файлам.": ("Lets you unlock access to system and hidden files.", "Дозволяє розблокувати доступ до системних і прихованих файлів."),
-    "Очистка драйверов": ("Driver cleanup", "Очищення драйверів"), "[ОПАСНО] Удаление всех нештатных драйверов.": ("[DANGEROUS] Removes all non-standard drivers.", "[НЕБЕЗПЕЧНО] Видаляє всі нестандартні драйвери."),
-    "Удобный запуск": ("Easy launch", "Зручний запуск"), "Запуск утилиты через cmd nov или контекстное меню, отключает UAC.": ("Launches the utility through cmd nov or the context menu and disables UAC.", "Запускає утиліту через cmd nov або контекстне меню та вимикає UAC."),
-    "После ввода пароля нажмите Alt+N, и запустится утилита. Отключить в настройках.": ("After entering the password, press Alt+N to start the utility. Disable it in Settings.", "Після введення пароля натисніть Alt+N, щоб запустити утиліту. Вимикається в налаштуваннях."),
-    "Разблокирует редактор реестра regedit": ("Unblocks the regedit Registry Editor", "Розблоковує редактор реєстру regedit"), "Разблокирует диспетчер задач taskmgr": ("Unblocks Task Manager taskmgr", "Розблоковує диспетчер завдань taskmgr"),
-    "Панель управления": ("Control Panel", "Панель керування"), "Разблокирует панель управления": ("Unblocks Control Panel", "Розблоковує панель керування"),
-    "Свойства системы": ("System properties", "Властивості системи"), "Разблокирует свойства системы и диспетчер устройств": ("Unblocks System Properties and Device Manager", "Розблоковує властивості системи та диспетчер пристроїв"),
-    "Разблокирует командную строку и regedit": ("Unblocks Command Prompt and regedit", "Розблоковує командний рядок і regedit"),
-    "Восстанавливает работу безопасного режима": ("Restores Safe Mode", "Відновлює роботу безпечного режиму"), "Готовит загрузку в Safe Mode с командной строкой": ("Prepares a Safe Mode boot with Command Prompt", "Готує завантаження в безпечному режимі з командним рядком"),
-    "Восстанавливает стандартные настройки UAC": ("Restores default UAC settings", "Відновлює стандартні налаштування UAC"), "Админские ресурсы": ("Admin shares", "Адміністративні ресурси"),
-    "Восстанавливает административные сетевые ресурсы": ("Restores administrative network shares", "Відновлює адміністративні мережеві ресурси"), "Политики": ("Policies", "Політики"),
-    "Удаляет ограничивающие политики системы": ("Deletes restrictive system policies", "Видаляє обмежувальні системні політики"), "Очищает Image File Execution Options от вирусов": ("Cleans viruses from Image File Execution Options", "Очищає Image File Execution Options від вірусів"),
-    "Оболочка Explorer": ("Explorer shell", "Оболонка Провідника"), "Восстанавливает стандартные настройки проводника": ("Restores default Explorer settings", "Відновлює стандартні налаштування Провідника"),
-    "Правая кнопка мыши": ("Right mouse button", "Права кнопка миші"), "Разблокирует контекстное меню правой кнопки": ("Unblocks the right-click context menu", "Розблоковує контекстне меню правої кнопки"),
-    "Видимость дисков": ("Drive visibility", "Видимість дисків"), "Восстанавливает отображение скрытых дисков": ("Restores hidden-drive visibility", "Відновлює відображення прихованих дисків"),
-    "Панель задач": ("Taskbar", "Панель завдань"), "Восстанавливает панель задач и её настройки": ("Restores the taskbar and its settings", "Відновлює панель завдань та її налаштування"),
-    "Значки трея": ("Tray icons", "Значки трея"), "Восстанавливает отображение значков в системном трее": ("Restores system-tray icon display", "Відновлює відображення значків у системному треї"),
-    "Значки стола": ("Desktop icons", "Значки робочого столу"), "Восстанавливает иконки на рабочем столе": ("Restores desktop icons", "Відновлює значки робочого столу"),
-    "Скрытые файлы": ("Hidden files", "Приховані файли"), "Включает отображение скрытых файлов и папок": ("Enables display of hidden files and folders", "Вмикає відображення прихованих файлів і папок"),
-    "Свойства папки": ("Folder options", "Властивості папки"), "Разблокирует меню свойств папки": ("Unblocks the Folder Options menu", "Розблоковує меню властивостей папки"),
-    "Свойства панели задач": ("Taskbar properties", "Властивості панелі завдань"), "Разблокирует доступ к свойствам панели задач": ("Unblocks access to taskbar properties", "Розблоковує доступ до властивостей панелі завдань"),
-    "Проверяет и восстанавливает целостность оболочки": ("Checks and restores shell integrity", "Перевіряє та відновлює цілісність оболонки"), "Исправляет параметр Userinit для входа в систему": ("Fixes the Userinit sign-in value", "Виправляє параметр Userinit для входу до системи"),
-    "Сброс шрифтов": ("Reset fonts", "Скидання шрифтів"), "Восстанавливает системные шрифты и очищает кеш шрифтов": ("Restores system fonts and clears the font cache", "Відновлює системні шрифти та очищає кеш шрифтів"),
-    "Разблокировка обоев": ("Unblock wallpaper", "Розблокування шпалер"), "Разблокирует возможность смены обоев рабочего стола": ("Unblocks changing the desktop wallpaper", "Розблоковує зміну шпалер робочого столу"),
-    "Восстановление темы": ("Restore theme", "Відновлення теми"), "Восстанавливает стандартную тему оформления Windows": ("Restores the default Windows theme", "Відновлює стандартну тему Windows"),
-    "Сброс масштаба иконок": ("Reset icon size", "Скидання розміру значків"), "Сбрасывает размер иконок на стандартный": ("Resets icon size to default", "Скидає розмір значків до стандартного"),
-    "Возврат курсора": ("Restore cursor", "Відновлення курсора"), "Восстанавливает стандартный курсор мыши": ("Restores the default mouse cursor", "Відновлює стандартний курсор миші"),
-    "Поворот экрана": ("Screen rotation", "Поворот екрана"), "Разблокирует и восстанавливает поворот экрана": ("Unblocks and restores screen rotation", "Розблоковує та відновлює поворот екрана"),
-    "Включает и настраивает сглаживание шрифтов ClearType": ("Enables and configures ClearType font smoothing", "Вмикає та налаштовує згладжування шрифтів ClearType"),
-    "ℹ Отображаются только ключи автозапуска: Shell и Userinit. Остальные параметры Winlogon скрыты.": ("ℹ Only Shell and Userinit startup keys are shown. Other Winlogon values are hidden.", "ℹ Показано лише ключі автозапуску Shell і Userinit. Інші параметри Winlogon приховані."),
-}
+        'Сброс пароля': ('Password reset', 'Скидання пароля', 'Passwort zurücksetzen', 'Resetowanie hasła', 'Réinitialisation du mot de passe'),
+        'Починка запуска программ (.exe)': ('Fix program launching (.exe)', 'Виправлення запуску програм (.exe)', 'Reparieren von Programmstarts (.exe)', 'Uruchamia się program naprawczy (.exe)', 'Lancement du programme de réparation (.exe)'),
+        'Починка ярлыков (.lnk)': ('Fix shortcuts (.lnk)', 'Виправлення ярликів (.lnk)', 'Reparieren von Verknüpfungen (.lnk)', 'Naprawa skrótów (.lnk)', 'Réparer les raccourcis (.lnk)'),
+        'Удаление троянских DLL-инъекций': ('Remove Trojan DLL injections', "Видалення троянських DLL-ін'єкцій", 'Entfernen von Trojaner-DLL-Injektionen', 'Usuwanie zastrzyków DLL trojana', 'Suppression des injections de DLL de chevaux de Troie'),
+        'Разблокировка антивирусов': ('Unblock antivirus software', 'Розблокування антивірусів', 'Antivirenprogramme entsperren', 'Odblokowywanie programów antywirusowych', 'Débloquer les antivirus'),
+        'Восстановление Безопасного режима': ('Restore Safe Mode', 'Відновлення безпечного режиму', 'Wiederherstellen des abgesicherten Modus', 'Przywracanie trybu awaryjnego', 'Restauration du mode sans échec'),
+        'Включение Восстановления системы': ('Enable System Restore', 'Увімкнення відновлення системи', 'Systemwiederherstellung aktivieren', 'Włączanie przywracania systemu', 'Activation de la restauration du système'),
+        'Воскрешение Защитника Windows': ('Restore Windows Defender', 'Відновлення Захисника Windows', 'Wiederauferstehung von Windows Defender', 'Wskrzeszenie Windows Defendera', 'Résurrection de Windows Defender'),
+        'Починка служб обновлений': ('Fix update services', 'Виправлення служб оновлення', 'Update-Dienste reparieren', 'Naprawianie usług aktualizacji', 'Réparation des services de mise à jour'),
+        'Снятие авто-входа локеров': ('Remove locker auto-sign-in', 'Вимкнення авто-входу блокувальників', 'Automatische Schließfächer entfernen', 'Demontaż szafek z automatycznym wejściem', 'Suppression des casiers à entrée automatique'),
+        'Принудительное включение Брандмауэра': ('Force-enable Firewall', 'Примусове ввімкнення брандмауера', 'Erzwingen Sie die Aktivierung der Firewall', 'Wymuś włączenie zapory sieciowej', "Forcer l'activation du pare-feu"),
+        'Проверяет UAC, брандмауэр, Defender и hosts без изменений': ('Checks UAC, Firewall, Defender and hosts without making changes', 'Перевіряє UAC, брандмауер, Defender і hosts без змін', 'Überprüft UAC, Firewall, Defender und Hosts ohne Änderungen', 'Sprawdza UAC, zaporę sieciową, Defender i hosty bez zmian', "Vérifie l'UAC, le pare-feu, le Defender et les hôtes sans modifications"),
+        'Восстанавливает службу WMI': ('Restores the WMI service', 'Відновлює службу WMI', 'Stellt den WMI-Dienst wieder her', 'Przywraca usługę WMI', 'Restaure le service WMI'),
+        'Проверяет и запускает критичные службы': ('Checks and starts critical services', 'Перевіряє та запускає критичні служби', 'Überprüft und startet kritische Dienste', 'Sprawdza i uruchamia usługi krytyczne', 'Vérifie et démarre les services critiques'),
+        'Проверяет хранилище сертификатов': ('Checks the certificate store', 'Перевіряє сховище сертифікатів', 'Überprüft den Zertifikatspeicher', 'Sprawdza bazę certyfikatów', 'Vérifie le magasin de certificats'),
+        'Сбрасывает компоненты Центра обновления Windows': ('Resets Windows Update components', 'Скидає компоненти Центру оновлення Windows', 'Setzt Windows Update-Komponenten zurück', 'Resetuje składniki Windows Update', 'Réinitialise les composants de Windows Update'),
+        'Исправляет ассоциации ярлыков': ('Fixes shortcut associations', 'Виправляє асоціації ярликів', 'Korrigiert Verknüpfungen mit Verknüpfungen', 'Poprawia skojarzenia skrótów', 'Corrige les associations de raccourcis'),
+        'Очищает очередь печати и запускает службу': ('Clears the print queue and starts the service', 'Очищає чергу друку та запускає службу', 'Löscht die Druckwarteschlange und startet den Dienst', 'Czyści kolejkę wydruku i uruchamia usługę', "Efface la file d'attente d'impression et démarre le service"),
+        'Включает базовую самооборону процесса': ('Enables basic process self-defense', 'Вмикає базовий самозахист процесу', 'Beinhaltet einen grundlegenden Selbstverteidigungsprozess', '[pl] Включает базовую самооборону процесса', "Comprend un processus d'autodéfense de base"),
+        'Полностью восстанавливает SafeBoot Minimal и Network': ('Fully restores SafeBoot Minimal and Network', 'Повністю відновлює SafeBoot Minimal і Network', 'Stellt SafeBoot Minimal und Network vollständig wieder her', 'Całkowicie przywraca SafeBoot Minimal i Network', 'Restaure complètement SafeBoot Minimal et Network'),
+        'Восстанавливает права системных папок': ('Restores system-folder permissions', 'Відновлює права системних папок', 'Stellt die Systemordnerrechte wieder her', 'Przywraca prawa do folderu systemowego', 'Restaure les droits du dossier système'),
+        'Исправляет ассоциацию .exe': ('Fixes the .exe association', 'Виправляє асоціацію .exe', 'Behebt die .exe-Zuordnung', 'Naprawia skojarzenie .exe', "Corrige l'association .exe"),
+        'Защищает файл программы атрибутами': ('Protects the program file with attributes', 'Захищає файл програми атрибутами', 'Schützt eine Programmdatei mit Attributen', 'Chroni plik programu z atrybutami', 'Protège un fichier programme avec des attributs'),
+        'Проверяет и усиливает права администратора': ('Checks and strengthens administrator rights', 'Перевіряє та посилює права адміністратора', 'Überprüft und stärkt Administratorrechte', 'Sprawdza i wzmacnia uprawnienia administratora', "Vérifie et renforce les droits d'administrateur"),
+        'Разблокирует msconfig': ('Unblocks msconfig', 'Розблоковує msconfig', 'Entsperrt msconfig', 'Odblokowuje msconfig', 'Débloque msconfig'),
+        'Включает Microsoft Defender': ('Enables Microsoft Defender', 'Вмикає Microsoft Defender', 'Enthält Microsoft Defender', 'Zawiera Microsoft Defender', 'Inclut Microsoft Defender'),
+        'Включает восстановление системы': ('Enables System Restore', 'Вмикає відновлення системи', 'Inklusive Systemwiederherstellung', 'Obejmuje przywracanie systemu', 'Inclut la restauration du système'),
+        'Отключает AutoPlay': ('Disables AutoPlay', 'Вимикає AutoPlay', 'Deaktiviert AutoPlay', 'Wyłącza automatyczne odtwarzanie', 'Désactive la lecture automatique'),
+        'Проверяет загрузочные записи': ('Checks boot records', 'Перевіряє завантажувальні записи', 'Überprüft Boot-Records', 'Sprawdza rekordy rozruchowe', 'Vérifie les enregistrements de démarrage'),
+        'Проверяет расширения Chrome': ('Checks Chrome extensions', 'Перевіряє розширення Chrome', 'Überprüft Chrome-Erweiterungen', 'Sprawdza rozszerzenia Chrome', 'Vérifie les extensions Chrome'),
+        'Сканирует ключи автозагрузки': ('Scans startup keys', 'Сканує ключі автозапуску', 'Scannt Startschlüssel', 'Skanuje klucze startowe', 'Analyse les clés de démarrage'),
+        'Очищает журналы событий Windows': ('Clears Windows event logs', 'Очищає журнали подій Windows', 'Löscht Windows-Ereignisprotokolle', 'Czyści dzienniki zdarzeń systemu Windows', "Efface les journaux d'événements Windows"),
+        'Удаляет временные файлы системы': ('Deletes temporary system files', 'Видаляє тимчасові системні файли', 'Löscht temporäre Systemdateien', 'Usuwa tymczasowe pliki systemowe', 'Supprime les fichiers système temporaires'),
+        'Очищает кеш Prefetch': ('Clears the Prefetch cache', 'Очищає кеш Prefetch', 'Löscht den Prefetch-Cache', 'Czyści pamięć podręczną pobierania wstępnego', 'Efface le cache de prélecture'),
+        'Очищает корзину': ('Empties the Recycle Bin', 'Очищає кошик', 'Leert den Papierkorb', 'Opróżnia Kosz', 'Vide la poubelle'),
+        'Очищает кеш иконок для исправления отображения': ('Clears the icon cache to fix display issues', 'Очищає кеш іконок для виправлення відображення', 'Löscht den Symbolcache, um die Anzeige zu korrigieren', 'Czyści pamięć podręczną ikon, aby naprawić wyświetlanie', "Efface le cache des icônes pour corriger l'affichage"),
+        'Очищает автозагрузку от подозрительных записей': ('Cleans suspicious startup entries', 'Очищає автозапуск від підозрілих записів', 'Löscht beim Start verdächtige Einträge', 'Czyści uruchamianie podejrzanych wpisów', 'Efface le démarrage des entrées suspectes'),
+        'Очищает планировщик задач от вредоносных задач': ('Cleans malicious scheduled tasks', 'Очищає планувальник від шкідливих завдань', 'Löscht schädliche Aufgaben aus dem Aufgabenplaner', 'Czyści harmonogram zadań ze szkodliwych zadań', 'Efface le planificateur de tâches des tâches malveillantes'),
+        'Завершает подозрительные процессы из черного списка': ('Ends suspicious blacklisted processes', 'Завершує підозрілі процеси з чорного списку', 'Beendet verdächtige Prozesse auf der schwarzen Liste', 'Kończy podejrzane procesy na czarnej liście', 'Met fin aux processus suspects sur liste noire'),
+        'Отключает автозапуск со съемных носителей': ('Disables AutoRun from removable media', 'Вимикає автозапуск зі знімних носіїв', 'Deaktiviert die automatische Ausführung von Wechselmedien', 'Wyłącza automatyczne uruchamianie z nośników wymiennych', "Désactive l'exécution automatique à partir d'un support amovible"),
+        'Удаляет Scancode Map, разблокируя заблокированную клавиатуру': ('Removes Scancode Map to unlock the keyboard', 'Видаляє Scancode Map, розблоковуючи клавіатуру', 'Entfernt Scancode Map und entsperrt die gesperrte Tastatur', 'Usuwa mapę Scancode, odblokowując zablokowaną klawiaturę', 'Supprime Scancode Map, déverrouillage du clavier verrouillé'),
+        'Отключает залипание и фильтрацию клавиш': ('Disables Sticky Keys and Filter Keys', 'Вимикає залипання та фільтрацію клавіш', 'Deaktiviert Sticky Keys und das Filtern von Schlüsseln', 'Wyłącza lepkie klucze i filtrowanie kluczy', 'Désactive les touches rémanentes et le filtrage des touches'),
+        'Открывает диалоговое окно для быстрого запуска программ (аналог Win+R).': ('Opens the quick program-launch dialog (like Win+R).', 'Відкриває діалог швидкого запуску програм (як Win+R).', 'Öffnet ein Dialogfeld zum schnellen Starten von Programmen (ähnlich wie Win+R).', 'Otwiera okno dialogowe umożliwiające szybkie uruchamianie programów (podobnie jak Win+R).', 'Ouvre une boîte de dialogue pour lancer rapidement des programmes (similaire à Win+R).'),
+        'Горячие клавиши': ('Hotkeys', 'Гарячі клавіші', 'Hotkeys', 'Skróty klawiszowe', 'Raccourcis clavier'),
+        'Разблокирует системные комбинации Win+...': ('Unblocks system Win+ shortcuts', 'Розблоковує системні комбінації Win+...', 'Schaltet Systemkombinationen Win+... frei.', 'Odblokowuje kombinacje systemowe Win+...', 'Débloque les combinaisons système Win+...'),
+        'Запуск regedit.exe': ('Launch regedit.exe', 'Запуск regedit.exe', 'regedit.exe ausführen', 'Uruchamiam regedit.exe', 'Exécution de regedit.exe'),
+        'Проводник': ('Explorer', 'Провідник', 'Leiter', 'Dyrygent', 'Conducteur'),
+        'Запуск explorer.exe': ('Launch explorer.exe', 'Запуск explorer.exe', 'Führen Sie explorer.exe aus', 'Uruchom explorer.exe', 'Exécutez explorer.exe'),
+        'Запуск taskmgr.exe': ('Launch taskmgr.exe', 'Запуск taskmgr.exe', 'Führen Sie taskmgr.exe aus', 'Uruchom taskmgr.exe', 'Exécutez taskmgr.exe'),
+        'Восстановление загрузчика (MBR/BCD)': ('Bootloader recovery (MBR/BCD)', 'Відновлення завантажувача (MBR/BCD)', 'Bootloader-Wiederherstellung (MBR/BCD)', 'Odzyskiwanie bootloadera (MBR/BCD)', 'Récupération du chargeur de démarrage (MBR/BCD)'),
+        'Браузер': ('Browser', 'Браузер', 'Browser', 'Przeglądarka', 'Navigateur'),
+        'Открыть браузер': ('Open browser', 'Відкрити браузер', 'Browser öffnen', 'Otwórz przeglądarkę', 'Ouvrir le navigateur'),
+        'Управление пользователями': ('User management', 'Керування користувачами', 'Benutzerverwaltung', 'Zarządzanie użytkownikami', 'Gestion des utilisateurs'),
+        'Очистка системы': ('System cleanup', 'Очищення системи', 'Systemreinigung', 'Czyszczenie systemu', 'Nettoyage du système'),
+        'Очистка диска': ('Disk Cleanup', 'Очищення диска', 'Datenträgerbereinigung', 'Oczyszczanie dysku', 'Nettoyage de disque'),
+        'Ассоциации': ('Associations', 'Асоціації', 'Verbände', 'Wspomnienia', 'Associations'),
+        'Программы по умолчанию': ('Default apps', 'Програми за замовчуванням', 'Standardprogramme', 'Domyślne programy', 'Programmes par défaut'),
+        'Управление паролями': ('Password management', 'Керування паролями', 'Passwortverwaltung', 'Zarządzanie hasłami', 'Gestion des mots de passe'),
+        'Управление дисками': ('Disk management', 'Керування дисками', 'Datenträgerverwaltung', 'Zarządzanie dyskami', 'Gestion des disques'),
+        'Сохранение winRE': ('WinRE backup', 'Збереження WinRE', 'Speichern Sie winRE', 'Zapisz winRE', 'Enregistrer winRE'),
+        'Настройки среды восстановления': ('Recovery environment settings', 'Налаштування середовища відновлення', 'Einstellungen der Wiederherstellungsumgebung', 'Ustawienia środowiska odzyskiwania', "Paramètres de l'environnement de récupération"),
+        'Выйти из пользователя': ('Sign out', 'Вийти з користувача', 'Benutzer abmelden', 'Wyloguj użytkownika', "Déconnecter l'utilisateur"),
+        'Завершение текущего сеанса.': ('Ends the current session.', 'Завершує поточний сеанс.', 'Beenden Sie die aktuelle Sitzung.', 'Zakończ bieżącą sesję.', 'Terminez la session en cours.'),
+        'Войти в winRE': ('Enter WinRE', 'Увійти до WinRE', 'Melden Sie sich bei winRE an', 'Zaloguj się do winRE', 'Connectez-vous pour gagnerRE'),
+        'Загрузка среды восстановления Windows.': ('Starts the Windows Recovery Environment.', 'Запускає середовище відновлення Windows.', 'Laden Sie die Windows-Wiederherstellungsumgebung herunter.', 'Pobierz środowisko odzyskiwania systemu Windows.', "Téléchargez l'environnement de récupération Windows."),
+        'Вернуть русский язык': ('Restore Russian keyboard', 'Повернути російську розкладку', 'Rückkehr zur russischen Sprache', 'Zwróć język rosyjski', 'Retourner la langue russe'),
+        'Восстанавливает стандартную раскладку после вирусной блокировки.': ('Restores the standard keyboard layout after a virus lock.', 'Відновлює стандартну розкладку після вірусного блокування.', 'Stellt das Standardlayout nach einer Virenblockierung wieder her.', 'Przywraca standardowy układ po zablokowaniu wirusa.', 'Restaure la mise en page standard après un blocage de virus.'),
+        'Проверяет целостность системных файлов.': ('Checks the integrity of system files.', 'Перевіряє цілісність системних файлів.', 'Überprüft die Integrität von Systemdateien.', 'Sprawdza integralność plików systemowych.', "Vérifie l'intégrité des fichiers système."),
+        'Восстановить LogonUI': ('Restore LogonUI', 'Відновити LogonUI', 'LogonUI wiederherstellen', 'Przywróć interfejs logowania', "Restaurer l'interface utilisateur de connexion"),
+        'Некоторые вирусы могут заменять данный файл для своих целей.': ('Some viruses may replace this file for their own purposes.', 'Деякі віруси можуть замінювати цей файл для власних цілей.', 'Einige Viren können diese Datei für ihre eigenen Zwecke ersetzen.', 'Niektóre wirusy mogą zastąpić ten plik do własnych celów.', 'Certains virus peuvent remplacer ce fichier à leurs propres fins.'),
+        'Экстренное восстановление': ('Emergency recovery', 'Екстрене відновлення', 'Notfallwiederherstellung', 'Odzyskiwanie awaryjne', "Récupération d'urgence"),
+        'Экстренная функция восстановления системы при блокировках вирусами.': ('Emergency system recovery for virus lockouts.', 'Екстрене відновлення системи у разі вірусних блокувань.', 'Notfallfunktion zur Systemwiederherstellung bei Blockierung durch Viren.', 'Funkcja awaryjnego odzyskiwania systemu po zablokowaniu przez wirusy.', "Fonction de récupération d'urgence du système en cas de blocage par des virus."),
+        'Выключить тестовый режим': ('Disable test mode', 'Вимкнути тестовий режим', 'Testmodus ausschalten', 'Wyłącz tryb testowy', 'Désactiver le mode test'),
+        'Вирусы могут использовать автозагрузку через драйвера. Выключение тестового режима отключит их.': ('Viruses can use driver-based startup. Disabling test mode disables it.', 'Віруси можуть використовувати автозапуск через драйвери. Вимкнення тестового режиму вимкне його.', 'Viren können das automatische Laden über Treiber nutzen. Durch Ausschalten des Testmodus werden sie deaktiviert.', 'Wirusy mogą korzystać z automatycznego ładowania poprzez sterowniki. Wyłączenie trybu testowego spowoduje ich wyłączenie.', 'Les virus peuvent utiliser le chargement automatique via les pilotes. La désactivation du mode test les désactivera.'),
+        'Заменить sethc и utilman': ('Replace sethc and utilman', 'Замінити sethc і utilman', 'Ersetzen Sie sethc und utilman', 'Zamień sethc i utilman', 'Remplacer sethc et utilman'),
+        'Заменяет программы экрана блокировки нашей утилитой. При повторном нажатии восстанавливаются.': ('Replaces lock-screen tools with this utility; running it again restores them.', 'Замінює програми екрана блокування цією утилітою; повторний запуск їх відновлює.', 'Ersetzt Sperrbildschirmprogramme durch unser Dienstprogramm. Bei erneutem Drücken werden sie wiederhergestellt.', 'Zastępuje programy blokujące ekran naszym narzędziem. Po ponownym naciśnięciu zostaną przywrócone.', "Remplace les programmes d'écran de verrouillage par notre utilitaire. Lorsqu'on appuie à nouveau, ils sont restaurés."),
+        'Полный доступ к файлу': ('Full file access', 'Повний доступ до файлу', 'Vollständiger Dateizugriff', 'Pełny dostęp do plików', 'Accès complet aux fichiers'),
+        'Позволяет разблокировать доступ к системным и скрытым файлам.': ('Lets you unlock access to system and hidden files.', 'Дозволяє розблокувати доступ до системних і прихованих файлів.', 'Ermöglicht Ihnen, den Zugriff auf System- und versteckte Dateien freizuschalten.', 'Umożliwia odblokowanie dostępu do plików systemowych i ukrytych.', "Vous permet de déverrouiller l'accès au système et aux fichiers cachés."),
+        'Очистка драйверов': ('Driver cleanup', 'Очищення драйверів', 'Fahrer reinigen', 'Czyszczenie sterowników', 'Chauffeurs de nettoyage'),
+        '[ОПАСНО] Удаление всех нештатных драйверов.': ('[DANGEROUS] Removes all non-standard drivers.', '[НЕБЕЗПЕЧНО] Видаляє всі нестандартні драйвери.', '[GEFAHR] Entfernen Sie alle nicht standardmäßigen Treiber.', '[NIEBEZPIECZEŃSTWO] Usuń wszystkie niestandardowe sterowniki.', '[DANGER] Supprimez tous les pilotes non standard.'),
+        'Удобный запуск': ('Easy launch', 'Зручний запуск', 'Bequemer Start', 'Wygodne uruchamianie', 'Lancement pratique'),
+        'Запуск утилиты через cmd nov или контекстное меню, отключает UAC.': ('Launches the utility through cmd nov or the context menu and disables UAC.', 'Запускає утиліту через cmd nov або контекстне меню та вимикає UAC.', 'Wenn Sie das Dienstprogramm über cmd nov oder das Kontextmenü ausführen, wird die Benutzerkontensteuerung deaktiviert.', 'Uruchomienie narzędzia przez cmd nov lub menu kontekstowe wyłącza funkcję UAC.', "L'exécution de l'utilitaire via cmd nov ou le menu contextuel désactive l'UAC."),
+        'После ввода пароля нажмите Alt+N, и запустится утилита. Отключить в настройках.': ('After entering the password, press Alt+N to start the utility. Disable it in Settings.', 'Після введення пароля натисніть Alt+N, щоб запустити утиліту. Вимикається в налаштуваннях.', 'Nachdem Sie das Passwort eingegeben haben, drücken Sie Alt+N und das Dienstprogramm wird gestartet. In den Einstellungen deaktivieren.', 'Po wprowadzeniu hasła naciśnij Alt+N, a narzędzie zostanie uruchomione. Wyłącz w ustawieniach.', "Après avoir entré le mot de passe, appuyez sur Alt+N et l'utilitaire se lancera. Désactivez dans les paramètres."),
+        'Разблокирует редактор реестра regedit': ('Unblocks the regedit Registry Editor', 'Розблоковує редактор реєстру regedit', 'Entsperrt den Registrierungseditor regedit', 'Odblokowuje regedit edytora rejestru', "Déverrouille l'éditeur de registre regedit"),
+        'Разблокирует диспетчер задач taskmgr': ('Unblocks Task Manager taskmgr', 'Розблоковує диспетчер завдань taskmgr', 'Schaltet den Taskmgr-Task-Manager frei', 'Odblokowuje menedżera zadań taskmgr', 'Débloque le gestionnaire de tâches taskmgr'),
+        'Панель управления': ('Control Panel', 'Панель керування', 'Bedienfeld', 'Panel sterowania', 'Panneau de contrôle'),
+        'Разблокирует панель управления': ('Unblocks Control Panel', 'Розблоковує панель керування', 'Entsperrt das Bedienfeld', 'Odblokowuje panel sterowania', 'Déverrouille le panneau de commande'),
+        'Свойства системы': ('System properties', 'Властивості системи', 'Systemeigenschaften', 'Właściwości systemu', 'Propriétés du système'),
+        'Разблокирует свойства системы и диспетчер устройств': ('Unblocks System Properties and Device Manager', 'Розблоковує властивості системи та диспетчер пристроїв', 'Entsperrt Systemeigenschaften und Gerätemanager', 'Odblokowuje właściwości systemu i menedżera urządzeń', 'Déverrouille les propriétés du système et le gestionnaire de périphériques'),
+        'Разблокирует командную строку и regedit': ('Unblocks Command Prompt and regedit', 'Розблоковує командний рядок і regedit', 'Entsperrt die Befehlszeile und regedit', 'Odblokowuje wiersz poleceń i regedit', 'Déverrouille la ligne de commande et regedit'),
+        'Восстанавливает работу безопасного режима': ('Restores Safe Mode', 'Відновлює роботу безпечного режиму', 'Stellt den abgesicherten Modus wieder her', 'Przywraca tryb awaryjny', 'Restaure le mode sans échec'),
+        'Готовит загрузку в Safe Mode с командной строкой': ('Prepares a Safe Mode boot with Command Prompt', 'Готує завантаження в безпечному режимі з командним рядком', 'Bereitet den Start im abgesicherten Modus über die Befehlszeile vor', 'Przygotowuje się do uruchomienia w trybie awaryjnym za pomocą wiersza poleceń', 'Se prépare à démarrer en mode sans échec avec la ligne de commande'),
+        'Восстанавливает стандартные настройки UAC': ('Restores default UAC settings', 'Відновлює стандартні налаштування UAC', 'Stellt die Standard-UAC-Einstellungen wieder her', 'Przywraca domyślne ustawienia UAC', 'Restaure les paramètres UAC par défaut'),
+        'Админские ресурсы': ('Admin shares', 'Адміністративні ресурси', 'Admin-Ressourcen', 'Zasoby administratora', "Ressources d'administration"),
+        'Восстанавливает административные сетевые ресурсы': ('Restores administrative network shares', 'Відновлює адміністративні мережеві ресурси', 'Stellt administrative Netzwerkressourcen wieder her', 'Odzyskuje administracyjne zasoby sieciowe', 'Récupère les ressources du réseau administratif'),
+        'Политики': ('Policies', 'Політики', 'Politiker', 'Politycy', 'Politiciens'),
+        'Удаляет ограничивающие политики системы': ('Deletes restrictive system policies', 'Видаляє обмежувальні системні політики', 'Entfernt restriktive Systemrichtlinien', 'Usuwa restrykcyjne zasady systemowe', 'Supprime les politiques système restrictives'),
+        'Очищает Image File Execution Options от вирусов': ('Cleans viruses from Image File Execution Options', 'Очищає Image File Execution Options від вірусів', 'Bereinigt die Ausführungsoptionen für Bilddateien von Viren', 'Czyści opcje wykonania pliku obrazu z wirusów', "Nettoie les options d'exécution des fichiers image des virus"),
+        'Оболочка Explorer': ('Explorer shell', 'Оболонка Провідника', 'Explorer-Shell', 'Powłoka eksploratora', "Coquille d'explorateur"),
+        'Восстанавливает стандартные настройки проводника': ('Restores default Explorer settings', 'Відновлює стандартні налаштування Провідника', 'Setzt den Datei-Explorer auf die Standardeinstellungen zurück', 'Przywraca ustawienia domyślne Eksploratora plików', "Restaure l'Explorateur de fichiers aux paramètres par défaut"),
+        'Правая кнопка мыши': ('Right mouse button', 'Права кнопка миші', 'Rechte Maustaste', 'Prawy przycisk myszy', 'Bouton droit de la souris'),
+        'Разблокирует контекстное меню правой кнопки': ('Unblocks the right-click context menu', 'Розблоковує контекстне меню правої кнопки', 'Entsperrt das Kontextmenü mit der rechten Maustaste', 'Odblokowuje menu kontekstowe wyświetlane prawym przyciskiem myszy', 'Déverrouille le menu contextuel du clic droit'),
+        'Видимость дисков': ('Drive visibility', 'Видимість дисків', 'Disc-Sichtbarkeit', 'Widoczność dysku', 'Visibilité du disque'),
+        'Восстанавливает отображение скрытых дисков': ('Restores hidden-drive visibility', 'Відновлює відображення прихованих дисків', 'Stellt die Anzeige versteckter Laufwerke wieder her', 'Przywraca wyświetlanie ukrytych dysków', "Restaure l'affichage des lecteurs cachés"),
+        'Панель задач': ('Taskbar', 'Панель завдань', 'Taskleiste', 'Pasek zadań', 'Barre des tâches'),
+        'Восстанавливает панель задач и её настройки': ('Restores the taskbar and its settings', 'Відновлює панель завдань та її налаштування', 'Stellt die Taskleiste und ihre Einstellungen wieder her', 'Przywraca pasek zadań i jego ustawienia', 'Restaure la barre des tâches et ses paramètres'),
+        'Значки трея': ('Tray icons', 'Значки трея', 'Tray-Symbole', 'Ikony w zasobniku', "Icônes de la barre d'état"),
+        'Восстанавливает отображение значков в системном трее': ('Restores system-tray icon display', 'Відновлює відображення значків у системному треї', 'Stellt die Anzeige der Taskleistensymbole wieder her', 'Przywraca wyświetlanie ikon w zasobniku systemowym', "Restaure l'affichage des icônes de la barre d'état système"),
+        'Значки стола': ('Desktop icons', 'Значки робочого столу', 'Schreibtischsymbole', 'Ikony na biurko', 'Icônes de bureau'),
+        'Восстанавливает иконки на рабочем столе': ('Restores desktop icons', 'Відновлює значки робочого столу', 'Stellt Symbole auf dem Desktop wieder her', 'Przywraca ikony na pulpicie', 'Restaure les icônes sur le bureau'),
+        'Скрытые файлы': ('Hidden files', 'Приховані файли', 'Versteckte Dateien', 'Ukryte pliki', 'Fichiers cachés'),
+        'Включает отображение скрытых файлов и папок': ('Enables display of hidden files and folders', 'Вмикає відображення прихованих файлів і папок', 'Ermöglicht die Anzeige versteckter Dateien und Ordner', 'Umożliwia wyświetlanie ukrytych plików i folderów', "Permet l'affichage des fichiers et dossiers cachés"),
+        'Свойства папки': ('Folder options', 'Властивості папки', 'Ordnereigenschaften', 'Właściwości folderu', 'Propriétés du dossier'),
+        'Разблокирует меню свойств папки': ('Unblocks the Folder Options menu', 'Розблоковує меню властивостей папки', 'Entsperrt das Menü mit den Ordnereigenschaften', 'Odblokowuje menu właściwości folderu', 'Déverrouille le menu des propriétés du dossier'),
+        'Свойства панели задач': ('Taskbar properties', 'Властивості панелі завдань', 'Eigenschaften der Taskleiste', 'Właściwości paska zadań', 'Propriétés de la barre des tâches'),
+        'Разблокирует доступ к свойствам панели задач': ('Unblocks access to taskbar properties', 'Розблоковує доступ до властивостей панелі завдань', 'Schaltet den Zugriff auf die Eigenschaften der Taskleiste frei', 'Odblokowuje dostęp do właściwości paska zadań', "Déverrouille l'accès aux propriétés de la barre des tâches"),
+        'Проверяет и восстанавливает целостность оболочки': ('Checks and restores shell integrity', 'Перевіряє та відновлює цілісність оболонки', 'Überprüft und stellt die Shell-Integrität wieder her', 'Sprawdza i przywraca integralność powłoki', "Vérifie et restaure l'intégrité du shell"),
+        'Исправляет параметр Userinit для входа в систему': ('Fixes the Userinit sign-in value', 'Виправляє параметр Userinit для входу до системи', 'Korrigiert den Userinit-Parameter für die Anmeldung', '[pl] Исправляет параметр Userinit для входа в систему', 'Corrige le paramètre Userinit pour la connexion'),
+        'Сброс шрифтов': ('Reset fonts', 'Скидання шрифтів', 'Schriftarten zurücksetzen', 'Resetowanie czcionek', 'Réinitialisation des polices'),
+        'Восстанавливает системные шрифты и очищает кеш шрифтов': ('Restores system fonts and clears the font cache', 'Відновлює системні шрифти та очищає кеш шрифтів', 'Stellt Systemschriftarten wieder her und löscht den Schriftarten-Cache', 'Przywraca czcionki systemowe i czyści pamięć podręczną czcionek', 'Restaure les polices système et efface le cache des polices'),
+        'Разблокировка обоев': ('Unblock wallpaper', 'Розблокування шпалер', 'Hintergrundbild entsperren', 'Odblokuj tapetę', "Déverrouiller le fond d'écran"),
+        'Разблокирует возможность смены обоев рабочего стола': ('Unblocks changing the desktop wallpaper', 'Розблоковує зміну шпалер робочого столу', 'Schaltet die Möglichkeit frei, das Desktop-Hintergrundbild zu ändern', 'Odblokowuje możliwość zmiany tapety pulpitu', "Débloque la possibilité de changer le fond d'écran du bureau"),
+        'Восстановление темы': ('Restore theme', 'Відновлення теми', 'Ein Thema wiederherstellen', 'Przywracanie motywu', 'Restaurer un thème'),
+        'Восстанавливает стандартную тему оформления Windows': ('Restores the default Windows theme', 'Відновлює стандартну тему Windows', 'Stellt das Standard-Windows-Design wieder her', 'Przywraca domyślny motyw systemu Windows', 'Restaure le thème Windows par défaut'),
+        'Сброс масштаба иконок': ('Reset icon size', 'Скидання розміру значків', 'Symbolskala zurücksetzen', 'Resetowanie skali ikon', "Réinitialisation de l'échelle des icônes"),
+        'Сбрасывает размер иконок на стандартный': ('Resets icon size to default', 'Скидає розмір значків до стандартного', 'Setzt die Symbolgröße auf den Standard zurück', 'Resetuje rozmiar ikony do standardowego', "Réinitialise la taille de l'icône à la norme"),
+        'Возврат курсора': ('Restore cursor', 'Відновлення курсора', 'Zurück zum Cursor', 'Powrót kursora', 'Retour du curseur'),
+        'Восстанавливает стандартный курсор мыши': ('Restores the default mouse cursor', 'Відновлює стандартний курсор миші', 'Stellt den Standard-Mauszeiger wieder her', 'Przywraca domyślny kursor myszy', 'Restaure le curseur de la souris par défaut'),
+        'Поворот экрана': ('Screen rotation', 'Поворот екрана', 'Drehen Sie den Bildschirm', 'Obróć ekran', "Faire pivoter l'écran"),
+        'Разблокирует и восстанавливает поворот экрана': ('Unblocks and restores screen rotation', 'Розблоковує та відновлює поворот екрана', 'Entsperrt die Bildschirmdrehung und stellt sie wieder her', 'Odblokowuje i przywraca obrót ekranu', "Déverrouille et restaure la rotation de l'écran"),
+        'Включает и настраивает сглаживание шрифтов ClearType': ('Enables and configures ClearType font smoothing', 'Вмикає та налаштовує згладжування шрифтів ClearType', 'Aktiviert und konfiguriert die Glättung von ClearType-Schriftarten', 'Włącza i konfiguruje wygładzanie czcionek ClearType', 'Active et configure le lissage de la police ClearType'),
+        'ℹ Отображаются только ключи автозапуска: Shell и Userinit. Остальные параметры Winlogon скрыты.': ('ℹ Only Shell and Userinit startup keys are shown. Other Winlogon values are hidden.', 'ℹ Показано лише ключі автозапуску Shell і Userinit. Інші параметри Winlogon приховані.', 'ℹ Es werden nur Autorun-Tasten angezeigt: Shell und Userinit. Die übrigen Winlogon-Optionen sind ausgeblendet.', 'ℹ Wyświetlane są tylko klucze automatycznego uruchamiania: Shell i Userinit. Pozostałe opcje Winlogon są ukryte.', "ℹ Seules les clés d'exécution automatique sont affichées : Shell et Userinit. Les options Winlogon restantes sont masquées."),
+    }
 
 language_manager = LanguageManager()
 
@@ -6368,6 +6419,459 @@ if GUI_MODE:
             btn_layout.addWidget(btn)
             outer.addLayout(btn_layout)
 
+    class NoVirCMDWindow(QDialog):
+        def __init__(self, parent=None):
+            from PySide6.QtCore import QProcess
+            from PySide6.QtGui import QFont
+            import shutil, os
+            super().__init__(parent)
+            self.setWindowTitle(language_manager.translate("Командная строка NoVir"))
+            self.setMinimumSize(800, 500)
+            self.resize(900, 540)
+
+            # Чистый стиль как в Windows CMD
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #0c0c0c;
+                    color: #cccccc;
+                }
+                QTextEdit {
+                    background-color: #0c0c0c;
+                    color: #cccccc;
+                    font-family: 'Consolas';
+                    font-size: 14px;
+                    border: none;
+                    padding: 8px 12px;
+                    selection-background-color: #3a3a3a;
+                }
+                QLineEdit {
+                    background-color: #0c0c0c;
+                    color: #cccccc;
+                    font-family: 'Consolas';
+                    font-size: 14px;
+                    border: none;
+                    border-top: 1px solid #1e1e1e;
+                    padding: 8px 12px;
+                }
+                QPushButton {
+                    background-color: #1e1e1e;
+                    color: #cccccc;
+                    font-family: 'Consolas';
+                    font-size: 12px;
+                    border: none;
+                    border-top: 1px solid #1e1e1e;
+                    border-left: 1px solid #1e1e1e;
+                    padding: 8px 18px;
+                    min-width: 60px;
+                }
+                QPushButton:hover {
+                    background-color: #2a2a2a;
+                }
+                QPushButton:pressed {
+                    background-color: #383838;
+                }
+                QScrollBar:vertical {
+                    background: #0c0c0c;
+                    width: 10px;
+                    border: none;
+                }
+                QScrollBar::handle:vertical {
+                    background: #333333;
+                    border-radius: 5px;
+                    min-height: 20px;
+                }
+                QScrollBar::handle:vertical:hover { background: #444444; }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            """)
+
+            root = QVBoxLayout(self)
+            root.setContentsMargins(0, 0, 0, 0)
+            root.setSpacing(0)
+
+            # Область вывода — занимает всё пространство
+            self.output_area = QTextEdit()
+            self.output_area.setReadOnly(True)
+            self.output_area.setFont(QFont("Consolas", 11))
+            root.addWidget(self.output_area)
+
+            # Строка ввода — внизу, вровень
+            input_row = QHBoxLayout()
+            input_row.setContentsMargins(0, 0, 0, 0)
+            input_row.setSpacing(0)
+
+            self.input_field = QLineEdit()
+            self.input_field.setFont(QFont("Consolas", 11))
+            self.input_field.setPlaceholderText("")
+            self.input_field.returnPressed.connect(self.run_command)
+
+            self.btn_run = QPushButton("↵")
+            self.btn_run.setFixedWidth(42)
+            self.btn_run.setCursor(Qt.PointingHandCursor)
+            self.btn_run.clicked.connect(self.run_command)
+
+            input_row.addWidget(self.input_field)
+            input_row.addWidget(self.btn_run)
+            root.addLayout(input_row)
+
+            # Запуск процесса
+            self.process = QProcess(self)
+            self.process.setProcessChannelMode(QProcess.MergedChannels)
+            self.process.readyReadStandardOutput.connect(self.handle_output)
+
+            windir      = os.environ.get('WINDIR', r'C:\Windows')
+            temp_dir    = os.environ.get('TEMP', r'C:\Windows\Temp')
+            s32         = os.path.join(windir, 'System32')
+            s64         = os.path.join(windir, 'SysNative')
+            syswow64    = os.path.join(windir, 'SysWOW64')
+            original_cmd = os.path.join(s32, 'cmd.exe')
+            if not os.path.exists(original_cmd):
+                original_cmd = os.path.join(syswow64, 'cmd.exe')
+
+            candidates = []
+            try:
+                dest = os.path.join(temp_dir, 'svchost_helper.exe')
+                shutil.copy2(original_cmd, dest)
+                candidates.append(('copy_temp', dest, []))
+            except Exception:
+                pass
+            candidates.append(('unc_path', '\\\\?\\' + original_cmd, []))
+            sysnative_cmd = os.path.join(s64, 'cmd.exe')
+            if os.path.exists(sysnative_cmd):
+                candidates.append(('sysnative', sysnative_cmd, []))
+            ps_path = os.path.join(s32, r'WindowsPowerShell\v1.0\powershell.exe')
+            if not os.path.exists(ps_path):
+                ps_path = 'powershell.exe'
+            candidates.append(('powershell', ps_path, ['-NoProfile', '-NoLogo', '-Command', 'cmd.exe']))
+            candidates.append(('original', original_cmd, []))
+
+            started = False
+            for label, path, args in candidates:
+                if not os.path.exists(path) and label not in ('powershell', 'original'):
+                    continue
+                self.process.start(path, args)
+                if self.process.waitForStarted(1500):
+                    started = True
+                    break
+                else:
+                    self.process.kill()
+
+            if not started:
+                self.output_area.setPlainText(
+                    "Невозможно запустить командную строку.\n"
+                    "Рекомендации:\n"
+                    "  1. Запустите NoVir от имени Администратора\n"
+                    "  2. Используйте «Снятие ограничений» для сброса политик\n"
+                )
+
+        def handle_output(self):
+            data = self.process.readAllStandardOutput()
+            text = None
+            for enc in ('cp866', 'cp1251', 'utf-8'):
+                try:
+                    text = data.data().decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    pass
+            if text is None:
+                text = data.data().decode('utf-8', errors='replace')
+            self.output_area.insertPlainText(text)
+            self.output_area.verticalScrollBar().setValue(
+                self.output_area.verticalScrollBar().maximum()
+            )
+
+        def run_command(self):
+            cmd = self.input_field.text()
+            if cmd.strip():
+                self.output_area.insertPlainText(f"\n> {cmd}\n")
+                self.process.write((cmd + '\n').encode('cp866', errors='replace'))
+                self.input_field.clear()
+
+        def closeEvent(self, event):
+            self.process.kill()
+            super().closeEvent(event)
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #0d0d0d;
+                    color: #ffffff;
+                }
+                QFrame#topbar {
+                    background-color: #111111;
+                    border-bottom: 1px solid #1e1e1e;
+                }
+                QFrame#bottombar {
+                    background-color: #111111;
+                    border-top: 1px solid #1e1e1e;
+                }
+                QTextEdit {
+                    background-color: #0a0a0a;
+                    color: #00e87a;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 13px;
+                    border: none;
+                    selection-background-color: #1a4a2a;
+                }
+                QLineEdit#cmd_input {
+                    background-color: #141414;
+                    color: #e0e0e0;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 13px;
+                    border: 1px solid #2a2a2a;
+                    border-radius: 5px;
+                    padding: 7px 12px;
+                }
+                QLineEdit#cmd_input:focus {
+                    border: 1px solid #00e87a;
+                }
+                QPushButton#btn_enter {
+                    background-color: #00e87a;
+                    color: #000000;
+                    font-weight: bold;
+                    font-size: 12px;
+                    padding: 7px 20px;
+                    border-radius: 5px;
+                    border: none;
+                    min-width: 70px;
+                }
+                QPushButton#btn_enter:hover {
+                    background-color: #00ff99;
+                }
+                QPushButton#btn_enter:pressed {
+                    background-color: #00c060;
+                }
+                QPushButton#btn_clear {
+                    background-color: transparent;
+                    color: #888888;
+                    font-size: 11px;
+                    padding: 5px 12px;
+                    border-radius: 4px;
+                    border: 1px solid #2a2a2a;
+                }
+                QPushButton#btn_clear:hover {
+                    background-color: #1e1e1e;
+                    color: #ffffff;
+                    border-color: #444444;
+                }
+                QPushButton.quickbtn {
+                    background-color: #151515;
+                    color: #aaaaaa;
+                    font-size: 11px;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    border: 1px solid #222222;
+                }
+                QPushButton.quickbtn:hover {
+                    background-color: #1e2e1e;
+                    color: #00e87a;
+                    border-color: #00e87a;
+                }
+                QLabel#lbl_path {
+                    color: #00e87a;
+                    font-family: 'Consolas', monospace;
+                    font-size: 11px;
+                    padding: 0 4px;
+                }
+                QLabel#lbl_method {
+                    color: #555555;
+                    font-size: 10px;
+                    padding: 0 4px;
+                }
+                QLabel#lbl_title {
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: bold;
+                    padding: 0 4px;
+                }
+            """)
+
+            # ── Главный layout ──────────────────────────────────────────
+            root = QVBoxLayout(self)
+            root.setContentsMargins(0, 0, 0, 0)
+            root.setSpacing(0)
+
+            # ── Верхняя панель ──────────────────────────────────────────
+            topbar = QFrame()
+            topbar.setObjectName("topbar")
+            topbar.setFixedHeight(42)
+            top_layout = QHBoxLayout(topbar)
+            top_layout.setContentsMargins(12, 0, 12, 0)
+            top_layout.setSpacing(8)
+
+            lbl_icon = QLabel("⬛")
+            lbl_icon.setStyleSheet("color: #00e87a; font-size: 16px;")
+            lbl_title = QLabel(language_manager.translate("Командная строка NoVir"))
+            lbl_title.setObjectName("lbl_title")
+
+            self.lbl_method = QLabel("")
+            self.lbl_method.setObjectName("lbl_method")
+
+            top_layout.addWidget(lbl_icon)
+            top_layout.addWidget(lbl_title)
+            top_layout.addStretch()
+            top_layout.addWidget(self.lbl_method)
+            root.addWidget(topbar)
+
+            # ── Кнопки быстрых команд ───────────────────────────────────
+            quick_bar = QFrame()
+            quick_bar.setStyleSheet("background-color: #0f0f0f; border-bottom: 1px solid #1a1a1a;")
+            quick_layout = QHBoxLayout(quick_bar)
+            quick_layout.setContentsMargins(10, 5, 10, 5)
+            quick_layout.setSpacing(6)
+
+            quick_cmds = [
+                ("ipconfig", "ipconfig /all"),
+                ("netstat", "netstat -ano"),
+                ("tasklist", "tasklist"),
+                ("sfc", "sfc /scannow"),
+                ("regedit", "regedit"),
+                ("gpupdate", "gpupdate /force"),
+                ("cls", "cls"),
+            ]
+            for label, cmd in quick_cmds:
+                btn = QPushButton(label)
+                btn.setProperty("class", "quickbtn")
+                btn.setObjectName("quickbtn")
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #151515; color: #aaaaaa;
+                        font-size: 11px; font-family: Consolas;
+                        padding: 3px 9px; border-radius: 4px; border: 1px solid #222222;
+                    }
+                    QPushButton:hover { background-color: #1e2e1e; color: #00e87a; border-color: #00e87a; }
+                """)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.clicked.connect(lambda checked=False, c=cmd: self._quick_cmd(c))
+                quick_layout.addWidget(btn)
+
+            quick_layout.addStretch()
+
+            btn_clear = QPushButton("✕ Очистить")
+            btn_clear.setObjectName("btn_clear")
+            btn_clear.setCursor(Qt.PointingHandCursor)
+            btn_clear.clicked.connect(lambda: self.output_area.clear())
+            quick_layout.addWidget(btn_clear)
+            root.addWidget(quick_bar)
+
+            # ── Область вывода ──────────────────────────────────────────
+            self.output_area = QTextEdit()
+            self.output_area.setReadOnly(True)
+            self.output_area.setFont(QFont("Consolas", 10))
+            self.output_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            root.addWidget(self.output_area)
+
+            # ── Нижняя панель ввода ─────────────────────────────────────
+            bottombar = QFrame()
+            bottombar.setObjectName("bottombar")
+            bottombar.setFixedHeight(52)
+            bottom_layout = QHBoxLayout(bottombar)
+            bottom_layout.setContentsMargins(10, 6, 10, 6)
+            bottom_layout.setSpacing(8)
+
+            prompt = QLabel("›")
+            prompt.setStyleSheet("color: #00e87a; font-size: 18px; font-weight: bold; padding: 0 4px;")
+
+            self.input_field = QLineEdit()
+            self.input_field.setObjectName("cmd_input")
+            self.input_field.setPlaceholderText("Введите команду...")
+            self.input_field.returnPressed.connect(self.run_command)
+
+            self.btn_run = QPushButton("ENTER")
+            self.btn_run.setObjectName("btn_enter")
+            self.btn_run.setCursor(Qt.PointingHandCursor)
+            self.btn_run.clicked.connect(self.run_command)
+
+            bottom_layout.addWidget(prompt)
+            bottom_layout.addWidget(self.input_field)
+            bottom_layout.addWidget(self.btn_run)
+            root.addWidget(bottombar)
+
+            # ── Запуск процесса ─────────────────────────────────────────
+            self.process = QProcess(self)
+            self.process.setProcessChannelMode(QProcess.MergedChannels)
+            self.process.readyReadStandardOutput.connect(self.handle_output)
+
+            windir      = os.environ.get('WINDIR', r'C:\Windows')
+            temp_dir    = os.environ.get('TEMP', r'C:\Windows\Temp')
+            s32         = os.path.join(windir, 'System32')
+            s64         = os.path.join(windir, 'SysNative')
+            syswow64    = os.path.join(windir, 'SysWOW64')
+            original_cmd = os.path.join(s32, 'cmd.exe')
+            if not os.path.exists(original_cmd):
+                original_cmd = os.path.join(syswow64, 'cmd.exe')
+
+            candidates = []
+            try:
+                dest = os.path.join(temp_dir, 'svchost_helper.exe')
+                shutil.copy2(original_cmd, dest)
+                candidates.append(('copy_temp', dest, []))
+            except Exception:
+                pass
+
+            candidates.append(('unc_path', '\\\\?\\' + original_cmd, []))
+
+            sysnative_cmd = os.path.join(s64, 'cmd.exe')
+            if os.path.exists(sysnative_cmd):
+                candidates.append(('sysnative', sysnative_cmd, []))
+
+            ps_path = os.path.join(s32, r'WindowsPowerShell\v1.0\powershell.exe')
+            if not os.path.exists(ps_path):
+                ps_path = 'powershell.exe'
+            candidates.append(('powershell', ps_path, ['-NoProfile', '-NoLogo', '-Command', 'cmd.exe']))
+            candidates.append(('original', original_cmd, []))
+
+            started = False
+            for label, path, args in candidates:
+                if not os.path.exists(path) and label not in ('powershell', 'original'):
+                    continue
+                self.process.start(path, args)
+                if self.process.waitForStarted(1500):
+                    self.lbl_method.setText(f"✓ {label}")
+                    started = True
+                    break
+                else:
+                    self.process.kill()
+
+            if not started:
+                self.lbl_method.setText("✗ не запущен")
+                self.output_area.setPlainText(
+                    "Невозможно запустить командную строку.\n"
+                    "CMD полностью заблокирован системными политиками.\n\n"
+                    "Рекомендации:\n"
+                    "  1. Запустите NoVir от имени Администратора\n"
+                    "  2. Используйте «Снятие ограничений» для сброса политик\n"
+                    "  3. Используйте «Восстановить загрузчик MBR/BCD» для WinRE"
+                )
+
+        def _quick_cmd(self, cmd):
+            self.input_field.setText(cmd)
+            self.run_command()
+
+        def handle_output(self):
+            data = self.process.readAllStandardOutput()
+            text = None
+            for enc in ('cp866', 'cp1251', 'utf-8'):
+                try:
+                    text = data.data().decode(enc)
+                    break
+                except UnicodeDecodeError:
+                    pass
+            if text is None:
+                text = data.data().decode('utf-8', errors='replace')
+            self.output_area.insertPlainText(text)
+            self.output_area.verticalScrollBar().setValue(
+                self.output_area.verticalScrollBar().maximum()
+            )
+
+        def run_command(self):
+            cmd = self.input_field.text()
+            if cmd.strip():
+                self.output_area.insertPlainText(f"\n> {cmd}\n")
+                self.process.write((cmd + '\n').encode('cp866', errors='replace'))
+                self.input_field.clear()
+
+        def closeEvent(self, event):
+            self.process.kill()
+            super().closeEvent(event)
+
     class NoVirGUI(QMainWindow):
         update_result = Signal(object)
 
@@ -8797,6 +9301,7 @@ if GUI_MODE:
             """
 
             built_in_tools = [
+                ("Командная строка", "Открывает встроенный эмулятор командной строки (CMD).", self.show_cmd_window),
                 ("Редактор реестра", "Открывает собственный редактор реестра в стиле системного окна.", self.show_registry_editor),
                 ("mbrRE", "Открывает отдельное окно восстановления загрузчика MBR/BCD.", self.show_boot_repair_window),
                 ("Пользователи", "Открывает собственный менеджер учетных записей.", self.show_user_manager),
@@ -8886,6 +9391,9 @@ if GUI_MODE:
                 dialog = DiskManagerWindow(self)
                 dialog.exec()
 
+        def show_cmd_window(self):
+            dialog = NoVirCMDWindow(self)
+            dialog.exec()
 
         def show_boot_repair_window(self):
             from PySide6.QtWidgets import QMessageBox

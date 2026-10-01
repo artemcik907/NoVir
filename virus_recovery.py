@@ -8,8 +8,8 @@ NoVir - Вирусный Реаниматор
 """
 
 import os
-import sys
 import explorer_tab
+import sys
 import subprocess
 import winreg
 import ctypes
@@ -58,14 +58,14 @@ PYSIDE_AVAILABLE = False
 # Условный импорт PySide6
 if GUI_MODE:
     try:
-        from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+        from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                      QHBoxLayout, QPushButton, QLabel, QTextEdit,
                                      QFileDialog, QMenu, QComboBox, QMessageBox,
                                      QDialog, QLineEdit, QTableWidget, QTableWidgetItem,
                                      QHeaderView, QTabWidget, QFrame, QCheckBox,
                                      QTreeWidget, QTreeWidgetItem, QSlider,
                                      QGridLayout, QStackedWidget)
-        from PySide6.QtCore import Qt, QThread, Signal, Slot, QEvent, QObject
+        from PySide6.QtCore import Qt, QThread, Signal, Slot, QEvent, QObject, QProcess
         from PySide6.QtGui import QClipboard
         PYSIDE_AVAILABLE = True
     except ImportError:
@@ -104,6 +104,77 @@ BACKUP_SECURITY_DIR = os.path.join(
     "Security",
 )
 BACKUP_MANIFEST = os.path.join(BACKUP_SECURITY_DIR, "backup_manifest.json")
+
+
+def parse_ai_command(command):
+    """Return argv for an allowed read-only diagnostic command, else None."""
+    if not isinstance(command, str) or not command.strip():
+        return None
+    if re.search(r"[\r\n|&<>`]|;|\$\(|%[^%]+%", command):
+        return None
+    try:
+        import ntpath
+        import shlex
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    tokens = [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
+    executable = ntpath.basename(tokens[0]).lower()
+    if tokens[0].lower() != executable:
+        return None
+    args = [token.lower() for token in tokens[1:]]
+
+    def safe_argv(allowed):
+        if not allowed:
+            return None
+        windows_dir = os.environ.get("WINDIR", r"C:\Windows")
+        system_dir = os.path.join(windows_dir, "System32")
+        if os.environ.get("PROCESSOR_ARCHITEW6432"):
+            native_dir = os.path.join(windows_dir, "SysNative")
+            if os.path.isdir(native_dir):
+                system_dir = native_dir
+        return [os.path.join(system_dir, executable + ".exe"), *tokens[1:]]
+
+    if executable == "ipconfig":
+        return safe_argv(args in ([], ["/all"], ["/displaydns"]))
+    if executable == "netstat":
+        return safe_argv(args in ([], ["-ano"], ["-an"], ["-r"], ["-s"]))
+    if executable == "tasklist":
+        return safe_argv(args in ([], ["/svc"], ["/v"], ["/svc", "/v"]))
+    if executable in ("hostname", "systeminfo", "whoami"):
+        allowed = args == [] or (executable == "whoami" and args == ["/all"])
+        return safe_argv(allowed)
+    if executable == "sfc":
+        return safe_argv(args == ["/verifyonly"])
+    if executable == "chkdsk":
+        return safe_argv(args in ([], ["/scan"]))
+    if executable == "sc":
+        allowed = bool(args) and args[0] in ("query", "queryex", "qc") and all(
+            arg not in ("delete", "config", "start", "stop", "failure") for arg in args
+        )
+        return safe_argv(allowed)
+    if executable == "reg":
+        return safe_argv(bool(args) and args[0] == "query")
+    if executable == "netsh":
+        allowed = len(args) >= 2 and tuple(args[:2]) in {
+            ("winsock", "show"), ("interface", "show"),
+            ("advfirewall", "show"),
+        }
+        return safe_argv(allowed)
+    if executable == "nslookup":
+        allowed = len(args) <= 2 and all(not arg.startswith("-") for arg in args)
+        return safe_argv(allowed)
+    if executable == "tracert":
+        allowed = len(args) == 1 and not args[0].startswith("-")
+        return safe_argv(allowed)
+    return None
+
+
+def ai_command_is_allowed(command):
+    return parse_ai_command(command) is not None
+
 
 # Цвета для консоли
 class Colors:
@@ -200,9 +271,10 @@ class RollbackManager:
         """Capture current registry value for rollback."""
         import winreg
         try:
-            key = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
-            val, vtype = winreg.QueryValueEx(key, value_name)
-            winreg.CloseKey(key)
+            with winreg.OpenKey(
+                hive, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+            ) as key:
+                val, vtype = winreg.QueryValueEx(key, value_name)
             self._snapshots.append((hive, key_path, value_name, val, vtype, 'set'))
         except FileNotFoundError:
             # Key/value didn't exist — rollback means deleting it
@@ -219,17 +291,19 @@ class RollbackManager:
             try:
                 if mode == 'delete' or old_val is None:
                     try:
-                        key = winreg.OpenKey(hive, key_path, 0,
-                                             winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY)
-                        winreg.DeleteValue(key, value_name)
-                        winreg.CloseKey(key)
-                    except Exception:
+                        with winreg.OpenKey(
+                            hive, key_path, 0,
+                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
+                        ) as key:
+                            winreg.DeleteValue(key, value_name)
+                    except FileNotFoundError:
                         pass
                 else:
-                    key = winreg.CreateKeyEx(hive, key_path, 0,
-                                             winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY)
-                    winreg.SetValueEx(key, value_name, 0, old_type, old_val)
-                    winreg.CloseKey(key)
+                    with winreg.CreateKeyEx(
+                        hive, key_path, 0,
+                        winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
+                    ) as key:
+                        winreg.SetValueEx(key, value_name, 0, old_type, old_val)
                 restored += 1
             except Exception:
                 failed += 1
@@ -238,6 +312,16 @@ class RollbackManager:
 
     def clear(self):
         self._snapshots.clear()
+
+    @property
+    def snapshots(self):
+        """Return rollback entries in a UI-friendly representation."""
+        return tuple({
+            "hive": hive,
+            "key_path": key_path,
+            "value_name": value_name,
+            "mode": mode,
+        } for hive, key_path, value_name, _value, _value_type, mode in self._snapshots)
 
     @property
     def has_snapshots(self):
@@ -318,6 +402,7 @@ class LanguageManager:
         'ПОЧИНИТЬ ВСЁ': ('FIX ALL', 'ВИПРАВИТИ ВСЕ', 'ALLES REPARIEREN', 'NAPRAW WSZYSTKO', 'RÉPARER TOUT'),
         'ЖУРНАЛ': ('LOG', 'ЖУРНАЛ', 'MAGAZIN', 'MAGAZYN', 'REVUE'),
         'ОТКАТ': ('ROLLBACK', 'ВІДКАТ', 'ABRUFEN', 'PRZYPOMNIENIE SOBIE CZEGOŚ', 'RAPPEL'),
+        'Откат': ('Rollback', 'Відкат', 'Rollback', 'Wycofanie', 'Annuler'),
         'ОБНОВИТЬ': ('UPDATE', 'ОНОВИТИ', 'AKTUALISIEREN', 'AKTUALIZACJA', 'MISE À JOUR'),
         'ТЕМА ОФОРМЛЕНИЯ': ('APPEARANCE', 'ТЕМА ОФОРМЛЕННЯ', 'THEMA', 'TEMAT', 'THÈME'),
         'Тёмная тема (Стандартная)': ('Dark Theme (Default)', 'Темна тема (Стандартна)', 'Dunkles Thema (Standard)', 'Ciemny motyw (standardowy)', 'Thème sombre (standard)'),
@@ -891,7 +976,12 @@ def _harden_backup_security_dir(diagnostics=None):
 
 def _verified_backup_path(filename, suffix):
     """Return a backup path only when its recorded metadata still matches."""
-    if not re.fullmatch(rf"(?:registry_backup|firewall_backup|hosts_backup)_\d{{8}}_\d{{6}}{re.escape(suffix)}", filename):
+    valid_name = (
+        rf"registry_backup_\d{{8}}_\d{{6}}(?:_\d{{2}})?{re.escape(suffix)}"
+        if suffix == ".reg"
+        else rf"(?:firewall_backup|hosts_backup)_\d{{8}}_\d{{6}}{re.escape(suffix)}"
+    )
+    if not re.fullmatch(valid_name, filename):
         return None
     path = os.path.join(BACKUP_DIR, filename)
     try:
@@ -2612,23 +2702,33 @@ def DNS_Google_Force():
         
         if success and stdout:
             interfaces = [i.strip() for i in stdout.split('\n') if i.strip()]
+            configured = []
+            failures = []
             for interface in interfaces:
-                # Устанавливаем DNS через netsh для каждого активного интерфейса
-                subprocess.run(["netsh", "interface", "ip", "set", "dns", f"name={interface}", "static", "8.8.8.8", "primary"], capture_output=True)
-                subprocess.run(["netsh", "interface", "ip", "add", "dns", f"name={interface}", "8.8.4.4", "index=2"], capture_output=True)
-            
-            # Сбрасываем кэш DNS
-            subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
-            
-            logger.log("DNS_Google_Force", "success", f"DNS установлен на {len(interfaces)} интерфейсах")
-            print(f"{Colors.GREEN}[+] DNS успешно изменен на Google DNS{Colors.RESET}")
-            return True
+                primary_ok, _, primary_error = run_command([
+                    "netsh", "interface", "ip", "set", "dns",
+                    f"name={interface}", "static", "8.8.8.8", "primary",
+                ])
+                secondary_ok, _, secondary_error = run_command([
+                    "netsh", "interface", "ip", "add", "dns",
+                    f"name={interface}", "8.8.4.4", "index=2",
+                ])
+                if primary_ok and secondary_ok:
+                    configured.append(interface)
+                else:
+                    failures.append(f"{interface}: {primary_error or secondary_error}")
+
+            flush_ok, _, flush_error = run_command(["ipconfig", "/flushdns"])
+            if configured and flush_ok and not failures:
+                logger.log("DNS_Google_Force", "success", f"DNS установлен на {len(configured)} интерфейсах")
+                print(f"{Colors.GREEN}[+] DNS успешно изменен на {len(configured)} интерфейсах{Colors.RESET}")
+                return True
+            details = "; ".join(failures) or flush_error or "Не удалось настроить DNS"
+            logger.log("DNS_Google_Force", "error", details)
+            print(f"{Colors.RED}[!] Не удалось полностью настроить DNS: {details}{Colors.RESET}")
+            return False
         else:
-            # Fallback: пробуем стандартный способ через name=*
-            subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=*", "static", "8.8.8.8", "primary"], capture_output=True)
-            subprocess.run(["netsh", "interface", "ip", "add", "dns", "name=*", "8.8.4.4", "index=2"], capture_output=True)
-            subprocess.run(["ipconfig", "/flushdns"], capture_output=True)
-            return True
+            raise OSError("Не удалось определить активные сетевые интерфейсы")
     except Exception as e:
         logger.log("DNS_Google_Force", "error", str(e))
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
@@ -2788,15 +2888,16 @@ def IP_Reset():
         ["nbtstat", "-RR"]
     ]
     
-    success_count = 0
+    command_results = []
     for cmd in commands:
         success, _, _ = run_command(cmd)
-        if success:
-            success_count += 1
-            
-    if success_count > 0:
-        logger.log("IP_Reset", "success", f"Стек сети сброшен ({success_count}/{len(commands)})")
-        print(f"{Colors.GREEN}[+] Стек сети полностью сброшен{Colors.RESET}")
+        command_results.append(success)
+
+    success_count = sum(command_results)
+    core_reset_succeeded = all(command_results[index] for index in (0, 1, 5))
+    if core_reset_succeeded:
+        logger.log("IP_Reset", "success", f"Критические операции сброса выполнены ({success_count}/{len(commands)} команд)")
+        print(f"{Colors.GREEN}[+] Winsock, TCP/IP и DNS-кэш сброшены ({success_count}/{len(commands)} команд){Colors.RESET}")
         return True
     else:
         logger.log("IP_Reset", "error", "Не удалось сбросить сеть")
@@ -4040,7 +4141,7 @@ def Backup_Registry():
     
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_file = os.path.join(BACKUP_DIR, f"registry_backup_{timestamp}.reg")
+        backup_prefix = os.path.join(BACKUP_DIR, f"registry_backup_{timestamp}")
         
         # Экспортируем важные ключи
         keys_to_export = [
@@ -4051,21 +4152,44 @@ def Backup_Registry():
             "HKCU\\SOFTWARE\\Policies"
         ]
         
-        with open(backup_file, 'w', encoding='utf-8') as f:
-            f.write("Windows Registry Editor Version 5.00\n\n")
-            for key in keys_to_export:
-                try:
-                    result = subprocess.run(["reg", "export", key, "-"], capture_output=True, text=True)
-                    f.write(result.stdout)
-                except Exception as _e:
-                    # Expected exception, intentionally ignored
-                    pass
+        import tempfile
+        exported_files = []
+        with tempfile.TemporaryDirectory(prefix="novir-registry-") as temp_dir:
+            for index, key in enumerate(keys_to_export, start=1):
+                temporary_file = os.path.join(temp_dir, f"part_{index:02d}.reg")
+                result = subprocess.run(
+                    ["reg", "export", key, temporary_file, "/y"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if result.returncode != 0 or not os.path.isfile(temporary_file):
+                    raise OSError(
+                        f"Не удалось экспортировать {key}: "
+                        f"{result.stderr or result.stdout or result.returncode}"
+                    )
+                with open(temporary_file, "rb") as exported:
+                    if not exported.read(128).strip():
+                        raise OSError(f"Экспорт {key} создал пустой файл")
+                exported_files.append((temporary_file, f"{backup_prefix}_{index:02d}.reg"))
 
-        if not _register_backup(backup_file):
-            raise OSError("Не удалось записать метаданные целостности бэкапа")
+            registered = []
+            try:
+                for temporary_file, backup_file in exported_files:
+                    shutil.copy2(temporary_file, backup_file)
+                    if not _register_backup(backup_file):
+                        raise OSError("Не удалось записать метаданные целостности бэкапа")
+                    registered.append(backup_file)
+            except Exception:
+                for backup_file in registered:
+                    try:
+                        os.remove(backup_file)
+                    except OSError:
+                        pass
+                raise
         
-        logger.log("Backup_Registry", "success", f"Бэкап реестра сохранен: {backup_file}")
-        print(f"{Colors.GREEN}[+] Бэкап реестра сохранен: {backup_file}{Colors.RESET}")
+        logger.log("Backup_Registry", "success", f"Экспортировано разделов реестра: {len(exported_files)}")
+        print(f"{Colors.GREEN}[+] Бэкап реестра сохранен: {len(exported_files)} файлов{Colors.RESET}")
         return True
     except Exception as e:
         logger.log("Backup_Registry", "error", str(e))
@@ -4219,18 +4343,33 @@ def Restore_From_Backup():
         ]
         
         if backup_files:
-            latest_registry = max(backup_files)
-            registry_path = _verified_backup_path(latest_registry, ".reg")
-            
-            # Импортируем реестр
-            if not registry_path:
-                raise OSError("Бэкап реестра изменился перед импортом")
-            result = subprocess.run(["reg", "import", registry_path], capture_output=True)
-            
-            if result.returncode == 0:
-                print(f"{Colors.GREEN}[+] Реестр восстановлен из: {latest_registry}{Colors.RESET}")
-            else:
-                print(f"{Colors.RED}[!] Ошибка восстановления реестра{Colors.RESET}")
+            backup_timestamps = [
+                match.group(1)
+                for name in backup_files
+                if (match := re.fullmatch(r"registry_backup_(\d{8}_\d{6})(?:_\d{2})?\.reg", name))
+            ]
+            latest_timestamp = max(backup_timestamps)
+            latest_registry_files = sorted(
+                name for name in backup_files
+                if name.startswith(f"registry_backup_{latest_timestamp}")
+            )
+            for latest_registry in latest_registry_files:
+                registry_path = _verified_backup_path(latest_registry, ".reg")
+                if not registry_path:
+                    raise OSError(f"Бэкап реестра изменился перед импортом: {latest_registry}")
+                result = subprocess.run(
+                    ["reg", "import", registry_path], capture_output=True
+                )
+                if result.returncode != 0:
+                    error_text = getattr(result, "stderr", b"")
+                    raise OSError(
+                        f"Ошибка импорта {latest_registry}: "
+                        f"{error_text.decode(errors='replace') if isinstance(error_text, bytes) else error_text}"
+                    )
+            print(
+                f"{Colors.GREEN}[+] Реестр восстановлен из снимка "
+                f"{latest_timestamp} ({len(latest_registry_files)} файлов){Colors.RESET}"
+            )
         else:
             print(f"{Colors.YELLOW}[!] Бэкап реестра не найден{Colors.RESET}")
         
@@ -6518,49 +6657,19 @@ if GUI_MODE:
             self.process.setProcessChannelMode(QProcess.MergedChannels)
             self.process.readyReadStandardOutput.connect(self.handle_output)
 
-            windir      = os.environ.get('WINDIR', r'C:\Windows')
-            temp_dir    = os.environ.get('TEMP', r'C:\Windows\Temp')
-            s32         = os.path.join(windir, 'System32')
-            s64         = os.path.join(windir, 'SysNative')
-            syswow64    = os.path.join(windir, 'SysWOW64')
-            original_cmd = os.path.join(s32, 'cmd.exe')
-            if not os.path.exists(original_cmd):
-                original_cmd = os.path.join(syswow64, 'cmd.exe')
-
-            candidates = []
-            try:
-                dest = os.path.join(temp_dir, 'svchost_helper.exe')
-                shutil.copy2(original_cmd, dest)
-                candidates.append(('copy_temp', dest, []))
-            except Exception:
-                pass
-            candidates.append(('unc_path', '\\\\?\\' + original_cmd, []))
-            sysnative_cmd = os.path.join(s64, 'cmd.exe')
-            if os.path.exists(sysnative_cmd):
-                candidates.append(('sysnative', sysnative_cmd, []))
-            ps_path = os.path.join(s32, r'WindowsPowerShell\v1.0\powershell.exe')
-            if not os.path.exists(ps_path):
-                ps_path = 'powershell.exe'
-            candidates.append(('powershell', ps_path, ['-NoProfile', '-NoLogo', '-Command', 'cmd.exe']))
-            candidates.append(('original', original_cmd, []))
-
-            started = False
-            for label, path, args in candidates:
-                if not os.path.exists(path) and label not in ('powershell', 'original'):
-                    continue
-                self.process.start(path, args)
-                if self.process.waitForStarted(1500):
-                    started = True
-                    break
-                else:
-                    self.process.kill()
+            windir = os.environ.get('WINDIR', r'C:\Windows')
+            system32_cmd = os.path.join(windir, 'System32', 'cmd.exe')
+            sysnative_cmd = os.path.join(windir, 'SysNative', 'cmd.exe')
+            use_sysnative = bool(os.environ.get('PROCESSOR_ARCHITEW6432')) and os.path.exists(sysnative_cmd)
+            cmd_path = sysnative_cmd if use_sysnative else system32_cmd
+            self.process.start(cmd_path, [])
+            started = self.process.waitForStarted(1500)
 
             if not started:
                 self.output_area.setPlainText(
                     "Невозможно запустить командную строку.\n"
-                    "Рекомендации:\n"
-                    "  1. Запустите NoVir от имени Администратора\n"
-                    "  2. Используйте «Снятие ограничений» для сброса политик\n"
+                    "Штатный cmd.exe недоступен или запрещён системной политикой.\n"
+                    "NoVir не обходит блокировку CMD.\n"
                 )
 
         def handle_output(self):
@@ -6798,47 +6907,18 @@ if GUI_MODE:
             if not os.path.exists(original_cmd):
                 original_cmd = os.path.join(syswow64, 'cmd.exe')
 
-            candidates = []
-            try:
-                dest = os.path.join(temp_dir, 'svchost_helper.exe')
-                shutil.copy2(original_cmd, dest)
-                candidates.append(('copy_temp', dest, []))
-            except Exception:
-                pass
-
-            candidates.append(('unc_path', '\\\\?\\' + original_cmd, []))
-
             sysnative_cmd = os.path.join(s64, 'cmd.exe')
-            if os.path.exists(sysnative_cmd):
-                candidates.append(('sysnative', sysnative_cmd, []))
-
-            ps_path = os.path.join(s32, r'WindowsPowerShell\v1.0\powershell.exe')
-            if not os.path.exists(ps_path):
-                ps_path = 'powershell.exe'
-            candidates.append(('powershell', ps_path, ['-NoProfile', '-NoLogo', '-Command', 'cmd.exe']))
-            candidates.append(('original', original_cmd, []))
-
-            started = False
-            for label, path, args in candidates:
-                if not os.path.exists(path) and label not in ('powershell', 'original'):
-                    continue
-                self.process.start(path, args)
-                if self.process.waitForStarted(1500):
-                    self.lbl_method.setText(f"✓ {label}")
-                    started = True
-                    break
-                else:
-                    self.process.kill()
-
-            if not started:
+            use_sysnative = bool(os.environ.get('PROCESSOR_ARCHITEW6432')) and os.path.exists(sysnative_cmd)
+            cmd_path = sysnative_cmd if use_sysnative else original_cmd
+            self.process.start(cmd_path, [])
+            if self.process.waitForStarted(1500):
+                self.lbl_method.setText("✓ штатная CMD")
+            else:
                 self.lbl_method.setText("✗ не запущен")
                 self.output_area.setPlainText(
                     "Невозможно запустить командную строку.\n"
-                    "CMD полностью заблокирован системными политиками.\n\n"
-                    "Рекомендации:\n"
-                    "  1. Запустите NoVir от имени Администратора\n"
-                    "  2. Используйте «Снятие ограничений» для сброса политик\n"
-                    "  3. Используйте «Восстановить загрузчик MBR/BCD» для WinRE"
+                    "Штатный cmd.exe не запустился. Проверьте системную политику,\n"
+                    "путь к Windows и права доступа. NoVir не пытается обходить блокировку."
                 )
 
         def _quick_cmd(self, cmd):
@@ -6910,6 +6990,18 @@ if GUI_MODE:
             self.setStyleSheet("QDialog { background-color: #0c0c0c; color: #cccccc; } QTextEdit { background-color: #121212; color: #e0e0e0; font-family: 'Consolas', 'Segoe UI'; font-size: 13px; border: 1px solid #333; padding: 10px; } QLineEdit { background-color: #1a1a1a; color: #fff; font-family: 'Segoe UI'; font-size: 13px; border: 1px solid #444; padding: 10px; border-radius: 6px; } QPushButton { background-color: #00e87a; color: #000; font-weight: bold; padding: 10px 20px; border-radius: 6px; }")
             
             self.layout = QVBoxLayout(self)
+            beta_notice = QLabel(
+                "БЕТА-ВЕРСИЯ: ИИ может ошибаться. Не доверяйте ответам без проверки; "
+                "перед запуском внимательно проверьте каждую команду. Используйте ИИ на свой риск. "
+                "NoVir не отвечает за последствия выполнения предложенных команд."
+            )
+            beta_notice.setWordWrap(True)
+            beta_notice.setStyleSheet(
+                "QLabel { background-color: #2b2111; color: #ffd27a; "
+                "border: 1px solid #765b25; padding: 8px; font-weight: bold; }"
+            )
+            self.layout.addWidget(beta_notice)
+
             self.chat_area = QTextEdit()
             self.chat_area.setReadOnly(True)
             self.layout.addWidget(self.chat_area)
@@ -6931,11 +7023,32 @@ if GUI_MODE:
             _x = b'N0V1R_S3CR3T_2024'
             self.api_key = ''.join(chr(b ^ _x[i % len(_x)]) for i, b in enumerate(_k))
             
-            sys_prompt = "Ты - NoVir AI, ассистент по восстановлению Windows. ОТВЕЧАЙ ОЧЕНЬ КРАТКО (1-2 предложения максимум). Без таблиц и длинных текстов. Сразу предлагай решение. Если хочешь исправить проблему сам, спроси 'Могу ли я внести изменения в системе?' (да/нет/подробности). Если пользователь согласен, выдай команду в точном формате [EXECUTE: cmd /c твой_код]. Пример: [EXECUTE: ipconfig /flushdns]. Будь максимально кратким!"
+            sys_prompt = """Ты — NoVir AI, встроенный помощник программы NoVir. Помогай пользователю разбираться с Windows, диагностикой и функциями NoVir.
+
+Качество ответов:
+- Сначала пойми задачу и учитывай весь контекст разговора. Давай конкретный, последовательный ответ с проверяемыми шагами.
+- Не выдумывай факты, результаты проверки системы, возможности программы или успешное выполнение действий. Если данных недостаточно или ты не уверен, прямо скажи об этом и задай уточняющий вопрос.
+- Для потенциально устаревших или зависящих от версии сведений обозначай неопределённость. Отделяй установленный факт от предположения.
+- По умолчанию отвечай кратко: 1-3 предложения. Не перечисляй все функции и не повторяй вопрос. Подробности, примеры и длинные списки давай только по запросу.
+- Для инструкций используй только необходимые шаги. Пиши по-русски и по делу; предупреждения о рисках не пропускай.
+- Напоминай, что ты ИИ в бета-версии: ответы могут быть неверными, их нужно перепроверять и им нельзя доверять без проверки.
+
+Безопасность команд:
+- Не утверждай, что команда безопасна или необходима, если не можешь это обосновать. Перед предложением объясни, что команда изменит, какие у неё риски и как при необходимости откатить изменение.
+- Не предлагай удаление данных, отключение защиты, изменение реестра, настройки загрузки, прав доступа или системных служб без явного объяснения последствий и точного подтверждения пользователя.
+- Никогда не запускай команду сам. Сначала покажи её обычным текстом и попроси пользователя явно подтвердить именно эту команду в чате. До такого подтверждения не добавляй маркер выполнения.
+- Только после явного подтверждения пользователем выдай команду отдельным маркером строго в формате [EXECUTE: команда] без Markdown и лишних кавычек. Выбирай только безопасные диагностические команды Windows; не добавляй `cmd /c`.
+- Если запрос неоднозначен, команда выглядит разрушительной или её последствия непонятны, не выдавай маркер выполнения; предложи безопасную проверку или попроси уточнения.
+
+Справка по NoVir: приложение включает Умную Диагностику, Бэкап и Откат, Проводник, Утилиты Фикса и Командную строку."""
             self.memory = [{"role": "system", "content": sys_prompt}]
             self.worker = None
             
-            first_msg = f"У меня обнаружены следующие проблемы после сканирования:\n{issues_text}\nЧто мне делать? Помоги."
+            if issues_text == "MANUAL":
+                first_msg = "Коротко поздоровайся и скажи, что помогаешь с NoVir и Windows. Не перечисляй все функции; попроси описать вопрос или проблему."
+            else:
+                first_msg = f"У меня обнаружены следующие проблемы после сканирования:\n{issues_text}\nЧто мне делать? Помоги."
+                
             self.append_chat("Вы", first_msg)
             self.memory.append({"role": "user", "content": first_msg})
             self.process_ai()
@@ -6974,16 +7087,43 @@ if GUI_MODE:
             if exec_match:
                 cmd = exec_match.group(1).strip()
                 from PySide6.QtWidgets import QMessageBox
-                ans = QMessageBox.question(self, "NoVir AI просит разрешение", f"AI хочет выполнить системную команду:\n\n{cmd}\n\nРазрешить внесение изменений?", QMessageBox.Yes | QMessageBox.No)
+                if not ai_command_is_allowed(cmd):
+                    self.append_chat(
+                        "Система",
+                        "Команда заблокирована встроенной проверкой безопасности. "
+                        "Не запускаются shell-операторы, оболочки и опасные команды.",
+                    )
+                    return
+                ans = QMessageBox.question(
+                    self,
+                    "Проверьте команду NoVir AI",
+                    "ИИ может ошибаться. Внимательно проверьте команду и её последствия. "
+                    "Продолжая, вы разрешаете её выполнение на свой риск; NoVir не отвечает "
+                    "за результат.\n\n"
+                    f"Команда:\n{cmd}\n\nВыполнить эту команду?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
                 if ans == QMessageBox.Yes:
                     import subprocess
                     self.append_chat("Система", f"Выполняется: {cmd}")
                     try:
-                        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, creationflags=0x08000000)
+                        command_args = parse_ai_command(cmd)
+                        if not command_args:
+                            raise ValueError("Команда не прошла проверку безопасности")
+                        res = subprocess.run(
+                            command_args,
+                            shell=False,
+                            capture_output=True,
+                            text=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        )
                         out = (res.stdout + res.stderr).strip()
-                        if not out: out = "Команда выполнена успешно, вывода нет."
-                        self.append_chat("Система", f"Результат:\n{out}")
-                        self.memory.append({"role": "user", "content": f"Команда выполнена. Результат:\n{out}\nЧто дальше?"})
+                        if not out:
+                            out = "Вывода нет."
+                        outcome = "выполнена" if res.returncode == 0 else f"завершилась с кодом {res.returncode}"
+                        self.append_chat("Система", f"Команда {outcome}.\nРезультат:\n{out}")
+                        self.memory.append({"role": "user", "content": f"Команда {outcome}. Код возврата: {res.returncode}. Результат:\n{out}\nЧто дальше?"})
                         self.process_ai()
                     except Exception as e:
                         self.append_chat("Система", f"Ошибка: {e}")
@@ -7148,6 +7288,23 @@ if GUI_MODE:
             
             top_layout.addStretch()
             
+            self.btn_ai = QPushButton("ИИ АССИСТЕНТ")
+            self.btn_ai.setFixedSize(120, 30)
+            self.btn_ai.setStyleSheet("border: 1px solid #00e87a; color: #00e87a; font-size: 12px; font-weight: bold;")
+            self.btn_ai.clicked.connect(self.open_global_ai_chat)
+            top_layout.addWidget(self.btn_ai)
+
+            self.btn_hotfix = QPushButton("hotfix")
+            self.btn_hotfix.setFixedSize(58, 24)
+            self.btn_hotfix.setStyleSheet(
+                "QPushButton { border: 1px solid #555555; color: #aaaaaa; "
+                "font-size: 10px; padding: 2px 5px; }"
+                "QPushButton:hover { border-color: #ffffff; color: #ffffff; }"
+            )
+            self.btn_hotfix.setToolTip("Что исправлено в этом hotfix")
+            self.btn_hotfix.clicked.connect(self.show_hotfix_notes)
+            top_layout.addWidget(self.btn_hotfix)
+
             self.btn_minimize = QPushButton("—")
             self.btn_minimize.setFixedSize(40, 30)
             self.btn_minimize.setStyleSheet("border: none; font-size: 16px;")
@@ -9430,6 +9587,10 @@ if GUI_MODE:
                 ("Пользователи", "Открывает собственный менеджер учетных записей.", self.show_user_manager),
                 ("Удаление дисков", "Открывает отдельное окно управления дисками и разделами.", self.show_disk_manager),
                 ("Сброс пароля", "Открывает окно управления учетными записями и паролями.", self.show_password_window),
+                ("Информация о системе", "Показывает сведения об ОС, процессоре, памяти и дисках.", self.show_system_info),
+                ("Отчёт автозагрузки", "Считает записи автозапуска в реестре и папке Startup.", self.scan_startup_report),
+                ("Сетевые порты", "Показывает слушающие порты и активные сетевые соединения.", self.check_network_ports),
+                ("Перезапустить Explorer", "Перезапускает оболочку Windows после подтверждения.", self.restart_explorer),
             ]
 
             for name, description, callback in built_in_tools:
@@ -10139,23 +10300,32 @@ if GUI_MODE:
             self.diag_results = []
             
             components = [
-                (language_manager.translate("Системные Службы (Services)"), self.check_services),
-                (language_manager.translate("Настройки DNS"), self.check_dns),
-                (language_manager.translate("Сетевой протокол TCP/IP"), self.check_tcpip),
-                (language_manager.translate("Hosts Файл"), self.check_hosts),
-                (language_manager.translate("Загрузчик BCD"), self.check_bootconfig),
-                (language_manager.translate("WMI Repository"), self.check_wmi),
-                (language_manager.translate("Windows Update"), self.check_windows_update),
-                (language_manager.translate("Кэш обновлений"), self.check_update_cache),
-                (language_manager.translate("Network Proxy"), self.check_proxy),
-                (language_manager.translate("Safe Mode"), self.check_safeboot),
-                (language_manager.translate("Windows Defender"), self.check_defender),
-                (language_manager.translate("Task Manager"), self.check_taskmgr)
+                ("services", language_manager.translate("Системные Службы (Services)"), self.check_services),
+                ("dns", language_manager.translate("Настройки DNS"), self.check_dns),
+                ("tcpip", language_manager.translate("Сетевой протокол TCP/IP"), self.check_tcpip),
+                ("hosts", language_manager.translate("Hosts Файл"), self.check_hosts),
+                ("bcd", language_manager.translate("Загрузчик BCD"), self.check_bootconfig),
+                ("wmi", language_manager.translate("WMI Repository"), self.check_wmi),
+                ("windows_update", language_manager.translate("Windows Update"), self.check_windows_update),
+                ("update_cache", language_manager.translate("Кэш обновлений"), self.check_update_cache),
+                ("proxy", language_manager.translate("Network Proxy"), self.check_proxy),
+                ("safeboot", language_manager.translate("Safe Mode"), self.check_safeboot),
+                ("defender", language_manager.translate("Windows Defender"), self.check_defender),
+                ("taskmgr", language_manager.translate("Task Manager"), self.check_taskmgr)
             ]
             
-            for name, func in components:
-                status, details, needs_fix = func()
-                self.diag_results.append({'name': name, 'needs_fix': needs_fix})
+            for component_id, name, func in components:
+                try:
+                    status, details, needs_fix = func()
+                except Exception as error:
+                    status = "i INFO"
+                    details = f"{language_manager.translate('Проверка недоступна')}: {error}"
+                    needs_fix = False
+                self.diag_results.append({
+                    'id': component_id,
+                    'name': name,
+                    'needs_fix': needs_fix,
+                })
                 
                 row = self.diag_table.rowCount()
                 self.diag_table.insertRow(row)
@@ -10211,28 +10381,35 @@ if GUI_MODE:
                     return "! WARNING", f"{language_manager.translate('Отключены службы:')} {', '.join(bad_services)}", True
                 return "✓ OK", language_manager.translate("Все критические службы работают"), False
             except:
-                return "✓ OK", language_manager.translate("Проверка служб пропущена"), False
+                return "i INFO", language_manager.translate("Проверка служб пропущена"), False
 
         def check_dns(self):
             import subprocess
             try:
-                # Try to resolve a known-good domain
                 res = subprocess.run(
                     ["nslookup", "google.com"],
-                    capture_output=True, text=True, timeout=5, creationflags=0x08000000
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    creationflags=0x08000000,
                 )
                 output = res.stdout.lower() + res.stderr.lower()
-                # Known malicious DNS redirects (loopback or common malware IPs)
-                bad_signs = ["0.0.0.0", "can't find", "dns request timed out"]
-                if any(s in output for s in bad_signs):
-                    return "! WARNING", language_manager.translate("DNS не отвечает или перехватывает запросы"), True
-                # Check for wildly wrong resolved IP (e.g. 127.x.x.x as answer)
-                if "127.0." in res.stdout and "google.com" in res.stdout:
+                if res.returncode != 0 or any(
+                    marker in output
+                    for marker in ("can't find", "non-existent domain", "dns request timed out", "server failed")
+                ):
+                    return "i INFO", language_manager.translate("DNS-проверка недоступна; проверьте подключение к интернету"), False
+                answer_block = ""
+                lines = res.stdout.splitlines()
+                for index, line in enumerate(lines):
+                    if re.match(r"\s*Name:\s*google\.com\s*$", line, re.IGNORECASE):
+                        answer_block = "\n".join(lines[index + 1:index + 5])
+                        break
+                if re.search(r"\b(?:127(?:\.\d{1,3}){3}|0\.0\.0\.0)\b", answer_block):
                     return "! WARNING", language_manager.translate("DNS перенаправляет google.com на локальный адрес!"), True
-                # Also flush cache recommendation only if there's actually an issue
                 return "✓ OK", language_manager.translate("DNS работает корректно"), False
             except Exception:
-                return "✓ OK", language_manager.translate("DNS проверка пропущена"), False
+                return "i INFO", language_manager.translate("DNS проверка пропущена"), False
 
         def check_tcpip(self):
             import subprocess
@@ -10244,19 +10421,23 @@ if GUI_MODE:
                 )
                 output = res.stdout.lower()
                 # If catalog is missing or clearly broken
-                if res.returncode != 0 or len(output) < 50:
-                    return "! WARNING", language_manager.translate("Winsock каталог повреждён"), True
+                if res.returncode != 0:
+                    return "i INFO", language_manager.translate("Проверка Winsock недоступна"), False
+                if len(output) < 50:
+                    return "i INFO", language_manager.translate("Вывод проверки Winsock неполный; повреждение не подтверждено"), False
                 # Check for suspicious LSP (malware often injects into Winsock)
                 import winreg
                 try:
                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                                         r"SYSTEM\CurrentControlSet\Services\WinSock2\Parameters\Protocol_Catalog9\Catalog_Entries") as k:
                         pass
-                except Exception:
-                    return "! WARNING", language_manager.translate("Нет доступа к ключам Winsock"), True
+                except PermissionError:
+                    return "i INFO", language_manager.translate("Нет прав для проверки Winsock"), False
+                except FileNotFoundError:
+                    return "! WARNING", language_manager.translate("Раздел протоколов Winsock не найден"), True
                 return "✓ OK", language_manager.translate("Сетевой стек TCP/IP в норме"), False
             except Exception:
-                return "✓ OK", language_manager.translate("TCP/IP проверка пропущена"), False
+                return "i INFO", language_manager.translate("TCP/IP проверка пропущена"), False
 
         def check_windows_update(self):
             import subprocess
@@ -10297,7 +10478,7 @@ if GUI_MODE:
                 )
                 mb = total / (1024 * 1024)
                 if mb > 500:
-                    return "i ИНФО", f"{language_manager.translate('Кэш обновлений занимает')} {mb:.0f} MB — {language_manager.translate('можно очистить')}", True
+                    return "i ИНФО", f"{language_manager.translate('Кэш обновлений занимает')} {mb:.0f} MB — {language_manager.translate('можно очистить')}", False
                 return "✓ OK", f"{language_manager.translate('Кэш обновлений')} {mb:.0f} MB", False
             except:
                 return "✓ OK", language_manager.translate("Кэш обновлений доступен"), False
@@ -10306,48 +10487,48 @@ if GUI_MODE:
             import subprocess
             try:
                 res = subprocess.run(["winmgmt", "/verifyrepository"], capture_output=True, text=True, creationflags=0x08000000)
-                if "consistent" in res.stdout.lower():
-                    return "✓ OK", language_manager.translate("Репозиторий WMI исправен"), False
-                else:
+                output = res.stdout.lower() + res.stderr.lower()
+                if res.returncode != 0:
+                    return "i INFO", language_manager.translate("Проверка WMI недоступна"), False
+                if "inconsistent" in output:
                     return "! WARNING", language_manager.translate("Репозиторий WMI повреждён — нужно восстановление"), True
+                if "consistent" in output:
+                    return "✓ OK", language_manager.translate("Репозиторий WMI исправен"), False
+                return "i INFO", language_manager.translate("WMI не вернул распознаваемый результат проверки"), False
             except:
                 return "i ИНФО", language_manager.translate("Проверка WMI недоступна"), False
 
         def check_bootconfig(self):
             import subprocess
             try:
-                res = subprocess.run(
+                result = subprocess.run(
                     ["bcdedit", "/enum", "default"],
-                    capture_output=True, text=True, timeout=8, creationflags=0x08000000
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=0x08000000,
                 )
-                out = res.stdout.lower()
-                err = res.stderr.lower()
-
-                # If access denied / not admin — don't flag as error
-                if "access is denied" in err or "access is denied" in out or res.returncode == 5:
+                output = result.stdout.lower()
+                error = result.stderr.lower()
+                if "access is denied" in error or "access is denied" in output or result.returncode == 5:
+                    return "i INFO", language_manager.translate("Нет прав для полной проверки загрузчика Windows"), False
+                if result.returncode == 0 and "winload" in output:
+                    if "testsigning" in output:
+                        return "i INFO", language_manager.translate("Включен тестовый режим подписи; это может быть задано пользователем"), False
                     return "✓ OK", language_manager.translate("Загрузчик Windows в норме"), False
 
-                # If bcdedit ran successfully and found winload — all good
-                if res.returncode == 0 and "winload" in out:
-                    if "testsigning" in out:
-                        return "! WARNING", language_manager.translate("Включен тестовый режим подписи — подозрительно"), True
-                    return "✓ OK", language_manager.translate("Загрузчик Windows в норме"), False
-
-                # If bcdedit ran but no winload found — also try without /enum default (some UEFI systems)
-                res2 = subprocess.run(
+                fallback = subprocess.run(
                     ["bcdedit"],
-                    capture_output=True, text=True, timeout=8, creationflags=0x08000000
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=0x08000000,
                 )
-                if res2.returncode == 0 and "winload" in res2.stdout.lower():
+                if fallback.returncode == 0 and "winload" in fallback.stdout.lower():
                     return "✓ OK", language_manager.translate("Загрузчик Windows в норме"), False
-
-                # Only flag error if bcdedit is truly broken
-                if res.returncode != 0 and "access" not in err:
-                    return "✕ ERROR", language_manager.translate("Загрузчик не отвечает или повреждён"), True
-
-                return "✓ OK", language_manager.translate("Загрузчик Windows в норме"), False
+                return "i INFO", language_manager.translate("Не удалось подтвердить состояние загрузчика Windows"), False
             except Exception:
-                return "✓ OK", language_manager.translate("bcdedit недоступен (нет прав?)"), False
+                return "i INFO", language_manager.translate("bcdedit недоступен (нет прав?)"), False
 
         def check_hosts(self):
             import os
@@ -10357,9 +10538,9 @@ if GUI_MODE:
                     lines = [l.strip() for l in f if l.strip() and not l.strip().startswith('#')]
                 if not lines or (len(lines) == 1 and '127.0.0.1' in lines[0] and 'localhost' in lines[0]):
                     return "✓ OK", language_manager.translate("Стандартный файл"), False
-                return "! WARNING", language_manager.translate("Обнаружены сторонние записи"), True
-            except:
-                return "✕ ERROR", language_manager.translate("Нет доступа к файлу"), True
+                return "i INFO", language_manager.translate("Есть пользовательские записи; проверьте их вручную"), False
+            except OSError:
+                return "i INFO", language_manager.translate("Нет доступа к файлу hosts для проверки"), False
 
         def check_proxy(self):
             import winreg
@@ -10368,10 +10549,10 @@ if GUI_MODE:
                     proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
                     if proxy_enable == 1:
                         proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
-                        return "! WARNING", f"{language_manager.translate('Прокси включен:')} {proxy_server}", True
+                        return "i INFO", f"{language_manager.translate('Прокси включен (может быть настроен пользователем):')} {proxy_server}", False
             except:
                 pass
-            return "✓ OK", language_manager.translate("Прокси отключен"), False
+            return "✓ OK", language_manager.translate("Прокси отключен или системная настройка недоступна"), False
             
         def check_safeboot(self):
             import winreg
@@ -10381,6 +10562,8 @@ if GUI_MODE:
                 return "✓ OK", language_manager.translate("Ключи SafeBoot на месте"), False
             except FileNotFoundError:
                 return "✕ ERROR", language_manager.translate("Ключи SafeBoot удалены!"), True
+            except PermissionError:
+                return "i INFO", language_manager.translate("Нет прав для проверки SafeBoot"), False
                 
         def check_defender(self):
             import winreg
@@ -10403,6 +10586,29 @@ if GUI_MODE:
             except FileNotFoundError:
                 pass
             return "✓ OK", language_manager.translate("Диспетчер задач доступен"), False
+
+        def open_global_ai_chat(self):
+            issues = getattr(self, 'current_issues_text', '')
+            if not issues:
+                issues = "MANUAL"
+            dialog = NoVirAIChatDialog(issues, self)
+            dialog.exec_()
+
+        def show_hotfix_notes(self):
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "NoVir hotfix",
+                "Исправления этого hotfix:\n"
+                "• Диагностика: штатные записи hosts и пользовательский прокси больше не помечаются как заражение.\n"
+                "• Недоступность сети и прав отображается как информационный статус; ошибка отдельной проверки не останавливает сканирование.\n"
+                "• Действия диагностики больше не зависят от языка интерфейса; DNS/Winsock показывают ошибки, не выдавая их за успех.\n"
+                "• Экспорт реестра создаёт реальные файлы; основной restore проверяет манифест и хэши, GUI backup-manager проверяет файлы и коды возврата.\n"
+                "• Окно отката показывает реальные записи и число успешно восстановленных значений.\n"
+                "• Команды ИИ ограничены диагностическим allowlist, запускаются без shell и требуют подтверждения.\n"
+                "• CMD запускает только штатный исполняемый файл, без обходных копий; добавлены системные инструменты.\n"
+                "• Добавлен перевод заголовка «Откат» и показ событий памяти в Audit Log.",
+            )
 
         def offer_ai_help(self):
             from PySide6.QtWidgets import QMessageBox
@@ -10428,43 +10634,44 @@ if GUI_MODE:
                 for res in self.diag_results:
                     if res['needs_fix']:
                         name = res['name']
+                        component_id = res.get('id')
                         try:
-                            if name == language_manager.translate("Hosts Файл"):
+                            if component_id == "hosts":
                                 hosts_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'drivers', 'etc', 'hosts')
                                 try:
                                     subprocess.run(["attrib", "-r", hosts_path], creationflags=0x08000000)
                                     with open(hosts_path, 'w', encoding='utf-8') as hf:
                                         hf.write("# Cleaned by NoVir\n127.0.0.1 localhost\n")
                                 except: pass
-                            elif name == language_manager.translate("Системные Службы (Services)"):
+                            elif component_id == "services":
                                 for srv in ['wuauserv', 'BITS', 'Winmgmt', 'wscsvc']:
                                     subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
                                     subprocess.run(["sc", "start", srv], creationflags=0x08000000)
-                            elif name == language_manager.translate("Настройки DNS"):
+                            elif component_id == "dns":
                                 subprocess.run(["ipconfig", "/flushdns"], creationflags=0x08000000)
                                 subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Ethernet\"", "dhcp"], creationflags=0x08000000)
                                 subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Wi-Fi\"", "dhcp"], creationflags=0x08000000)
-                            elif name == language_manager.translate("Сетевой протокол TCP/IP"):
+                            elif component_id == "tcpip":
                                 subprocess.run(["netsh", "winsock", "reset"], creationflags=0x08000000)
                                 subprocess.run(["netsh", "int", "ip", "reset"], creationflags=0x08000000)
-                            elif name == language_manager.translate("Network Proxy"):
+                            elif component_id == "proxy":
                                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", 0, winreg.KEY_SET_VALUE) as key:
                                     winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
-                            elif name == language_manager.translate("Windows Defender"):
+                            elif component_id == "defender":
                                 try:
                                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows Defender", 0, winreg.KEY_SET_VALUE) as key:
                                         winreg.DeleteValue(key, "DisableAntiSpyware")
                                 except FileNotFoundError: pass
-                            elif name == language_manager.translate("Task Manager"):
+                            elif component_id == "taskmgr":
                                 try:
                                     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
                                         winreg.DeleteValue(key, "DisableTaskMgr")
                                 except FileNotFoundError: pass
-                            elif name == language_manager.translate("Windows Update"):
+                            elif component_id == "windows_update":
                                 for srv in ['wuauserv', 'BITS', 'cryptsvc', 'msiserver']:
                                     subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
                                     subprocess.run(["sc", "start", srv], creationflags=0x08000000)
-                            elif name == language_manager.translate("Кэш обновлений"):
+                            elif component_id == "update_cache":
                                 subprocess.run(["sc", "stop", "wuauserv"], creationflags=0x08000000)
                                 import shutil
                                 cache_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
@@ -10473,9 +10680,9 @@ if GUI_MODE:
                                     os.makedirs(cache_path, exist_ok=True)
                                 except: pass
                                 subprocess.run(["sc", "start", "wuauserv"], creationflags=0x08000000)
-                            elif name == language_manager.translate("WMI Repository"):
+                            elif component_id == "wmi":
                                 subprocess.run(["winmgmt", "/resetrepository"], creationflags=0x08000000)
-                            elif name == language_manager.translate("Загрузчик BCD"):
+                            elif component_id == "bcd":
                                 subprocess.run(["bcdedit", "/set", "testsigning", "off"], creationflags=0x08000000)
                         except Exception as e:
                             logger.log("DiagFix", "error", f"Error fixing {name}: {e}")
@@ -11303,6 +11510,12 @@ if GUI_MODE:
                         text_area.setPlainText(f.read())
                 except Exception as e:
                     text_area.setPlainText(f"Error reading log: {e}")
+            elif logger.actions:
+                text_area.setPlainText("\n".join(
+                    f"{item['date']} {item['time']} [{item['status']}] "
+                    f"{item['action']}: {item['message']}"
+                    for item in logger.actions
+                ))
             else:
                 text_area.setPlainText(language_manager.translate("Журнал пуст или еще не создан."))
                 
@@ -11317,9 +11530,18 @@ if GUI_MODE:
             btn_clear = QPushButton(language_manager.translate("Очистить журнал"))
             btn_clear.setStyleSheet("QPushButton { background-color: #422; color: #f55; border: 1px solid #f00; padding: 5px; }")
             def clear_log(checked=False):
-                if log_path and os.path.exists(log_path):
-                    open(log_path, 'w').close()
+                try:
+                    if log_path:
+                        with open(log_path, 'w', encoding='utf-8') as log_file:
+                            log_file.write("")
+                    logger.actions.clear()
                     text_area.setPlainText("")
+                except OSError as error:
+                    QMessageBox.warning(
+                        dlg,
+                        language_manager.translate("Ошибка"),
+                        f"Не удалось очистить журнал: {error}",
+                    )
             btn_clear.clicked.connect(clear_log)
             
             btn_close = QPushButton(language_manager.translate("Закрыть"))
@@ -11345,10 +11567,8 @@ if GUI_MODE:
             count = len(rollback_mgr._snapshots)
             
             details = ""
-            for s in reversed(rollback_mgr.snapshots):
-                key = s['key_path']
-                val_name = s['value_name']
-                details += f"{key} \\ {val_name}\n"
+            for snapshot in reversed(rollback_mgr.snapshots):
+                details += f"{snapshot['key_path']} \\ {snapshot['value_name']}\n"
                 
             reply = QMessageBox.question(
                 self, 
@@ -11359,8 +11579,19 @@ if GUI_MODE:
             
             if reply == QMessageBox.Yes:
                 try:
-                    rollback_mgr.rollback()
-                    QMessageBox.information(self, language_manager.translate("Откат"), language_manager.translate("Изменения успешно отменены!"))
+                    restored, failed = rollback_mgr.rollback()
+                    if failed:
+                        QMessageBox.warning(
+                            self,
+                            language_manager.translate("Откат"),
+                            f"Восстановлено: {restored}. Не удалось восстановить: {failed}.",
+                        )
+                    else:
+                        QMessageBox.information(
+                            self,
+                            language_manager.translate("Откат"),
+                            f"Изменения отменены. Восстановлено значений: {restored}.",
+                        )
                 except Exception as e:
                     QMessageBox.warning(self, language_manager.translate("Ошибка"), f"{language_manager.translate('Не удалось выполнить откат:')}\n{e}")
 
@@ -11369,6 +11600,7 @@ if GUI_MODE:
             from PySide6.QtWidgets import QProgressDialog
             from PySide6.QtCore import Qt, QCoreApplication
             import subprocess
+            import time
             
             progress = QProgressDialog(language_manager.translate("Создание бэкапа реестра..."), "", 0, 100, self)
             progress.setWindowModality(Qt.WindowModal)
@@ -11380,22 +11612,42 @@ if GUI_MODE:
             progress.setValue(10)
             QCoreApplication.processEvents()
             
-            # Export SYSTEM
-            p1 = subprocess.Popen(f'reg export HKLM\\SYSTEM "{bkp_dir}\\SYSTEM.reg" /y', shell=True, creationflags=0x08000000)
-            while p1.poll() is None:
-                QCoreApplication.processEvents()
-            
-            progress.setValue(50)
-            QCoreApplication.processEvents()
-            
-            # Export SOFTWARE
-            p2 = subprocess.Popen(f'reg export HKLM\\SOFTWARE "{bkp_dir}\\SOFTWARE.reg" /y', shell=True, creationflags=0x08000000)
-            while p2.poll() is None:
-                QCoreApplication.processEvents()
-                
-            progress.setValue(100)
-            progress.close()
-            on_complete()
+            try:
+                for percent, registry_key, filename in (
+                    (50, r"HKLM\SYSTEM", "SYSTEM.reg"),
+                    (90, r"HKLM\SOFTWARE", "SOFTWARE.reg"),
+                ):
+                    destination = os.path.join(bkp_dir, filename)
+                    process = subprocess.Popen(
+                        ["reg", "export", registry_key, destination, "/y"],
+                        shell=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    while process.poll() is None:
+                        QCoreApplication.processEvents()
+                        time.sleep(0.02)
+                    stdout, stderr = process.communicate()
+                    if process.returncode != 0 or not os.path.isfile(destination) or os.path.getsize(destination) == 0:
+                        error = (stderr or stdout).decode(errors="replace").strip()
+                        raise OSError(error or f"reg export {registry_key} завершился с кодом {process.returncode}")
+                    progress.setValue(percent)
+                    QCoreApplication.processEvents()
+
+                progress.setValue(100)
+                progress.close()
+                on_complete()
+                return True
+            except Exception as error:
+                progress.close()
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(
+                    self,
+                    language_manager.translate("Ошибка резервного копирования"),
+                    f"Не удалось создать полный бэкап.\n{error}",
+                )
+                return False
         def show_backup_manager(self):
             import os
             import json
@@ -11464,11 +11716,22 @@ if GUI_MODE:
                 if reply == QMessageBox.Yes:
                     sys_reg = os.path.join(bkp_dir, "SYSTEM.reg")
                     sw_reg = os.path.join(bkp_dir, "SOFTWARE.reg")
-                    if os.path.exists(sys_reg):
-                        subprocess.run(f'reg import "{sys_reg}"', shell=True, creationflags=0x08000000)
-                    if os.path.exists(sw_reg):
-                        subprocess.run(f'reg import "{sw_reg}"', shell=True, creationflags=0x08000000)
-                    QMessageBox.information(dlg, language_manager.translate("Готово"), language_manager.translate("Бэкап применён. Необходима перезагрузка."))
+                    try:
+                        for registry_file in (sys_reg, sw_reg):
+                            if not os.path.isfile(registry_file) or os.path.getsize(registry_file) == 0:
+                                raise OSError(f"Файл резервной копии отсутствует или пуст: {registry_file}")
+                            result = subprocess.run(
+                                ["reg", "import", registry_file],
+                                capture_output=True,
+                                text=True,
+                                shell=False,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                            )
+                            if result.returncode != 0:
+                                raise OSError(result.stderr.strip() or result.stdout.strip() or f"Код {result.returncode}")
+                        QMessageBox.information(dlg, language_manager.translate("Готово"), language_manager.translate("Бэкап применён. Необходима перезагрузка."))
+                    except OSError as error:
+                        QMessageBox.critical(dlg, language_manager.translate("Ошибка восстановления"), str(error))
             btn_restore.clicked.connect(lambda checked=False: restore_bkp())
             
             btn_del = QPushButton(language_manager.translate("Удалить"))

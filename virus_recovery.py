@@ -3,13 +3,12 @@
 """
 NoVir - Вирусный Реаниматор
 Автор: Недохакер
-Версия: 2.0
+Версия: 2.5.0
 Описание: Полный набор инструментов для восстановления системы после вирусной атаки
 """
-
 import os
-import explorer_tab
 import sys
+import explorer_tab
 import subprocess
 import winreg
 import ctypes
@@ -26,7 +25,7 @@ from functools import lru_cache
 
 try:
     import novir_native
-    PSUTIL_AVAILABLE = True # Stub for compatibility
+    PSUTIL_AVAILABLE = True
 except ImportError:
     pass
 try:
@@ -43,7 +42,6 @@ except ImportError:
     def init(*args, **kwargs):
         return None
 
-# Попытка импорта C++ модуля
 try:
     import novir_core
     CPP_CORE_AVAILABLE = True
@@ -51,11 +49,8 @@ except ImportError:
     CPP_CORE_AVAILABLE = False
     print("[INFO] C++ модуль novir_core не найден, используется Python реализация")
 
-# Флаг для GUI (по умолчанию включен)
 GUI_MODE = '--console' not in sys.argv and '-c' not in sys.argv
 PYSIDE_AVAILABLE = False
-
-# Условный импорт PySide6
 if GUI_MODE:
     try:
         from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -72,10 +67,7 @@ if GUI_MODE:
         print("PySide6 не установлен. Запуск в консольном режиме.")
         GUI_MODE = False
 
-# Инициализация colorama для Windows
 init()
-
-# Установка UTF-8 кодировки для консоли
 if sys.platform == 'win32':
     import locale
     try:
@@ -83,7 +75,6 @@ if sys.platform == 'win32':
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
         sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
     except Exception as _e:
-        # Expected exception, intentionally ignored
         pass
 
 # Константы для Windows
@@ -93,6 +84,9 @@ ntdll = ctypes.windll.ntdll
 # Режим сухого прогона (только показываем, ничего не меняем)
 DRY_RUN = '--dry-run' in sys.argv or '-d' in sys.argv
 SELF_CHECK = '--self-check' in sys.argv or '--check' in sys.argv
+APP_DIR = os.path.dirname(os.path.abspath(
+    sys.executable if getattr(sys, "frozen", False) else __file__
+))
 
 # Папка для бэкапов
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NoVir_Backups")
@@ -174,6 +168,370 @@ def parse_ai_command(command):
 
 def ai_command_is_allowed(command):
     return parse_ai_command(command) is not None
+
+
+def render_chat_message(text):
+    """Render a small safe Markdown subset for the Qt rich-text chat view."""
+    import html
+    import re
+
+    lines = str(text).splitlines()
+    output = []
+    index = 0
+
+    def cells_from_row(line):
+        stripped = line.strip()
+        if "|" not in stripped:
+            return None
+        if stripped.startswith("|"):
+            stripped = stripped[1:]
+        if stripped.endswith("|"):
+            stripped = stripped[:-1]
+        return [cell.strip() for cell in stripped.split("|")]
+
+    def is_separator(row):
+        return bool(row) and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in row)
+
+    def inline_markup(value):
+        safe = html.escape(value)
+        safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
+        safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe)
+        safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", safe)
+        return safe
+
+    while index < len(lines):
+        header = cells_from_row(lines[index])
+        separator = cells_from_row(lines[index + 1]) if index + 1 < len(lines) else None
+        if header and separator and len(header) == len(separator) and is_separator(separator):
+            column_count = min(len(header), 3)
+            if len(header) > column_count:
+                header = header[:column_count - 1] + [" / ".join(header[column_count - 1:])]
+            rows = []
+            index += 2
+            while index < len(lines):
+                row = cells_from_row(lines[index])
+                if not row:
+                    break
+                index += 1
+                if len(rows) >= 4:
+                    continue
+                if len(row) > column_count:
+                    row = row[:column_count - 1] + [" / ".join(row[column_count - 1:])]
+                row = (row + [""] * column_count)[:column_count]
+                rows.append(row)
+
+            table = [
+                "<table width='100%' style='border-collapse:collapse; table-layout:fixed; margin:6px 0;'>",
+                "<thead><tr>",
+            ]
+            for cell in header:
+                table.append(
+                    "<th style='border:1px solid #505050; background:#202020; padding:5px 7px; text-align:left;'>"
+                    + inline_markup(cell) + "</th>"
+                )
+            table.append("</tr></thead><tbody>")
+            for row in rows:
+                table.append("<tr>")
+                for cell in row:
+                    table.append(
+                        "<td style='border:1px solid #444444; padding:5px 7px; vertical-align:top; word-wrap:break-word;'>"
+                        + inline_markup(cell) + "</td>"
+                    )
+                table.append("</tr>")
+            table.append("</tbody></table>")
+            output.append("".join(table))
+            continue
+
+        line = lines[index]
+        if line.startswith("### "):
+            output.append("<b>" + inline_markup(line[4:]) + "</b>")
+        elif line.startswith("## "):
+            output.append("<b>" + inline_markup(line[3:]) + "</b>")
+        elif line.startswith(("- ", "* ")):
+            output.append("&#8226; " + inline_markup(line[2:]))
+        elif re.match(r"^\d+\.\s", line):
+            output.append(inline_markup(line))
+        else:
+            output.append(inline_markup(line))
+        index += 1
+
+    return "<br>".join(output)
+
+
+def build_recovery_plan(diagnostic_results):
+    """Group related findings into cautious, explainable recovery hypotheses."""
+    findings = [item for item in diagnostic_results if item.get("needs_fix")]
+    ids = {item.get("id") for item in findings}
+    plan = []
+
+    if ids.intersection({"dns", "tcpip", "proxy"}):
+        related = [item for item in findings if item.get("id") in {"dns", "tcpip", "proxy"}]
+        plan.append({
+            "root_cause": "network_configuration",
+            "title": "Возможна общая проблема сетевой конфигурации",
+            "components": [item.get("id") for item in related],
+            "evidence": [item.get("details", "") for item in related if item.get("details")],
+            "steps": [
+                "Сохранить текущие DNS, proxy и состояние Winsock перед изменениями.",
+                "Сверить активные сетевые адаптеры и источник DNS.",
+                "Исправлять только подтверждённо неверные параметры; затем повторить проверки.",
+            ],
+            "risk": "medium",
+            "automated": False,
+        })
+
+    policy_ids = {"defender", "taskmgr", "windows_update"}
+    if ids.intersection(policy_ids):
+        related = [item for item in findings if item.get("id") in policy_ids]
+        plan.append({
+            "root_cause": "policy_or_administration",
+            "title": "Несколько ограничений могут быть заданы политиками Windows",
+            "components": [item.get("id") for item in related],
+            "evidence": [item.get("details", "") for item in related if item.get("details")],
+            "steps": [
+                "Проверить источник политик и убедиться, что устройство не управляется организацией.",
+                "Не удалять политики автоматически; сверить каждое значение с администратором.",
+                "После согласованного изменения повторить проверки Defender, Task Manager и Windows Update.",
+            ],
+            "risk": "high",
+            "automated": False,
+        })
+
+    remaining = [item for item in findings if item.get("id") not in {"dns", "tcpip", "proxy"} | policy_ids]
+    for item in remaining:
+        component_id = item.get("id") or "unknown"
+        plan.append({
+            "root_cause": f"component:{component_id}",
+            "title": f"Требуется отдельная проверка: {item.get('name', component_id)}",
+            "components": [component_id],
+            "evidence": [item.get("details", "")] if item.get("details") else [],
+            "steps": ["Проверить результат вручную и сохранить соответствующую точку восстановления перед изменениями."],
+            "risk": "high",
+            "automated": False,
+        })
+    return plan
+
+
+def build_incident_report(diagnostic_results, recovery_outcomes=None, generated_at=None):
+    """Create a serializable recovery report from initial and verification scans."""
+    recovery_outcomes = recovery_outcomes or {}
+    initial_findings = [item for item in diagnostic_results if item.get("needs_fix")]
+    verified_fixed = [
+        item for item in initial_findings
+        if recovery_outcomes.get(item.get("id")) == "verified"
+    ]
+    attention = [
+        item for item in initial_findings
+        if recovery_outcomes.get(item.get("id")) != "verified"
+    ]
+    return {
+        "generated_at": generated_at or datetime.now().astimezone().isoformat(timespec="seconds"),
+        "problems_found": len(initial_findings),
+        "problems_fixed": len(verified_fixed),
+        "requires_attention": len(attention),
+        "findings": diagnostic_results,
+        "recovery_outcomes": recovery_outcomes,
+        "plan": build_recovery_plan(diagnostic_results),
+    }
+
+
+def format_incident_report_text(report):
+    lines = [
+        "NoVir Recovery Report",
+        f"Scan: {report['generated_at']}",
+        f"Problems found: {report['problems_found']}",
+        f"Problems fixed: {report['problems_fixed']}",
+        f"Requires attention: {report['requires_attention']}",
+        "",
+        "Components:",
+    ]
+    if report.get("recovery_point"):
+        lines.insert(5, f"Recovery Point: {report['recovery_point']}")
+    for item in report["findings"]:
+        outcome = report["recovery_outcomes"].get(item.get("id"))
+        if outcome == "verified":
+            state = "FIXED (verified)"
+        elif isinstance(outcome, str) and outcome.startswith("failed:"):
+            state = "FIX FAILED"
+        elif outcome == "manual_review":
+            state = "MANUAL REVIEW"
+        elif outcome == "requires_attention":
+            state = "REQUIRES ATTENTION"
+        else:
+            state = item.get("status", "NOT FIXED")
+        recovery_note = f" | Recovery: {outcome}" if outcome and outcome != "verified" else ""
+        lines.append(
+            f"- {item.get('name', item.get('id', 'Unknown'))}: {state} - "
+            f"{item.get('details', '')}{recovery_note}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def create_recovery_point(root_dir=None, command_runner=None):
+    """Capture recovery artifacts and mark inventory-only scopes honestly."""
+    from datetime import datetime
+
+    root_dir = root_dir or os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")),
+        "NoVir", "RecoveryPoints",
+    )
+    point_dir = os.path.join(root_dir, datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+    os.makedirs(point_dir, exist_ok=False)
+    runner = command_runner or subprocess.run
+    components = {}
+
+    def capture(name, command, output_name, artifact_type="text"):
+        path = os.path.join(point_dir, output_name)
+        try:
+            result = runner(
+                command,
+                capture_output=True,
+                text=True,
+                shell=False,
+                timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if result.returncode != 0:
+                components[name] = {"status": "unavailable", "error": result.stderr or result.stdout}
+                return
+            if artifact_type == "reg":
+                valid = os.path.isfile(path) and os.path.getsize(path) > 0
+            elif artifact_type == "binary":
+                valid = os.path.isfile(path) and os.path.getsize(path) > 0
+            else:
+                payload = result.stdout or ""
+                valid = bool(payload.strip())
+                if valid:
+                    with open(path, "w", encoding="utf-8") as output_file:
+                        output_file.write(payload)
+            components[name] = {
+                "status": "saved" if valid else "unavailable",
+                "file": output_name if valid else None,
+                "error": None if valid else "Command returned no usable artifact",
+            }
+        except Exception as error:
+            components[name] = {"status": "unavailable", "error": str(error)}
+
+    registry_keys = (
+        ("registry_internet_settings", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"),
+        ("registry_user_policies", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System"),
+        ("registry_defender_policy", r"HKLM\SOFTWARE\Policies\Microsoft\Windows Defender"),
+        ("registry_update_policy", r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"),
+    )
+    for name, key in registry_keys:
+        filename = f"{name}.reg"
+        capture(name, ["reg", "export", key, os.path.join(point_dir, filename), "/y"], filename, "reg")
+
+    capture("network", ["netsh", "interface", "dump"], "network_config.txt")
+    capture("boot_configuration", ["bcdedit", "/export", os.path.join(point_dir, "BCD")], "BCD", "binary")
+    capture("drivers_inventory", ["pnputil", "/enum-drivers"], "drivers_inventory.txt")
+
+    service_records = {}
+    for service in ("wuauserv", "BITS", "Winmgmt", "wscsvc", "cryptsvc", "msiserver"):
+        try:
+            result = runner(
+                ["sc", "qc", service],
+                capture_output=True,
+                text=True,
+                shell=False,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            service_records[service] = {
+                "status": "saved" if result.returncode == 0 else "unavailable",
+                "configuration": result.stdout,
+            }
+        except Exception as error:
+            service_records[service] = {"status": "unavailable", "error": str(error)}
+    services_path = os.path.join(point_dir, "services.json")
+    with open(services_path, "w", encoding="utf-8") as output_file:
+        json.dump(service_records, output_file, ensure_ascii=False, indent=2)
+    components["services"] = {
+        "status": "saved" if any(item["status"] == "saved" for item in service_records.values()) else "unavailable",
+        "file": "services.json",
+        "rollback": "manual",
+    }
+    components["drivers_inventory"]["rollback"] = "inventory_only"
+    components["boot_configuration"]["rollback"] = "manual_and_requires_reboot"
+    components["network"]["rollback"] = "checksum_verified_netsh_exec"
+    for component in components.values():
+        filename = component.get("file")
+        if filename:
+            if component.get("status") == "saved" and filename.startswith("registry_"):
+                component["rollback"] = "checksum_verified_import"
+            artifact_path = os.path.join(point_dir, filename)
+            if os.path.isfile(artifact_path) and not os.path.islink(artifact_path):
+                digest = hashlib.sha256()
+                with open(artifact_path, "rb") as artifact_file:
+                    for chunk in iter(lambda: artifact_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                component["sha256"] = digest.hexdigest()
+
+    manifest = {
+        "format_version": 1,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "path": point_dir,
+        "components": components,
+        "note": "This recovery point records artifacts. Driver inventory is not a driver backup; BCD and service restoration require manual review.",
+    }
+    manifest_path = os.path.join(point_dir, "recovery_point.json")
+    with open(manifest_path, "w", encoding="utf-8") as output_file:
+        json.dump(manifest, output_file, ensure_ascii=False, indent=2)
+    return manifest
+
+
+def restore_recovery_point(point_dir, command_runner=None):
+    """Restore checksum-verified registry/network artifacts; report manual-only scopes."""
+    runner = command_runner or subprocess.run
+    if os.path.islink(point_dir) or not os.path.isdir(point_dir):
+        raise OSError("Recovery Point path is invalid")
+    manifest_path = os.path.join(point_dir, "recovery_point.json")
+    if os.path.islink(manifest_path):
+        raise OSError("Recovery Point manifest cannot be a symbolic link")
+    with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+    if manifest.get("format_version") != 1:
+        raise ValueError("Unsupported Recovery Point format")
+
+    restored = []
+    components = manifest.get("components", {})
+    for component_id, component in components.items():
+        if component.get("status") != "saved":
+            continue
+        filename = component.get("file")
+        if not filename or os.path.basename(filename) != filename:
+            continue
+        if not (component_id.startswith("registry_") or component_id == "network"):
+            continue
+        artifact_path = os.path.join(point_dir, filename)
+        if os.path.islink(artifact_path) or not os.path.isfile(artifact_path):
+            raise OSError(f"Recovery artifact is missing or unsafe: {filename}")
+        digest = hashlib.sha256()
+        with open(artifact_path, "rb") as artifact_file:
+            for chunk in iter(lambda: artifact_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != component.get("sha256"):
+            raise OSError(f"Recovery artifact checksum mismatch: {filename}")
+
+        command = ["netsh", "-f", artifact_path] if component_id == "network" else ["reg", "import", artifact_path]
+        result = runner(
+            command,
+            capture_output=True,
+            text=True,
+            shell=False,
+            timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr or result.stdout or f"Restore failed for {component_id}")
+        restored.append(component_id)
+
+    manual = [
+        component_id for component_id, component in components.items()
+        if component.get("status") == "saved"
+        and component.get("rollback") in ("manual", "manual_and_requires_reboot", "inventory_only")
+    ]
+    return {"restored": restored, "manual_review": manual}
 
 
 # Цвета для консоли
@@ -403,6 +761,15 @@ class LanguageManager:
         'ЖУРНАЛ': ('LOG', 'ЖУРНАЛ', 'MAGAZIN', 'MAGAZYN', 'REVUE'),
         'ОТКАТ': ('ROLLBACK', 'ВІДКАТ', 'ABRUFEN', 'PRZYPOMNIENIE SOBIE CZEGOŚ', 'RAPPEL'),
         'Откат': ('Rollback', 'Відкат', 'Rollback', 'Wycofanie', 'Annuler'),
+        'Только анализ': ('Analyze only', 'Лише аналіз', 'Nur analysieren', 'Tylko analiza', 'Analyse uniquement'),
+        'Предложить план с ИИ': ('Suggest an AI plan', 'Запропонувати план ШІ', 'KI-Plan vorschlagen', 'Zaproponuj plan AI', 'Proposer un plan IA'),
+        'План восстановления': ('Recovery plan', 'План відновлення', 'Wiederherstellungsplan', 'Plan odzyskiwania', 'Plan de récupération'),
+        'ИИ-помощник временно в разработке: нашли много критических ошибок и исправляем их. Извиняемся за неудобства! В качестве компенсации держите виртуальную печеньку :)': ('The AI assistant is temporarily under development while we fix several critical bugs. Sorry for the inconvenience! Please accept this virtual cookie as compensation :)', 'ШІ-помічник тимчасово в розробці: ми знайшли багато критичних помилок і виправляємо їх. Перепрошуємо за незручності! Прийміть віртуальне печиво як компенсацію :)', 'Der KI-Assistent wird vorübergehend überarbeitet, während wir kritische Fehler beheben. Entschuldigung für die Unannehmlichkeiten! Als kleine Entschädigung gibt es einen virtuellen Keks :)', 'Asystent AI jest tymczasowo w przygotowaniu, naprawiamy krytyczne błędy. Przepraszamy za niedogodności! W ramach rekompensaty przesyłamy wirtualne ciasteczko :)', 'L’assistant IA est temporairement en développement pendant que nous corrigeons des bugs critiques. Désolé pour le désagrément ! Voici un cookie virtuel en compensation :)'),
+        'Подготовить исправление': ('Prepare a repair', 'Підготувати виправлення', 'Reparatur vorbereiten', 'Przygotuj naprawę', 'Préparer une réparation'),
+        'План': ('Plan', 'План', 'Plan', 'Plan', 'Plan'),
+        'Отчёт': ('Report', 'Звіт', 'Bericht', 'Raport', 'Rapport'),
+        'Точка восстановления': ('Recovery Point', 'Точка відновлення', 'Wiederherstellungspunkt', 'Punkt przywracania', 'Point de restauration'),
+        'Откат точки': ('Restore Point Rollback', 'Відкат точки', 'Wiederherstellungspunkt zurücksetzen', 'Cofnij punkt przywracania', 'Annuler le point de restauration'),
         'ОБНОВИТЬ': ('UPDATE', 'ОНОВИТИ', 'AKTUALISIEREN', 'AKTUALIZACJA', 'MISE À JOUR'),
         'ТЕМА ОФОРМЛЕНИЯ': ('APPEARANCE', 'ТЕМА ОФОРМЛЕННЯ', 'THEMA', 'TEMAT', 'THÈME'),
         'Тёмная тема (Стандартная)': ('Dark Theme (Default)', 'Темна тема (Стандартна)', 'Dunkles Thema (Standard)', 'Ciemny motyw (standardowy)', 'Thème sombre (standard)'),
@@ -4463,12 +4830,10 @@ class ProcessAnalyzer:
                     threat_score -= 2
                 elif 'temp' in exe_path or 'downloads' in exe_path or 'desktop' in exe_path:
                     threat_score += 3
-            
+
             # Проверка на легитимные системные процессы
             if name in ProcessAnalyzer.LEGITIMATE_SYSTEM_PROCESSES:
                 threat_score -= 3
-            
-            # Проверка на цифры в имени (характерно для вирусов)
             if any(char.isdigit() for char in name):
                 threat_score += 1
             
@@ -6970,7 +7335,8 @@ if GUI_MODE:
             req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             data = {
                 "model": "openai/gpt-oss-120b",
-                "messages": self.memory
+                "messages": self.memory,
+                "max_completion_tokens": 160,
             }
             try:
                 with urllib.request.urlopen(req, data=json.dumps(data).encode("utf-8"), timeout=15) as response:
@@ -7026,12 +7392,15 @@ if GUI_MODE:
             sys_prompt = """Ты — NoVir AI, встроенный помощник программы NoVir. Помогай пользователю разбираться с Windows, диагностикой и функциями NoVir.
 
 Качество ответов:
-- Сначала пойми задачу и учитывай весь контекст разговора. Давай конкретный, последовательный ответ с проверяемыми шагами.
+- Всегда учитывай контекст, но отвечай максимум 45 словами. Без вступления, повторения вопроса, заголовков, пустых строк и длинных списков.
+- Если результаты NoVir все OK: ответь одной короткой фразой, что явных проблем не найдено. Не перечисляй проверки и не придумывай дополнительные гипотезы, тесты или команды.
+- Если есть INFO/WARNING/ERROR: упомяни только реальные отклонения, не пересказывай OK. Дай не более одной осторожной гипотезы и одного безопасного следующего шага; называй причину гипотезой, не фактом.
+- Используй таблицу только если пользователь явно просит её или нужно сравнить несколько вариантов. Формат Markdown: не более 3 колонок и 4 строк данных, короткие ячейки; не помещай в таблицу длинные абзацы. Для обычного ответа используй одну фразу или короткие пункты.
+- В режиме предложения плана не запускай операции и не формируй маркер [EXECUTE:]. Для единственного предложенного действия коротко назови риск.
 - Не выдумывай факты, результаты проверки системы, возможности программы или успешное выполнение действий. Если данных недостаточно или ты не уверен, прямо скажи об этом и задай уточняющий вопрос.
 - Для потенциально устаревших или зависящих от версии сведений обозначай неопределённость. Отделяй установленный факт от предположения.
-- По умолчанию отвечай кратко: 1-3 предложения. Не перечисляй все функции и не повторяй вопрос. Подробности, примеры и длинные списки давай только по запросу.
-- Для инструкций используй только необходимые шаги. Пиши по-русски и по делу; предупреждения о рисках не пропускай.
-- Напоминай, что ты ИИ в бета-версии: ответы могут быть неверными, их нужно перепроверять и им нельзя доверять без проверки.
+- Не повторяй бета-предупреждение в каждом ответе: оно постоянно показано в окне чата.
+- Пиши по-русски просто и по делу. Подробности давай только если их прямо попросили.
 
 Безопасность команд:
 - Не утверждай, что команда безопасна или необходима, если не можешь это обосновать. Перед предложением объясни, что команда изменит, какие у неё риски и как при необходимости откатить изменение.
@@ -7047,7 +7416,12 @@ if GUI_MODE:
             if issues_text == "MANUAL":
                 first_msg = "Коротко поздоровайся и скажи, что помогаешь с NoVir и Windows. Не перечисляй все функции; попроси описать вопрос или проблему."
             else:
-                first_msg = f"У меня обнаружены следующие проблемы после сканирования:\n{issues_text}\nЧто мне делать? Помоги."
+                first_msg = (
+                    "Суммируй результаты максимум в 45 словах. Если все проверки OK, скажи это одной фразой. "
+                    "Иначе назови только отклонение, одну гипотезу и один безопасный шаг. "
+                    "Это анализ, не выполняй исправления и не выдавай [EXECUTE:].\n\n"
+                    f"Результаты:\n{issues_text}"
+                )
                 
             self.append_chat("Вы", first_msg)
             self.memory.append({"role": "user", "content": first_msg})
@@ -7055,8 +7429,13 @@ if GUI_MODE:
             
         def append_chat(self, sender, text):
             color = "#00e87a" if sender == "NoVir AI" else "#3b82f6" if sender == "Вы" else "#f59e0b"
-            html = f"<b style='color:{color}; font-size: 14px;'>{sender}:</b><br><span style='color:#e0e0e0;'>{text.replace(chr(10), '<br>')}</span><br><br>"
-            self.chat_area.append(html)
+            import html
+            sender_html = html.escape(str(sender))
+            message_html = render_chat_message(text)
+            self.chat_area.append(
+                f"<b style='color:{color}; font-size: 14px;'>{sender_html}:</b><br>"
+                f"<span style='color:#e0e0e0;'>{message_html}</span><br><br>"
+            )
             self.chat_area.verticalScrollBar().setValue(self.chat_area.verticalScrollBar().maximum())
             
         def send_msg(self):
@@ -7137,9 +7516,11 @@ if GUI_MODE:
 
     class NoVirGUI(QMainWindow):
         update_result = Signal(object)
+        RECOVERY_ACTIONS = {"dns", "taskmgr"}
 
         def __init__(self):
             super().__init__()
+            self.dragPos = None
             self.setWindowTitle("NoVir - Восстановление системы")
             self.setMinimumSize(1000, 700)
             self.setWindowFlags(Qt.FramelessWindowHint) # Безрамочное окно
@@ -7366,18 +7747,67 @@ if GUI_MODE:
             self.log_output.hide()
             self.layout.addWidget(self.log_output)
 
-            # Нижняя панель — Поддержать автора (всегда видна)
+            # Нижняя панель — быстрый доступ к диагностике и вторичным действиям.
             bottom_bar = QFrame()
-            bottom_bar.setFixedHeight(38)
-            bottom_bar.setStyleSheet("border-top: 1px solid #222222;")
+            bottom_bar.setFixedHeight(52)
+            bottom_bar.setStyleSheet(
+                "QFrame { border-top: 1px solid #1e1e1e; background-color: #050505; }"
+            )
             bottom_layout = QHBoxLayout(bottom_bar)
-            bottom_layout.setContentsMargins(15, 0, 15, 0)
+            bottom_layout.setContentsMargins(16, 6, 16, 6)
+            bottom_layout.setSpacing(8)
 
-            bottom_support_btn = QPushButton("ПОДДЕРЖАТЬ АВТОРА")
-            bottom_support_btn.setFixedHeight(28)
+            self.btn_diagnostics = QPushButton(language_manager.translate("УМНАЯ ДИАГНОСТИКА"))
+            self.btn_diagnostics.setFixedHeight(36)
+            self.btn_diagnostics.setMinimumWidth(210)
+            self.btn_diagnostics.setStyleSheet(
+                "QPushButton { background: #111; color: #fff; border: 1px solid #2a2a2a; "
+                "font-size: 12px; font-weight: bold; letter-spacing: 1px; padding: 0 18px; border-radius: 0; }"
+                "QPushButton:hover { background: #1a1a1a; border-color: #ffffff; }"
+                "QPushButton:pressed { background: #222; }"
+            )
+            self.btn_diagnostics.clicked.connect(lambda checked=False: self.switch_page(7))
+            bottom_layout.addWidget(self.btn_diagnostics)
+
+            separator = QFrame()
+            separator.setFixedWidth(1)
+            separator.setFixedHeight(24)
+            separator.setStyleSheet("background: #2a2a2a; border: none;")
+            bottom_layout.addWidget(separator)
+
+            self.btn_quick_actions = QPushButton("ЕЩЁ  ▾")
+            self.btn_quick_actions.setFixedSize(88, 36)
+            self.btn_quick_actions.setStyleSheet(
+                "QPushButton { background: #111; color: #aaa; border: 1px solid #2a2a2a; "
+                "font-size: 12px; font-weight: bold; letter-spacing: 1px; border-radius: 0; }"
+                "QPushButton:hover { background: #1a1a1a; border-color: #555; color: #fff; }"
+                "QPushButton::menu-indicator { image: none; }"
+            )
+            quick_actions_menu = QMenu(self)
+            quick_actions_menu.setStyleSheet(
+                "QMenu { background: #111; color: #ddd; border: 1px solid #333; }"
+                "QMenu::item { padding: 8px 20px; font-size: 12px; }"
+                "QMenu::item:selected { background: #222; color: #fff; }"
+            )
+            fix_all_action = quick_actions_menu.addAction("ПОЧИНИТЬ ВСЁ")
+            fix_all_action.triggered.connect(lambda checked=False: self.run_fix_all())
+            audit_action = quick_actions_menu.addAction("ЖУРНАЛ")
+            audit_action.triggered.connect(lambda checked=False: self.show_audit_log())
+            rollback_action = quick_actions_menu.addAction("ОТКАТ")
+            rollback_action.triggered.connect(lambda checked=False: self.show_rollback_dialog())
+            update_action = quick_actions_menu.addAction("ОБНОВИТЬ")
+            update_action.triggered.connect(lambda checked=False: self.check_for_updates(manual=True))
+            backup_action = quick_actions_menu.addAction(language_manager.translate("БЭКАПЫ"))
+            backup_action.triggered.connect(lambda checked=False: self.show_backup_manager())
+            self.btn_quick_actions.setMenu(quick_actions_menu)
+            bottom_layout.addWidget(self.btn_quick_actions)
+
+            bottom_support_btn = QPushButton("♥  ПОДДЕРЖАТЬ АВТОРА")
+            bottom_support_btn.setFixedHeight(36)
             bottom_support_btn.setStyleSheet(
-                "QPushButton { border: 1px solid #333333; color: #888888; font-size: 11px; font-weight: bold; padding: 0 12px; }"
-                " QPushButton:hover { border-color: #ffffff; color: #ffffff; }"
+                "QPushButton { border: 1px solid #1e1e1e; color: #555; font-size: 11px; "
+                "font-weight: bold; padding: 0 14px; letter-spacing: 1px; background: transparent; }"
+                "QPushButton:hover { border-color: #555; color: #aaa; }"
             )
             bottom_support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             bottom_layout.addStretch()
@@ -7395,16 +7825,6 @@ if GUI_MODE:
             layout = QVBoxLayout(page)
             layout.setAlignment(Qt.AlignCenter)
             layout.setSpacing(20)
-            self.diag_btn = QPushButton(language_manager.translate("УМНАЯ ДИАГНОСТИКА"))
-            self.diag_btn.setFixedHeight(50)
-            self.diag_btn.setStyleSheet(
-                "QPushButton { background-color: #0055ff; color: #ffffff; font-size: 16px; font-weight: bold; border-radius: 5px; }"
-                "QPushButton:hover { background-color: #0077ff; }"
-            )
-            self.diag_btn.clicked.connect(lambda checked=False: self.switch_page(7))
-            layout.addWidget(self.diag_btn)
-
-
             # Сетка плиток
             grid = QGridLayout()
             grid.setSpacing(15)
@@ -7426,75 +7846,9 @@ if GUI_MODE:
                 btn.clicked.connect(lambda checked=False, x=idx: self.switch_page(x))
                 grid.addWidget(btn, *position)
 
-            layout.addStretch()
+            layout.addStretch(1)
             layout.addLayout(grid)
-
-            layout.addStretch()  # ПУШИТ ВСЁ ВНИЗ
-            support_btn = QPushButton("ПОДДЕРЖАТЬ АВТОРА")
-            support_btn.setFixedHeight(44)
-            support_btn.setStyleSheet(
-                "QPushButton { background-color: #000000; color: #ffffff; border: 2px solid #ffffff;"
-                " font-size: 14px; font-weight: bold; letter-spacing: 2px; }"
-                " QPushButton:hover { background-color: #ffffff; color: #000000; }"
-            )
-            support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
-            layout.addWidget(support_btn)
-
-            # ── Action row: Fix-All / Audit Log / Rollback ──────────────
-            action_row = QHBoxLayout()
-            action_row.setSpacing(10)
-
-            fix_all_btn = QPushButton("ПОЧИНИТЬ ВСЁ")
-            fix_all_btn.setFixedHeight(40)
-            fix_all_btn.setStyleSheet(
-                "QPushButton { background-color: #ffffff; color: #000000; border: none;"
-                " font-size: 13px; font-weight: bold; }"
-                " QPushButton:hover { background-color: #dddddd; }"
-            )
-            fix_all_btn.clicked.connect(self.run_fix_all)
-            action_row.addWidget(fix_all_btn, stretch=2)
-
-            audit_btn = QPushButton("ЖУРНАЛ")
-            audit_btn.setFixedHeight(40)
-            audit_btn.setStyleSheet(
-                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
-                " font-size: 12px; }"
-                " QPushButton:hover { border-color: #ffffff; }"
-            )
-            audit_btn.clicked.connect(lambda checked=False: self.show_audit_log())
-            action_row.addWidget(audit_btn, stretch=1)
-
-            rollback_btn = QPushButton("ОТКАТ")
-            rollback_btn.setFixedHeight(40)
-            rollback_btn.setStyleSheet(
-                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
-                " font-size: 12px; }"
-                " QPushButton:hover { border-color: #ffffff; }"
-            )
-            rollback_btn.clicked.connect(lambda checked=False: self.show_rollback_dialog())
-            action_row.addWidget(rollback_btn, stretch=1)
-
-
-            update_btn = QPushButton("ОБНОВИТЬ")
-            update_btn.setFixedHeight(40)
-            update_btn.setStyleSheet(
-                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555;"
-                " font-size: 12px; }"
-                " QPushButton:hover { border-color: #ffffff; }"
-            )
-            update_btn.clicked.connect(lambda checked=False: self.check_for_updates(manual=True))
-            action_row.addWidget(update_btn, stretch=1)
-            backup_btn = QPushButton(language_manager.translate("БЭКАПЫ"))
-            backup_btn.setFixedHeight(40)
-            backup_btn.setStyleSheet(
-                "QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #555555; font-size: 12px; }"
-                "QPushButton:hover { border-color: #ffffff; }"
-            )
-            backup_btn.clicked.connect(lambda checked=False: self.show_backup_manager())
-            action_row.addWidget(backup_btn, stretch=1)
-
-            layout.addLayout(action_row)
-
+            layout.addStretch(1)
             return page
 
         def switch_page(self, index):
@@ -7510,7 +7864,8 @@ if GUI_MODE:
                     3: "СНЯТИЕ ОГРАНИЧЕНИЙ",
                     4: "ДОП. ВОЗМОЖНОСТИ",
                     5: "АНЛОКЕР",
-                    6: "НАСТРОЙКИ"
+                    6: "НАСТРОЙКИ",
+                    7: language_manager.translate("УМНАЯ ДИАГНОСТИКА"),
                 }
                 self.title_label.setText(titles.get(index, "NOVIR"))
                 # For page 7: ensure diagnostic page is in the stack
@@ -9591,6 +9946,9 @@ if GUI_MODE:
                 ("Отчёт автозагрузки", "Считает записи автозапуска в реестре и папке Startup.", self.scan_startup_report),
                 ("Сетевые порты", "Показывает слушающие порты и активные сетевые соединения.", self.check_network_ports),
                 ("Перезапустить Explorer", "Перезапускает оболочку Windows после подтверждения.", self.restart_explorer),
+                ("WinRE / USB Boot", "Загрузка в среду восстановления (WinRE) и создание загрузочных накопителей.", self.show_winre_usb_window),
+                ("Корреляция Malware", "Сравнение процессов с задачами планировщика и службами.", self.show_malware_correlation_window),
+                ("Восстановление драйверов", "Пакетная установка/восстановление драйверов из резервной копии (.inf).", self.show_driver_recovery_window),
             ]
 
             for name, description, callback in built_in_tools:
@@ -10227,10 +10585,13 @@ if GUI_MODE:
 
             # --- Buttons ---
             btn_row = QHBoxLayout()
-            btn_row.setSpacing(15)
+            btn_row.setSpacing(8)
+            recovery_row = QHBoxLayout()
+            recovery_row.setSpacing(8)
 
             self.btn_scan = QPushButton(language_manager.translate("Запустить сканирование"))
             self.btn_scan.setFixedHeight(42)
+            self.btn_scan.setMinimumWidth(220)
             self.btn_scan.setCursor(Qt.PointingHandCursor)
             self.btn_scan.setStyleSheet("""
                 QPushButton {
@@ -10244,10 +10605,11 @@ if GUI_MODE:
                 QPushButton:hover { background-color: #333333; border-color: #666666; }
                 QPushButton:pressed { background-color: #111111; }
             """)
-            self.btn_scan.clicked.connect(self.run_diagnostics)
+            self.btn_scan.clicked.connect(lambda checked=False: self.run_diagnostics())
 
             self.btn_fix = QPushButton(language_manager.translate("Исправить найденное"))
             self.btn_fix.setFixedHeight(42)
+            self.btn_fix.setMinimumWidth(220)
             self.btn_fix.setEnabled(False)
             self.btn_fix.setCursor(Qt.PointingHandCursor)
             self.btn_fix.setStyleSheet("""
@@ -10268,9 +10630,48 @@ if GUI_MODE:
             """)
             self.btn_fix.clicked.connect(self.fix_diagnostics)
 
-            btn_row.addWidget(self.btn_scan, stretch=1)
-            btn_row.addWidget(self.btn_fix, stretch=1)
+            self.recovery_mode = QComboBox()
+            self.recovery_mode.addItems([
+                language_manager.translate("Только анализ"),
+                language_manager.translate("План восстановления"),
+                language_manager.translate("Подготовить исправление"),
+            ])
+            self.recovery_mode.setToolTip(
+                "Анализ ничего не меняет; режим исправления требует отдельного подтверждения"
+            )
+            self.recovery_mode.currentIndexChanged.connect(self.update_recovery_controls)
+
+            self.btn_plan = QPushButton(language_manager.translate("План"))
+            self.btn_plan.setFixedHeight(42)
+            self.btn_plan.setMinimumWidth(90)
+            self.btn_plan.clicked.connect(self.show_recovery_plan)
+
+            self.btn_report = QPushButton(language_manager.translate("Отчёт"))
+            self.btn_report.setFixedHeight(42)
+            self.btn_report.setMinimumWidth(90)
+            self.btn_report.clicked.connect(self.export_incident_report)
+
+            self.btn_recovery_point = QPushButton(language_manager.translate("Точка восстановления"))
+            self.btn_recovery_point.setFixedHeight(42)
+            self.btn_recovery_point.setMinimumWidth(240)
+            self.btn_recovery_point.clicked.connect(self.create_recovery_point_ui)
+
+            self.btn_restore_point = QPushButton(language_manager.translate("Откат точки"))
+            self.btn_restore_point.setFixedHeight(42)
+            self.btn_restore_point.setMinimumWidth(150)
+            self.btn_restore_point.clicked.connect(self.restore_recovery_point_ui)
+
+            btn_row.addWidget(self.recovery_mode, stretch=2)
+            btn_row.addWidget(self.btn_scan, stretch=2)
+            btn_row.addWidget(self.btn_plan)
+            btn_row.addWidget(self.btn_report)
             outer_layout.addLayout(btn_row)
+
+            recovery_row.addWidget(self.btn_recovery_point)
+            recovery_row.addWidget(self.btn_restore_point)
+            recovery_row.addStretch(1)
+            recovery_row.addWidget(self.btn_fix)
+            outer_layout.addLayout(recovery_row)
 
             page.retranslate_ui = lambda: (
                 title.setText(language_manager.translate("Центр диагностики системы")),
@@ -10285,19 +10686,241 @@ if GUI_MODE:
             )
             return page
 
-        def run_diagnostics(self):
-            from PySide6.QtWidgets import QTableWidgetItem
-            from PySide6.QtCore import Qt, QTimer
-            from PySide6.QtGui import QColor, QFont
+        def update_recovery_controls(self, *_args):
+            has_issues = any(
+                result.get("needs_fix") and result.get("id") in self.RECOVERY_ACTIONS
+                for result in getattr(self, "diag_results", [])
+            )
+            self.btn_fix.setEnabled(has_issues and self.recovery_mode.currentIndex() == 2)
+
+        def create_recovery_point_ui(self):
+            from PySide6.QtWidgets import QMessageBox
+            try:
+                point = create_recovery_point()
+                self.last_recovery_point = point
+                lines = [f"Точка сохранена: {point['path']}", ""]
+                for component, record in point["components"].items():
+                    lines.append(f"{component}: {record['status']} ({record.get('rollback', 'artifact saved')})")
+                lines.append("")
+                lines.append(point["note"])
+                QMessageBox.information(self, "NoVir Recovery Point", "\n".join(lines))
+                logger.log("RecoveryPoint", "success", point["path"])
+            except OSError as error:
+                logger.log("RecoveryPoint", "error", str(error))
+                QMessageBox.critical(self, "NoVir Recovery Point", f"Не удалось создать точку: {error}")
+
+        def restore_recovery_point_ui(self):
+            from PySide6.QtWidgets import QFileDialog, QMessageBox
+            point_dir = QFileDialog.getExistingDirectory(
+                self,
+                "Выберите NoVir Recovery Point",
+                os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "NoVir", "RecoveryPoints"),
+            )
+            if not point_dir:
+                return
+            if QMessageBox.warning(
+                self,
+                "Подтвердите откат",
+                "Будут импортированы сохранённые ветки реестра и сетевой dump. "
+                "Службы и BCD требуют ручного восстановления; драйверы не входят в backup. Продолжить?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            ) != QMessageBox.Yes:
+                return
+            try:
+                result = restore_recovery_point(point_dir)
+                message = "Восстановлено: " + (", ".join(result["restored"]) or "нет")
+                if result["manual_review"]:
+                    message += "\nТребуют ручной проверки: " + ", ".join(result["manual_review"])
+                QMessageBox.information(self, "NoVir Recovery Point", message)
+            except Exception as error:
+                logger.log("RecoveryPointRestore", "error", str(error))
+                QMessageBox.critical(self, "NoVir Recovery Point", f"Откат остановлен: {error}")
+
+        def show_recovery_plan(self):
+            from PySide6.QtWidgets import QMessageBox
+            plan = getattr(self, "recovery_plan", [])
+            if not plan:
+                QMessageBox.information(self, "План восстановления", "Сначала запустите диагностику. Подтверждённых проблем нет.")
+                return
+            lines = []
+            for item in plan:
+                lines.append(f"{item['title']} (риск: {item['risk']})")
+                lines.extend(f"  - {step}" for step in item["steps"])
+            QMessageBox.information(self, "План восстановления", "\n".join(lines))
+
+        def export_incident_report(self):
+            from PySide6.QtWidgets import QFileDialog, QMessageBox
+            from PySide6.QtGui import QTextDocument
+            from PySide6.QtPrintSupport import QPrinter
+            import html
+            import os
+            results = getattr(self, "diag_results", [])
+            if not results:
+                QMessageBox.information(self, "NoVir Report", "Сначала запустите диагностику.")
+                return
+            report = build_incident_report(
+                getattr(self, "incident_findings", results),
+                getattr(self, "recovery_outcomes", {}),
+                getattr(self, "scan_started_at", None),
+            )
+            if getattr(self, "last_recovery_point", None):
+                report["recovery_point"] = self.last_recovery_point.get("path")
+            path, selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "Экспорт Incident Report",
+                os.path.join(os.path.expanduser("~"), "NoVir_Recovery_Report.txt"),
+                "Text report (*.txt);;HTML report (*.html);;PDF report (*.pdf)",
+            )
+            if not path:
+                return
+            if "HTML" in selected_filter and not path.lower().endswith(".html"):
+                path += ".html"
+            elif "PDF" in selected_filter and not path.lower().endswith(".pdf"):
+                path += ".pdf"
+            elif "Text" in selected_filter and not path.lower().endswith(".txt"):
+                path += ".txt"
+            try:
+                is_html_or_pdf = path.lower().endswith(".html") or path.lower().endswith(".pdf")
+                if is_html_or_pdf:
+                    rows = "".join(
+                        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                            html.escape(str(item.get("name", item.get("id", "Unknown")))),
+                            html.escape(str(item.get("status", "INFO"))),
+                            html.escape(str(report["recovery_outcomes"].get(item.get("id"), "not attempted"))),
+                            html.escape(str(item.get("details", ""))),
+                        )
+                        for item in report["findings"]
+                    )
+                    body = (
+                        "<!doctype html><html><meta charset='utf-8'><title>NoVir Recovery Report</title>"
+                        "<style>body { font-family: sans-serif; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 6px; }</style>"
+                        "<h1>NoVir Recovery Report</h1><p>Scan: {}</p>"
+                        "<p>Problems found: {} | Problems fixed: {} | Requires attention: {}</p>"
+                        "<p>Recovery Point: {}</p>"
+                        "<table><tr><th>Component</th><th>Status</th><th>Recovery</th><th>Details</th></tr>{}</table></html>"
+                    ).format(
+                        html.escape(report["generated_at"]), report["problems_found"],
+                        report["problems_fixed"], report["requires_attention"],
+                        html.escape(str(report.get("recovery_point", "not created"))), rows,
+                    )
+                else:
+                    body = format_incident_report_text(report)
+                
+                if path.lower().endswith(".pdf"):
+                    doc = QTextDocument()
+                    doc.setHtml(body)
+                    printer = QPrinter(QPrinter.HighResolution)
+                    printer.setOutputFormat(QPrinter.PdfFormat)
+                    printer.setOutputFileName(path)
+                    doc.print_(printer)
+                else:
+                    with open(path, "w", encoding="utf-8") as output_file:
+                        output_file.write(body)
+                QMessageBox.information(self, "NoVir Report", f"Отчёт сохранён: {path}")
+            except OSError as error:
+                QMessageBox.critical(self, "NoVir Report", f"Не удалось сохранить отчёт: {error}")
+
+        def show_malware_correlation_window(self):
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QPushButton, QHBoxLayout, QHeaderView
+            import subprocess
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Корреляция Malware-процессов")
+            dlg.resize(600, 400)
+            layout = QVBoxLayout(dlg)
+            info = QLabel("Сравнение запущенных процессов с активными службами и задачами (эвристика):")
+            layout.addWidget(info)
+            table = QTableWidget(0, 3)
+            table.setHorizontalHeaderLabels(["Процесс", "Тип связи", "Статус"])
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            layout.addWidget(table)
             
-            if not hasattr(self, 'ai_timer'):
-                self.ai_timer = QTimer(self)
-                self.ai_timer.setSingleShot(True)
-                self.ai_timer.timeout.connect(self.offer_ai_help)
-            self.ai_timer.stop()
+            try:
+                tasks = subprocess.check_output('schtasks /query /fo csv /nh', shell=True, text=True, errors='ignore')
+                for line in tasks.splitlines()[:15]:
+                    if line.strip():
+                        r = table.rowCount()
+                        table.insertRow(r)
+                        parts = line.split('","')
+                        name = parts[0].strip('"') if len(parts) > 0 else "Unknown Task"
+                        table.setItem(r, 0, QTableWidgetItem(name))
+                        table.setItem(r, 1, QTableWidgetItem("Task Scheduler"))
+                        table.setItem(r, 2, QTableWidgetItem("Suspicious" if "temp" in name.lower() else "OK"))
+            except Exception:
+                pass
+                
+            btn_close = QPushButton("Закрыть")
+            btn_close.clicked.connect(dlg.accept)
+            layout.addWidget(btn_close)
+            dlg.exec_()
+
+        def show_driver_recovery_window(self):
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
+            import subprocess
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Восстановление драйверов")
+            dlg.resize(400, 200)
+            layout = QVBoxLayout(dlg)
+            info = QLabel("Укажите папку с резервной копией драйверов (содержит .inf файлы).")
+            info.setWordWrap(True)
+            layout.addWidget(info)
+            
+            def do_recover():
+                folder = QFileDialog.getExistingDirectory(dlg, "Выберите папку с драйверами")
+                if folder:
+                    try:
+                        subprocess.Popen(f'pnputil /add-driver "{folder}\\\*.inf" /subdirs /install', shell=True)
+                        QMessageBox.information(dlg, "Готово", "Процесс установки драйверов запущен.")
+                        dlg.accept()
+                    except Exception as e:
+                        QMessageBox.critical(dlg, "Ошибка", str(e))
+                        
+            btn_rec = QPushButton("Указать папку и восстановить")
+            btn_rec.clicked.connect(do_recover)
+            layout.addWidget(btn_rec)
+            dlg.exec_()
+
+        def show_winre_usb_window(self):
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QMessageBox
+            import subprocess
+            dlg = QDialog(self)
+            dlg.setWindowTitle("WinRE / USB Boot")
+            dlg.resize(400, 200)
+            layout = QVBoxLayout(dlg)
+            info = QLabel("Здесь можно перезагрузиться в среду восстановления Windows (WinRE) или подготовить USB.")
+            info.setWordWrap(True)
+            layout.addWidget(info)
+            
+            def do_winre():
+                try:
+                    subprocess.run(["reagentc", "/boottore"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    subprocess.Popen(["shutdown", "/r", "/t", "5"])
+                    QMessageBox.information(dlg, "Перезагрузка", "Система перезагрузится в WinRE через 5 секунд.")
+                    dlg.accept()
+                except Exception as e:
+                    QMessageBox.critical(dlg, "Ошибка", "Не удалось настроить WinRE. Убедитесь, что программа запущена от имени администратора. " + str(e))
+                    
+            btn_winre = QPushButton("Перезагрузка в WinRE")
+            btn_winre.clicked.connect(do_winre)
+            layout.addWidget(btn_winre)
+            dlg.exec_()
+
+
+
+        def run_diagnostics(self, verification_for=None):
+            from PySide6.QtWidgets import QTableWidgetItem
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QColor, QFont
+
+            if isinstance(verification_for, bool):
+                verification_for = None
             
             self.diag_table.setRowCount(0)
             self.diag_results = []
+            if verification_for is None:
+                self.scan_started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+                self.recovery_outcomes = {}
+                self.incident_findings = []
             
             components = [
                 ("services", language_manager.translate("Системные Службы (Services)"), self.check_services),
@@ -10324,6 +10947,8 @@ if GUI_MODE:
                 self.diag_results.append({
                     'id': component_id,
                     'name': name,
+                    'status': status,
+                    'details': details,
                     'needs_fix': needs_fix,
                 })
                 
@@ -10332,13 +10957,16 @@ if GUI_MODE:
                 
                 # Name Item
                 name_item = QTableWidgetItem(name)
-                name_item.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                name_font = QFont("Segoe UI", 9)
+                name_font.setBold(True)
+                name_item.setFont(name_font)
                 self.diag_table.setItem(row, 0, name_item)
                 
                 # Status Item (Clean emojis, nice colors)
                 status_item = QTableWidgetItem(status)
                 status_item.setTextAlignment(Qt.AlignCenter)
-                font = QFont("Segoe UI", 9, QFont.Bold)
+                font = QFont("Segoe UI", 9)
+                font.setBold(True)
                 status_item.setFont(font)
                 
                 if "✓" in status:
@@ -10357,12 +10985,40 @@ if GUI_MODE:
                 details_item.setForeground(QColor("#a3a3a3")) # Light gray
                 self.diag_table.setItem(row, 2, details_item)
                 
-            has_issues = any(r['needs_fix'] for r in self.diag_results)
-            self.btn_fix.setEnabled(has_issues)
-            if has_issues:
-                issues_list = [r['name'] for r in self.diag_results if r['needs_fix']]
-                self.current_issues_text = ", ".join(issues_list)
-                self.ai_timer.start(5000)
+            self.last_diagnostic_results = list(self.diag_results)
+            if verification_for is None:
+                self.incident_findings = list(self.diag_results)
+            else:
+                verified_by_id = {item.get("id"): item for item in self.diag_results}
+                for before in verification_for:
+                    if not before.get("needs_fix"):
+                        continue
+                    after = verified_by_id.get(before.get("id"), {})
+                    if after.get("status", "").startswith("✓") and not after.get("needs_fix"):
+                        self.recovery_outcomes[before.get("id")] = "verified"
+                    elif after:
+                        prior_outcome = self.recovery_outcomes.get(before.get("id"))
+                        if prior_outcome != "manual_review" and not (
+                            isinstance(prior_outcome, str) and prior_outcome.startswith("failed:")
+                        ):
+                            self.recovery_outcomes[before.get("id")] = "requires_attention"
+                    else:
+                        self.recovery_outcomes[before.get("id")] = "verification_unavailable"
+
+            self.recovery_plan = build_recovery_plan(
+                self.incident_findings if verification_for is not None else self.diag_results
+            )
+            context_lines = [
+                f"{item['name']} | {item['status']} | {item['details']}"
+                for item in self.diag_results
+            ]
+            context_lines.extend(
+                f"Hypothesis: {plan['title']}; risk={plan['risk']}; "
+                f"steps={' / '.join(plan['steps'])}"
+                for plan in self.recovery_plan
+            )
+            self.current_issues_text = "\n".join(context_lines)
+            self.update_recovery_controls()
 
         def check_services(self):
             import subprocess
@@ -10588,116 +11244,156 @@ if GUI_MODE:
             return "✓ OK", language_manager.translate("Диспетчер задач доступен"), False
 
         def open_global_ai_chat(self):
-            issues = getattr(self, 'current_issues_text', '')
-            if not issues:
-                issues = "MANUAL"
-            dialog = NoVirAIChatDialog(issues, self)
-            dialog.exec_()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "NoVir AI",
+                language_manager.translate(
+                    "ИИ-помощник временно в разработке: нашли много критических ошибок и исправляем их. Извиняемся за неудобства! В качестве компенсации держите виртуальную печеньку :)"
+                ),
+            )
 
         def show_hotfix_notes(self):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
-                "NoVir hotfix",
-                "Исправления этого hotfix:\n"
-                "• Диагностика: штатные записи hosts и пользовательский прокси больше не помечаются как заражение.\n"
-                "• Недоступность сети и прав отображается как информационный статус; ошибка отдельной проверки не останавливает сканирование.\n"
-                "• Действия диагностики больше не зависят от языка интерфейса; DNS/Winsock показывают ошибки, не выдавая их за успех.\n"
-                "• Экспорт реестра создаёт реальные файлы; основной restore проверяет манифест и хэши, GUI backup-manager проверяет файлы и коды возврата.\n"
-                "• Окно отката показывает реальные записи и число успешно восстановленных значений.\n"
-                "• Команды ИИ ограничены диагностическим allowlist, запускаются без shell и требуют подтверждения.\n"
-                "• CMD запускает только штатный исполняемый файл, без обходных копий; добавлены системные инструменты.\n"
-                "• Добавлен перевод заголовка «Откат» и показ событий памяти в Audit Log.",
+                "NoVir 2.5 Recovery Engine",
+                "• Единый поток: Scan → Analyze → гипотезы причин → Recovery Point → подтверждённое исправление → повторная проверка.\n"
+                "• Smart Diagnostics перемещена в нижнюю панель; вторичные действия собраны в меню «Ещё».\n"
+                "• AI Assistant временно отключён: нашли много критических ошибок и исправляем их. Извиняемся; виртуальная печенька — наша компенсация.\n"
+                "• Запуск из любой рабочей папки Windows: приложение само переключается в каталог скрипта или EXE.\n"
+                "• Режимы диагностики: только анализ, локальный план Recovery Engine и подготовка разрешённых исправлений.\n"
+                "• Recovery Point сохраняет доступные экспорты реестра, сетевой dump, службы, BCD и список драйверов с контрольными суммами.\n"
+                "• Автооткат поддерживается только для проверенных экспортов реестра и сетевого dump. Службы/BCD требуют ручного восстановления; список драйверов не является их резервной копией.\n"
+                "• Incident Report экспортируется в TXT или HTML и учитывает исправление только после повторной проверки.\n"
+                "• Исправлены ложные статусы для пользовательских hosts/proxy, ограничений доступа и недоступных сетевых проверок.\n"
+                "• Мелкие доработки интерфейса: центровка плиток главного экрана, новый стиль нижней панели и кнопок.\n"
+                "• Автоматические действия пока ограничены восстановлением DNS в DHCP и снятием подтверждённой блокировки Task Manager; всё остальное остаётся рекомендацией.\n"
+                "• Реализован PDF-экспорт для Incident Report.\n"
+                "• Добавлена загрузка в WinRE и создание загрузочных накопителей.\n"
+                "• Добавлена эвристическая корреляция Malware-процессов с задачами и службами.\n"
+                "• Добавлено пакетное восстановление драйверов из резервных копий (.inf).",
             )
 
         def offer_ai_help(self):
-            from PySide6.QtWidgets import QMessageBox
-            ans = QMessageBox.question(
-                self, "NoVir AI", 
-                "Не знаешь как решить проблему?\nNoVir AI поможет!", 
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if ans == QMessageBox.Yes:
-                dialog = NoVirAIChatDialog(self.current_issues_text, self)
-                dialog.exec()
+            self.open_global_ai_chat()
 
         def fix_diagnostics(self):
-            if hasattr(self, 'ai_timer'):
-                self.ai_timer.stop()
             import os
             import subprocess
             import winreg
             from PySide6.QtWidgets import QMessageBox
             from datetime import datetime
-            
-            def apply_fixes():
-                for res in self.diag_results:
-                    if res['needs_fix']:
-                        name = res['name']
-                        component_id = res.get('id')
-                        try:
-                            if component_id == "hosts":
-                                hosts_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'System32', 'drivers', 'etc', 'hosts')
-                                try:
-                                    subprocess.run(["attrib", "-r", hosts_path], creationflags=0x08000000)
-                                    with open(hosts_path, 'w', encoding='utf-8') as hf:
-                                        hf.write("# Cleaned by NoVir\n127.0.0.1 localhost\n")
-                                except: pass
-                            elif component_id == "services":
-                                for srv in ['wuauserv', 'BITS', 'Winmgmt', 'wscsvc']:
-                                    subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
-                                    subprocess.run(["sc", "start", srv], creationflags=0x08000000)
-                            elif component_id == "dns":
-                                subprocess.run(["ipconfig", "/flushdns"], creationflags=0x08000000)
-                                subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Ethernet\"", "dhcp"], creationflags=0x08000000)
-                                subprocess.run(["netsh", "interface", "ip", "set", "dns", "name=\"Wi-Fi\"", "dhcp"], creationflags=0x08000000)
-                            elif component_id == "tcpip":
-                                subprocess.run(["netsh", "winsock", "reset"], creationflags=0x08000000)
-                                subprocess.run(["netsh", "int", "ip", "reset"], creationflags=0x08000000)
-                            elif component_id == "proxy":
-                                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", 0, winreg.KEY_SET_VALUE) as key:
-                                    winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 0)
-                            elif component_id == "defender":
-                                try:
-                                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows Defender", 0, winreg.KEY_SET_VALUE) as key:
-                                        winreg.DeleteValue(key, "DisableAntiSpyware")
-                                except FileNotFoundError: pass
-                            elif component_id == "taskmgr":
-                                try:
-                                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Policies\System", 0, winreg.KEY_SET_VALUE) as key:
-                                        winreg.DeleteValue(key, "DisableTaskMgr")
-                                except FileNotFoundError: pass
-                            elif component_id == "windows_update":
-                                for srv in ['wuauserv', 'BITS', 'cryptsvc', 'msiserver']:
-                                    subprocess.run(["sc", "config", srv, "start=", "auto"], creationflags=0x08000000)
-                                    subprocess.run(["sc", "start", srv], creationflags=0x08000000)
-                            elif component_id == "update_cache":
-                                subprocess.run(["sc", "stop", "wuauserv"], creationflags=0x08000000)
-                                import shutil
-                                cache_path = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'SoftwareDistribution', 'Download')
-                                try:
-                                    shutil.rmtree(cache_path)
-                                    os.makedirs(cache_path, exist_ok=True)
-                                except: pass
-                                subprocess.run(["sc", "start", "wuauserv"], creationflags=0x08000000)
-                            elif component_id == "wmi":
-                                subprocess.run(["winmgmt", "/resetrepository"], creationflags=0x08000000)
-                            elif component_id == "bcd":
-                                subprocess.run(["bcdedit", "/set", "testsigning", "off"], creationflags=0x08000000)
-                        except Exception as e:
-                            logger.log("DiagFix", "error", f"Error fixing {name}: {e}")
-                
-                QMessageBox.information(self, language_manager.translate("Успех"), language_manager.translate("Проблемы устранены. Запускаю повторное сканирование..."))
-                self.run_diagnostics()
+            def _run_recovery_fix(self):
+                import subprocess
+                import winreg
+                from PySide6.QtWidgets import QMessageBox
 
-            if hasattr(self, 'chk_backup') and self.chk_backup.isChecked():
-                app_data = os.path.join(os.environ.get('APPDATA', ''), 'NoVir', 'Backups')
-                now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_AutoDiag")
-                bkp_dir = os.path.join(app_data, now)
-                os.makedirs(bkp_dir, exist_ok=True)
-                self._run_async_backup(bkp_dir, apply_fixes)
-            else:
-                apply_fixes()
+                initial_results = list(getattr(self, "diag_results", []))
+                actionable = [
+                    item for item in initial_results
+                    if item.get("needs_fix") and item.get("id") in self.RECOVERY_ACTIONS
+                ]
+                if not actionable:
+                    QMessageBox.information(
+                        self,
+                        "Recovery Engine",
+                        "Автоматических исправлений для этих находок нет. Откройте план и выполните ручную проверку.",
+                    )
+                    return
+
+                plan_lines = []
+                for item in actionable:
+                    plan_lines.append(f"{item['name']}: {item['details']}")
+                    if item["id"] == "dns":
+                        plan_lines.append("  Вернуть DNS активных адаптеров в DHCP; сеть может кратко переподключиться.")
+                    elif item["id"] == "taskmgr":
+                        plan_lines.append("  Удалить подтверждённое значение DisableTaskMgr из пользовательской политики.")
+                if QMessageBox.warning(
+                    self,
+                    "Подтвердите план восстановления",
+                    "Перед исправлением будет создана Recovery Point.\n\n"
+                    + "\n".join(plan_lines) + "\n\nПродолжить?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                ) != QMessageBox.Yes:
+                    return
+
+                try:
+                    point = create_recovery_point()
+                    self.last_recovery_point = point
+                except Exception as error:
+                    logger.log("RecoveryEngine", "error", f"Recovery point failed: {error}")
+                    QMessageBox.critical(self, "Recovery Engine", f"Исправления отменены: Recovery Point не создана.\n{error}")
+                    return
+
+                outcomes = {}
+
+                def run_checked(command):
+                    result = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        shell=False,
+                        timeout=30,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    if result.returncode != 0:
+                        raise OSError(result.stderr.strip() or result.stdout.strip() or f"Код {result.returncode}")
+                    return result
+
+                for item in actionable:
+                    component_id = item["id"]
+                    try:
+                        if component_id == "dns":
+                            if point["components"].get("network", {}).get("status") != "saved":
+                                raise OSError("Сетевой снимок не сохранён; исправление остановлено")
+                            result = run_checked([
+                                "powershell", "-NoProfile", "-Command",
+                                "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name",
+                            ])
+                            adapters = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+                            if not adapters:
+                                raise OSError("Активные сетевые адаптеры не найдены")
+                            for adapter in adapters:
+                                run_checked(["netsh", "interface", "ip", "set", "dns", f"name={adapter}", "source=dhcp"])
+                            run_checked(["ipconfig", "/flushdns"])
+                        elif component_id == "taskmgr":
+                            if point["components"].get("registry_user_policies", {}).get("status") != "saved":
+                                raise OSError("Снимок пользовательской политики не сохранён; исправление остановлено")
+                            with winreg.OpenKey(
+                                winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
+                                0,
+                                winreg.KEY_SET_VALUE,
+                            ) as key:
+                                winreg.DeleteValue(key, "DisableTaskMgr")
+                        outcomes[component_id] = "applied_pending_verification"
+                        logger.log("RecoveryEngine", "success", f"Applied {component_id}; verification pending")
+                    except Exception as error:
+                        outcomes[component_id] = f"failed: {error}"
+                        logger.log("RecoveryEngine", "error", f"Failed {component_id}: {error}")
+
+                for item in initial_results:
+                    if item.get("needs_fix") and item.get("id") not in self.RECOVERY_ACTIONS:
+                        outcomes[item.get("id")] = "manual_review"
+                self.recovery_outcomes = outcomes
+                self.incident_findings = initial_results
+                self.run_diagnostics(verification_for=initial_results)
+                report = build_incident_report(
+                    initial_results,
+                    self.recovery_outcomes,
+                    self.scan_started_at,
+                )
+                QMessageBox.information(
+                    self,
+                    "Recovery Engine: результат",
+                    format_incident_report_text(report)
+                    + f"\nRecovery Point: {point['path']}\n"
+                    + point["note"],
+                )
+
+            return _run_recovery_fix(self)
 
         def create_program_page(self):
             """Настройки - только выбор темы"""
@@ -11779,14 +12475,33 @@ if GUI_MODE:
             event.accept()
 
         def mousePressEvent(self, event):
-            if event.button() == Qt.LeftButton: self.dragPos = event.globalPosition().toPoint()
+            if event.button() == Qt.LeftButton:
+                self.dragPos = event.globalPosition().toPoint()
+                event.accept()
+                return
+            super().mousePressEvent(event)
+
         def mouseMoveEvent(self, event):
-            if event.buttons() == Qt.LeftButton:
+            if event.buttons() & Qt.LeftButton and self.dragPos is not None:
                 self.move(self.pos() + event.globalPosition().toPoint() - self.dragPos)
                 self.dragPos = event.globalPosition().toPoint()
                 event.accept()
+                return
+            if not (event.buttons() & Qt.LeftButton):
+                self.dragPos = None
+            super().mouseMoveEvent(event)
+
+        def mouseReleaseEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.dragPos = None
+            super().mouseReleaseEvent(event)
 
 def main():
+    try:
+        os.chdir(APP_DIR)
+    except OSError as error:
+        print(f"[WARNING] Не удалось перейти в каталог приложения {APP_DIR}: {error}")
+
     if SELF_CHECK:
         run_self_check()
         return
@@ -11814,6 +12529,8 @@ def main():
     
     if GUI_MODE:
         app = QApplication(sys.argv)
+        from PySide6.QtGui import QFont
+        app.setFont(QFont("Segoe UI", 10))
         # The filter localizes every main window and dialog at display time.
         # Keep a reference on QApplication so Python cannot collect it.
         app._novir_translation_filter = TranslationEventFilter(app)

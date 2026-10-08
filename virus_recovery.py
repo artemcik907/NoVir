@@ -3,7 +3,7 @@
 """
 NoVir - Вирусный Реаниматор
 Автор: Недохакер
-Версия: 2.5.0
+Версия: 2.5.1
 Описание: Полный набор инструментов для восстановления системы после вирусной атаки
 """
 import os
@@ -116,7 +116,10 @@ def parse_ai_command(command):
         return None
     tokens = [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
     executable = ntpath.basename(tokens[0]).lower()
-    if tokens[0].lower() != executable:
+    # Allow both bare commands and full System32 paths
+    win = os.environ.get("WINDIR", r"C:\Windows").lower()
+    tok0 = tokens[0].lower().replace("/", "\\")
+    if tok0 != executable and not tok0.startswith(win):
         return None
     args = [token.lower() for token in tokens[1:]]
 
@@ -7328,23 +7331,64 @@ if GUI_MODE:
             
         def run(self):
             import urllib.request
+            import urllib.error
             import json
-            req = urllib.request.Request("https://api.groq.com/openai/v1/chat/completions", method="POST")
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                method="POST"
+            )
             req.add_header("Authorization", f"Bearer {self.api_key}")
             req.add_header("Content-Type", "application/json")
-            req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            req.add_header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
             data = {
                 "model": "openai/gpt-oss-120b",
                 "messages": self.memory,
-                "max_completion_tokens": 160,
+                "max_completion_tokens": 200,
             }
             try:
-                with urllib.request.urlopen(req, data=json.dumps(data).encode("utf-8"), timeout=15) as response:
+                with urllib.request.urlopen(
+                    req,
+                    data=json.dumps(data).encode("utf-8"),
+                    timeout=20,
+                ) as response:
                     res = json.loads(response.read().decode("utf-8"))
                     reply = res["choices"][0]["message"]["content"]
                     self.response_ready.emit(reply)
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")[:200]
+                except Exception:
+                    pass
+                if e.code == 401:
+                    self.response_ready.emit(
+                        "[Ошибка AI]: Неверный API-ключ (401). "
+                        "Проверьте подключение к интернету."
+                    )
+                elif e.code == 429:
+                    self.response_ready.emit(
+                        "[Ошибка AI]: Превышен лимит запросов (429). "
+                        "Подождите несколько секунд и попробуйте снова."
+                    )
+                elif e.code >= 500:
+                    self.response_ready.emit(
+                        f"[Ошибка AI]: Сервер Groq недоступен ({e.code}). "
+                        "Повторите попытку позже."
+                    )
+                else:
+                    self.response_ready.emit(
+                        f"[Ошибка AI]: HTTP {e.code}. {body}"
+                    )
+            except OSError as e:
+                self.response_ready.emit(
+                    f"[Ошибка AI]: Нет соединения с сервером. "
+                    f"Проверьте интернет. ({e})"
+                )
             except Exception as e:
-                self.response_ready.emit(f"[Ошибка AI]: {str(e)}")
+                self.response_ready.emit(f"[Ошибка AI]: {type(e).__name__}: {e}")
 
     class NoVirAIChatDialog(QDialog):
         def __init__(self, issues_text, parent=None):
@@ -7355,7 +7399,7 @@ if GUI_MODE:
             self.setMinimumSize(800, 600)
             self.setStyleSheet("QDialog { background-color: #0c0c0c; color: #cccccc; } QTextEdit { background-color: #121212; color: #e0e0e0; font-family: 'Consolas', 'Segoe UI'; font-size: 13px; border: 1px solid #333; padding: 10px; } QLineEdit { background-color: #1a1a1a; color: #fff; font-family: 'Segoe UI'; font-size: 13px; border: 1px solid #444; padding: 10px; border-radius: 6px; } QPushButton { background-color: #00e87a; color: #000; font-weight: bold; padding: 10px 20px; border-radius: 6px; }")
             
-            self.layout = QVBoxLayout(self)
+            self._vbox = QVBoxLayout(self)
             beta_notice = QLabel(
                 "БЕТА-ВЕРСИЯ: ИИ может ошибаться. Не доверяйте ответам без проверки; "
                 "перед запуском внимательно проверьте каждую команду. Используйте ИИ на свой риск. "
@@ -7366,11 +7410,11 @@ if GUI_MODE:
                 "QLabel { background-color: #2b2111; color: #ffd27a; "
                 "border: 1px solid #765b25; padding: 8px; font-weight: bold; }"
             )
-            self.layout.addWidget(beta_notice)
+            self._vbox.addWidget(beta_notice)
 
             self.chat_area = QTextEdit()
             self.chat_area.setReadOnly(True)
-            self.layout.addWidget(self.chat_area)
+            self._vbox.addWidget(self.chat_area)
             
             inp_layout = QHBoxLayout()
             self.input_field = QLineEdit()
@@ -7383,7 +7427,7 @@ if GUI_MODE:
             
             inp_layout.addWidget(self.input_field)
             inp_layout.addWidget(self.btn_send)
-            self.layout.addLayout(inp_layout)
+            self._vbox.addLayout(inp_layout)
             
             _k = b')C=n%\x1c+t5\x11\n \x0edx\x00\x00<\x00"\x7f\x17\x1add\x046J6ltiJW\nU=\x08\x14%kg \x13CbiUd\nV\x0fC>\x07&'
             _x = b'N0V1R_S3CR3T_2024'
@@ -7528,8 +7572,10 @@ if GUI_MODE:
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
             self.worker = None
+            self.advanced_mode = False
             self.update_result.connect(self._on_update_checked)
             self.init_ui()
+            self.toggle_advanced_mode(0)
             # Check for updates in background after 2 seconds
             from PySide6.QtCore import QTimer as _QTimer
             _QTimer.singleShot(2000, self.check_for_updates)
@@ -11244,39 +11290,42 @@ if GUI_MODE:
             return "✓ OK", language_manager.translate("Диспетчер задач доступен"), False
 
         def open_global_ai_chat(self):
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self,
-                "NoVir AI",
-                language_manager.translate(
-                    "ИИ-помощник временно в разработке: нашли много критических ошибок и исправляем их. Извиняемся за неудобства! В качестве компенсации держите виртуальную печеньку :)"
-                ),
-            )
+            try:
+                dlg = NoVirAIChatDialog("MANUAL", parent=self)
+                dlg.exec()
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "NoVir AI", f"Не удалось открыть AI Assistant:\n{e}")
 
         def show_hotfix_notes(self):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
-                "NoVir 2.5 Recovery Engine",
-                "• Единый поток: Scan → Analyze → гипотезы причин → Recovery Point → подтверждённое исправление → повторная проверка.\n"
-                "• Smart Diagnostics перемещена в нижнюю панель; вторичные действия собраны в меню «Ещё».\n"
-                "• AI Assistant временно отключён: нашли много критических ошибок и исправляем их. Извиняемся; виртуальная печенька — наша компенсация.\n"
-                "• Запуск из любой рабочей папки Windows: приложение само переключается в каталог скрипта или EXE.\n"
-                "• Режимы диагностики: только анализ, локальный план Recovery Engine и подготовка разрешённых исправлений.\n"
-                "• Recovery Point сохраняет доступные экспорты реестра, сетевой dump, службы, BCD и список драйверов с контрольными суммами.\n"
-                "• Автооткат поддерживается только для проверенных экспортов реестра и сетевого dump. Службы/BCD требуют ручного восстановления; список драйверов не является их резервной копией.\n"
-                "• Incident Report экспортируется в TXT или HTML и учитывает исправление только после повторной проверки.\n"
-                "• Исправлены ложные статусы для пользовательских hosts/proxy, ограничений доступа и недоступных сетевых проверок.\n"
+                "NoVir 2.5.1 Hotfix Notes",
+                "=== NoVir 2.5.1 (Релиз хотфикса) ===\n"
+                "• Восстановлена работа NoVir AI Assistant (устранены вылеты и ошибки подключения).\n"
+                "• Исправлен критический баг self.layout shadowing в окне ИИ-чата.\n"
+                "• Добавлена обработка HTTP-ошибок ИИ (401, 429, 5xx) и таймаутов сети.\n"
+                "• Исправлен запуск диагностических команд с полными путями в parse_ai_command.\n"
                 "• Мелкие доработки интерфейса: центровка плиток главного экрана, новый стиль нижней панели и кнопок.\n"
-                "• Автоматические действия пока ограничены восстановлением DNS в DHCP и снятием подтверждённой блокировки Task Manager; всё остальное остаётся рекомендацией.\n"
-                "• Реализован PDF-экспорт для Incident Report.\n"
-                "• Добавлена загрузка в WinRE и создание загрузочных накопителей.\n"
-                "• Добавлена эвристическая корреляция Malware-процессов с задачами и службами.\n"
-                "• Добавлено пакетное восстановление драйверов из резервных копий (.inf).",
+                "• Исправлены ложные срабатывания BCD, TCP/IP и DNS."
             )
 
+
         def offer_ai_help(self):
-            self.open_global_ai_chat()
+            issues_lines = []
+            for item in getattr(self, "diag_results", []):
+                status = item.get("status", "")
+                name   = item.get("name", "")
+                detail = item.get("detail", "")
+                issues_lines.append(f"{status} {name}: {detail}")
+            issues_text = "\n".join(issues_lines) if issues_lines else "MANUAL"
+            try:
+                dlg = NoVirAIChatDialog(issues_text, parent=self)
+                dlg.exec()
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "NoVir AI", f"Не удалось открыть AI Assistant:\n{e}")
 
         def fix_diagnostics(self):
             import os
@@ -11450,6 +11499,18 @@ if GUI_MODE:
             self.cb_language.currentIndexChanged.connect(self.change_language)
             layout.addWidget(self.cb_language)
 
+            lbl_mode = QLabel("Режим использования")
+            lbl_mode.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
+            layout.addWidget(lbl_mode)
+
+            self.cb_mode = QComboBox()
+            self.cb_mode.addItems(["Обычный пользователь", "Опытный пользователь (Advanced)"])
+            is_adv = getattr(self, "advanced_mode", False)
+            self.cb_mode.setCurrentIndex(1 if is_adv else 0)
+            self.cb_mode.setStyleSheet(self.cb_theme.styleSheet())
+            self.cb_mode.currentIndexChanged.connect(self.toggle_advanced_mode)
+            layout.addWidget(self.cb_mode)
+
             layout.addStretch()
             return page
 
@@ -11460,6 +11521,25 @@ if GUI_MODE:
             localize_widget_tree(self)
             if hasattr(self, "page_explorer"):
                 self.page_explorer.retranslate_ui()
+
+        def toggle_advanced_mode(self, index):
+            from PySide6.QtWidgets import QFrame, QLabel
+            self.advanced_mode = (index == 1)
+            
+            if hasattr(self, "btn_report"):
+                self.btn_report.setVisible(self.advanced_mode)
+            if hasattr(self, "btn_recovery_point"):
+                self.btn_recovery_point.setVisible(self.advanced_mode)
+            if hasattr(self, "btn_restore_point"):
+                self.btn_restore_point.setVisible(self.advanced_mode)
+                
+            if hasattr(self, "page_advanced"):
+                for card in self.page_advanced.findChildren(QFrame, "ToolCard"):
+                    labels = card.findChildren(QLabel)
+                    if labels:
+                        tool_name = labels[0].text()
+                        if tool_name in ["WinRE / USB Boot", "Корреляция Malware", "Восстановление драйверов"]:
+                            card.setVisible(self.advanced_mode)
 
         def create_whats_new_page(self):
             """Устаревший метод — перенаправляет на create_program_page"""
@@ -11501,6 +11581,20 @@ if GUI_MODE:
             self.chk_backup.setStyleSheet("color: #fff;")
             layout.addWidget(self.chk_backup)
 
+            # Mode
+            mode_label = QLabel(language_manager.translate("Режим использования:"))
+            self.mode_combo = QComboBox()
+            self.mode_combo.addItems([
+                language_manager.translate("Обычный пользователь"),
+                language_manager.translate("Опытный пользователь (Advanced)")
+            ])
+            self.mode_combo.setStyleSheet("QComboBox { background-color: #222; color: #fff; padding: 5px; }")
+            is_adv = getattr(self, "advanced_mode", False)
+            self.mode_combo.setCurrentIndex(1 if is_adv else 0)
+            self.mode_combo.currentIndexChanged.connect(self.toggle_advanced_mode)
+            layout.addWidget(mode_label)
+            layout.addWidget(self.mode_combo)
+
             layout.addStretch()
             
             # Apply Button
@@ -11518,9 +11612,31 @@ if GUI_MODE:
                 self.theme_combo.setItemText(1, language_manager.translate("Матовая")),
                 self.theme_combo.setItemText(2, language_manager.translate("Прозрачная")),
                 self.chk_backup.setText(language_manager.translate("Создавать бэкап перед опасными операциями")),
+                mode_label.setText(language_manager.translate("Режим использования:")),
+                self.mode_combo.setItemText(0, language_manager.translate("Обычный пользователь")),
+                self.mode_combo.setItemText(1, language_manager.translate("Опытный пользователь (Advanced)")),
                 apply_btn.setText(language_manager.translate("Применить и сохранить"))
             )
             return page
+
+        def toggle_advanced_mode(self, index):
+            from PySide6.QtWidgets import QFrame, QLabel
+            self.advanced_mode = (index == 1)
+            
+            if hasattr(self, "btn_report"):
+                self.btn_report.setVisible(self.advanced_mode)
+            if hasattr(self, "btn_recovery_point"):
+                self.btn_recovery_point.setVisible(self.advanced_mode)
+            if hasattr(self, "btn_restore_point"):
+                self.btn_restore_point.setVisible(self.advanced_mode)
+                
+            if hasattr(self, "page_advanced"):
+                for card in self.page_advanced.findChildren(QFrame, "ToolCard"):
+                    labels = card.findChildren(QLabel)
+                    if labels:
+                        tool_name = labels[0].text()
+                        if tool_name in ["WinRE / USB Boot", "Корреляция Malware", "Восстановление драйверов"]:
+                            card.setVisible(self.advanced_mode)
 
         def _legacy_whats_new_page(self):
             page = QFrame()

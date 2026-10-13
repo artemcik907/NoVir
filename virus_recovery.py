@@ -1740,6 +1740,101 @@ def reg_delete_key(key_path, recursive=False, hive=None):
             
     return success_any
 
+
+# ═══════════════════════════════════════════════════════════════
+# ПОДДЕРЖКА ВЕРСИЙ WINDOWS (7 / 8 / 8.1 / 10 / 11)
+# ═══════════════════════════════════════════════════════════════
+# Пользователь может выбрать целевую версию в «Настройках». В зависимости
+# от неё функции используют разные команды/ключи реестра. По умолчанию —
+# автоопределение текущей Windows. Win10/11 остаются дефолтным поведением.
+_WIN_ORDER = {"7": 70, "8": 80, "8.1": 81, "10": 100, "11": 110}
+# Порядок соответствует индексам комбобокса (0 = автоопределение).
+WIN_VERSION_KEYS = ("11", "10", "8.1", "8", "7")
+WIN_VERSION_LABELS = ("Windows 11", "Windows 10", "Windows 8.1",
+                      "Windows 8", "Windows 7")
+_WIN_TARGET = {"value": None}  # None = автоопределение
+
+
+def detect_windows_version():
+    """Определяет текущую версию Windows: '7', '8', '8.1', '10' или '11'."""
+    try:
+        info = sys.getwindowsversion()
+        major, minor, build = info.major, info.minor, info.build
+    except Exception:
+        return "10"  # не Windows (разработка/тест)
+    if major >= 10:
+        return "11" if build >= 22000 else "10"
+    if major == 6 and minor == 3:
+        return "8.1"
+    if major == 6 and minor == 2:
+        return "8"
+    if major == 6 and minor == 1:
+        return "7"
+    return "10"
+
+
+def win_target():
+    """Версия Windows, под которую настраиваются команды функций."""
+    v = _WIN_TARGET["value"]
+    return v if v else detect_windows_version()
+
+
+def win_at_least(ver):
+    """True, если целевая версия >= ver ('7' < '8' < '8.1' < '10' < '11')."""
+    return _WIN_ORDER.get(win_target(), 100) >= _WIN_ORDER.get(ver, 100)
+
+
+def win_is(*versions):
+    """True, если целевая версия входит в указанные (например win_is('7'))."""
+    return win_target() in versions
+
+
+def set_win_target(version):
+    """Установить целевую версию ('auto'/'None' = автоопределение)."""
+    if not version or version in ("auto", "Автоопределение"):
+        _WIN_TARGET["value"] = None
+    elif version in _WIN_ORDER:
+        _WIN_TARGET["value"] = version
+    return _WIN_TARGET["value"]
+
+
+def load_win_target():
+    """Читает сохранённый выбор версии Windows из settings.json."""
+    try:
+        with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as fh:
+            val = json.load(fh).get("win_target")
+        if val in _WIN_ORDER:
+            _WIN_TARGET["value"] = val
+            return val
+    except (OSError, ValueError, TypeError):
+        pass
+    _WIN_TARGET["value"] = None
+    return None
+
+
+def save_win_target():
+    """Сохраняет выбранный target в settings.json (не трогая остальные ключи)."""
+    try:
+        os.makedirs(os.path.dirname(LANGUAGE_CONFIG_PATH), exist_ok=True)
+        settings = {}
+        try:
+            with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as fh:
+                settings = json.load(fh)
+        except (OSError, ValueError, TypeError):
+            pass
+        settings["win_target"] = _WIN_TARGET["value"] or "auto"
+        tmp = LANGUAGE_CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(settings, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, LANGUAGE_CONFIG_PATH)
+    except OSError:
+        pass
+
+
+# Применяем сохранённый выбор при старте приложения.
+load_win_target()
+
+
 # ═══════════════════════════════════════════════════════════════
 # БЛОК 1: ВИЗУАЛЬНОЕ ВОССТАНОВЛЕНИЕ (ИНТЕРФЕЙС)
 # ═══════════════════════════════════════════════════════════════
@@ -3243,8 +3338,13 @@ def DNS_Google_Force():
         return True
     
     try:
-        # Получаем список активных интерфейсов через PowerShell
-        ps_cmd = "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
+        # Получаем список активных интерфейсов через PowerShell.
+        # Win8+: Get-NetAdapter. Win7: модуля нет — через WMI (NetConnectionID).
+        if win_at_least("8"):
+            ps_cmd = "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
+        else:
+            ps_cmd = ("Get-WmiObject Win32_NetworkAdapter -Filter \"NetConnectionStatus=2\" "
+                      "| Select-Object -ExpandProperty NetConnectionID")
         success, stdout, _ = run_command(["powershell", "-NoProfile", "-Command", ps_cmd])
         
         if success and stdout:
@@ -3530,8 +3630,15 @@ def RecycleBin_Empty():
         return True
     
     try:
-        # Очищаем корзину через PowerShell
-        ps_cmd = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
+        # Win8.1+/Win10/11: Clear-RecycleBin. Win7/8.0: команда не нужна —
+        # очищаем через Shell.Application COM (доступен во всех версиях).
+        if win_at_least("8.1"):
+            ps_cmd = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
+        else:
+            ps_cmd = ("$shell = New-Object -ComObject Shell.Application; "
+                      "$bin = $shell.Namespace(0xA); "
+                      "foreach ($item in @($bin.Items())) { "
+                      "Remove-Item -LiteralPath $item.Path -Recurse -Force -ErrorAction SilentlyContinue }")
         subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
         
         logger.log("RecycleBin_Empty", "success", "Корзина очищена")
@@ -3885,18 +3992,21 @@ def TaskScheduler_Clean():
         return True
     
     try:
-        # Получаем список задач через PowerShell
-        ps_cmd = "Get-ScheduledTask | Where-Object {$_.TaskName -notmatch '^Microsoft$'} | Select-Object TaskName, TaskPath"
-        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+        # Получаем список задач: Win8+ через Get-ScheduledTask, Win7 через schtasks.
+        if win_at_least("8"):
+            ps_cmd = "Get-ScheduledTask | Where-Object {$_.TaskName -notmatch '^Microsoft$'} | Select-Object TaskName, TaskPath"
+            result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+        else:
+            result = subprocess.run(["schtasks", "/query", "/fo", "CSV", "/v"],
+                                    capture_output=True, text=True)
+        lines = result.stdout.split('\n') if result.returncode == 0 else []
         
         suspicious_count = 0
-        if result.returncode == 0:
-            lines = result.stdout.split('\n')
-            for line in lines:
-                if 'temp' in line.lower() or 'hack' in line.lower() or 'virus' in line.lower():
-                    print(f"{Colors.YELLOW}[!] Обнаружена подозрительная задача: {line}{Colors.RESET}")
-                    # Можно добавить удаление, но это рискованно - лучше только показать
-                    suspicious_count += 1
+        for line in lines:
+            if 'temp' in line.lower() or 'hack' in line.lower() or 'virus' in line.lower():
+                print(f"{Colors.YELLOW}[!] Обнаружена подозрительная задача: {line}{Colors.RESET}")
+                # Можно добавить удаление, но это рискованно - лучше только показать
+                suspicious_count += 1
         
         logger.log("TaskScheduler_Clean", "success", f"Проверено задач планировщика")
         print(f"{Colors.GREEN}[+] Проверен планировщик задач (обнаружено подозрительных: {suspicious_count}){Colors.RESET}")
@@ -5526,7 +5636,18 @@ def SmartScreen_Enable():
         print(f"{Colors.CYAN}[DRY-RUN] SmartScreen будет включен{Colors.RESET}")
         logger.log("SmartScreen_Enable", "success", "SmartScreen будет включен")
         return True
-    
+
+    # Windows 7: политик System\EnableSmartScreen ещё нет — только AppHost-оценка.
+    if win_is("7"):
+        ok = reg_set_value(
+            r"Software\Microsoft\Windows\CurrentVersion\AppHost",
+            "EnableWebContentEvaluation", 1, winreg.REG_DWORD, hive=winreg.HKEY_CURRENT_USER)
+        logger.log("SmartScreen_Enable", "warning" if not ok else "success",
+                   "Win7: включена AppHost-оценка SmartScreen")
+        print(f"{Colors.YELLOW}[!] Windows 7: SmartScreen работает только как фильтр IE/проводника — "
+              f"политики Win8+ недоступны ({'включено' if ok else 'не удалось'}){Colors.RESET}")
+        return ok
+
     ok1 = reg_set_value(r"SOFTWARE\Policies\Microsoft\Windows\System", "EnableSmartScreen", 1, winreg.REG_DWORD, hive=winreg.HKEY_LOCAL_MACHINE)
     reg_set_value(r"SOFTWARE\Policies\Microsoft\Windows\System", "ShellSmartScreenLevel", "Block", winreg.REG_SZ, hive=winreg.HKEY_LOCAL_MACHINE)
     reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\AppHost", "EnableWebContentEvaluation", 1, winreg.REG_DWORD, hive=winreg.HKEY_CURRENT_USER)
@@ -5543,6 +5664,15 @@ def SmartScreen_Enable():
 
 def Ransomware_Shield_Enable():
     """Включение защиты от шифровальщиков (Controlled Folder Access)"""
+    # Controlled Folder Access появился в Windows 10 1709. На Win7/8/8.1 нет.
+    if not win_at_least("10"):
+        print_hacker_message("Защита от шифровальщиков появилась в Windows 10.")
+        logger.log("Ransomware_Shield_Enable", "warning",
+                   f"Controlled Folder Access недоступен на Windows {win_target()}")
+        print(f"{Colors.YELLOW}[!] Controlled Folder Access недоступен на Windows "
+              f"{win_target()} — нужна Windows 10 (1709) или новее{Colors.RESET}")
+        return False
+
     print_hacker_message("Включаю защиту от шифровальщиков (контроль доступа к папкам).")
     
     if DRY_RUN:
@@ -5573,7 +5703,20 @@ def SMBv1_Disable():
         print(f"{Colors.CYAN}[DRY-RUN] SMBv1 будет отключен{Colors.RESET}")
         logger.log("SMBv1_Disable", "success", "SMBv1 будет отключен")
         return True
-    
+
+    # Windows 7: нет DISM-фичи SMB1Protocol — отключаем через реестр.
+    if win_is("7"):
+        ok = reg_set_value(
+            r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "SMB1", 0, winreg.REG_DWORD, hive=winreg.HKEY_LOCAL_MACHINE)
+        if ok:
+            logger.log("SMBv1_Disable", "success", "SMBv1 отключен (реестр, Win7)")
+            print(f"{Colors.GREEN}[+] SMBv1 отключен (Windows 7, реестр — перезагрузка для применения){Colors.RESET}")
+            return True
+        logger.log("SMBv1_Disable", "error", "Не удалось записать SMB1=0")
+        print(f"{Colors.YELLOW}[!] Не удалось отключить SMBv1 (Windows 7){Colors.RESET}")
+        return False
+
     ok, out, err = _run_safe_process([
         "dism", "/online", "/disable-feature", "/featurename:SMB1Protocol", "/norestart"
     ])
@@ -5618,6 +5761,15 @@ def WDigest_Disable():
 
 def LSA_Protection_Enable():
     """Включение защиты LSA (RunAsPPL) для защиты от кражи паролей"""
+    # RunAsPPL появился в Windows 8.1. На Win7/8.0 ключ не поддерживается.
+    if not win_at_least("8.1"):
+        print_hacker_message("Защита LSA (RunAsPPL) появилась в Windows 8.1.")
+        logger.log("LSA_Protection_Enable", "warning",
+                   f"RunAsPPL недоступен на Windows {win_target()}")
+        print(f"{Colors.YELLOW}[!] RunAsPPL недоступен на Windows {win_target()} — "
+              f"нужна Windows 8.1 или новее{Colors.RESET}")
+        return False
+
     print_hacker_message("Включаю защиту LSA (RunAsPPL).")
     
     if DRY_RUN:
@@ -5747,6 +5899,14 @@ def UAC_Max_Upgrade():
 
 def SecureBoot_Status():
     """Проверка состояния Secure Boot (только чтение)"""
+    # Управление Secure Boot появилось в Windows 8. На Win7 его нет.
+    if not win_at_least("8"):
+        print_hacker_message("Secure Boot не поддерживается на Windows 7.")
+        logger.log("SecureBoot_Status", "warning", "Secure Boot не поддерживается на Win7")
+        print(f"{Colors.YELLOW}[!] Secure Boot не поддерживается на Windows 7 "
+              f"(появился в Windows 8){Colors.RESET}")
+        return False
+
     print_hacker_message("Проверяю состояние Secure Boot.")
     
     try:
@@ -5815,9 +5975,24 @@ def Defender_Update_Sigs():
         logger.log("Defender_Update_Sigs", "success", "Подписи Defender будут обновлены")
         return True
     
-    ok, out, err = _run_safe_process([
-        "powershell", "-NoProfile", "-Command", "Update-MpSignature"
-    ], timeout=60)
+    if win_at_least("10"):
+        # Windows 10/11: PowerShell-модуль Defender.
+        ok, out, err = _run_safe_process([
+            "powershell", "-NoProfile", "-Command", "Update-MpSignature"
+        ], timeout=60)
+    else:
+        # Windows 7/8: модуля Defender нет — обновляем через MpCmdRun.exe.
+        candidates = []
+        for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+            candidates.append(os.path.join(base, "Windows Defender", "MpCmdRun.exe"))
+            candidates.append(os.path.join(base, "Microsoft Security Client", "MpCmdRun.exe"))
+        mp = next((c for c in candidates if os.path.exists(c)), None)
+        if not mp:
+            logger.log("Defender_Update_Sigs", "error", "MpCmdRun.exe не найден (Win7/8)")
+            print(f"{Colors.YELLOW}[!] Microsoft Defender/MSE не найден на диске{Colors.RESET}")
+            return False
+        ok, out, err = _run_safe_process([mp, "-SignatureUpdate"], timeout=60)
     
     if ok:
         logger.log("Defender_Update_Sigs", "success", "Подписи Defender обновлены")
@@ -8538,23 +8713,72 @@ if GUI_MODE:
                 pass
 
         # ── @novir_ai: ответ бота через Groq ──
-        def _cm_ai_ask(self, question):
+        def _cm_build_ai_context(self, raw_text, reply=None):
+            """Собирает контекст для бота: историю чата, цель ответа (⤷)
+            и последнее сообщение упомянутых (@username) пользователей."""
+            rows = getattr(self, "_cm_recent_rows", None) or []
+            entries = []
+            for m in rows:
+                who = str(m.get("username") or "Гость")
+                if who == "NOVIR_AI":
+                    who = "NOVIR AI"
+                body = str(m.get("body") or "").replace("\n", " ").strip()
+                if not body:
+                    continue
+                # created_at (ISO) сортируется лексикографично = по времени
+                entries.append((str(m.get("created_at") or ""), who, body))
+            entries.sort(key=lambda e: e[0])
+            parts = []
+            recent = entries[-20:]
+            if recent:
+                transcript = "\n".join(
+                    f"{who}: {body[:160]}" for _, who, body in recent)
+                parts.append(
+                    "Последние сообщения чата (от старых к новым):\n" + transcript)
+            if reply:
+                ruser = str(reply.get("user") or "")
+                rtext = str(reply.get("text") or "")
+                if ruser or rtext:
+                    parts.append(
+                        f"Пользователь отвечает на сообщение {ruser}: «{rtext}».")
+            # упомянутые кроме самого бота — их последнее сообщение
+            mentions = [u for u in re.findall(r"@([A-Za-z0-9_]{3,20})", raw_text or "")
+                        if u.lower() != "novir_ai"]
+            for u in dict.fromkeys(mentions):
+                for _, who, body in reversed(entries):
+                    if who == u:
+                        parts.append(f"Последнее сообщение @{u}: «{body[:200]}».")
+                        break
+            return "\n\n".join(parts)
+
+        def _cm_ai_ask(self, question, context=None):
             """Спроси у бота — вернёт короткий ответ или None при ошибке."""
             import urllib.request
             import urllib.error
             api_key = ''.join(chr(b ^ self._AI_X[i % len(self._AI_X)])
                               for i, b in enumerate(self._AI_K))
+            sys_prompt = (
+                "Ты — NOVIR AI, дружелюбный бот чата сообщества NoVir (Windows recovery утилита). "
+                "Ты видишь последние сообщения чата — можешь отвечать на них, учитывать контекст "
+                "разговора и кто что писал. Отвечай коротко, по делу и на языке вопроса, максимум 40 слов. "
+                "Без markdown-символов, без списков, без пустых строк — ответ увидят все в чате.")
+            user_content = ""
+            if context:
+                user_content += context + "\n\n"
+            user_content += "Вопрос: " + question
             memory = [
-                {"role": "system", "content": (
-                    "Ты — NOVIR AI, дружелюбный бот чата сообщества NoVir (Windows recovery утилита). "
-                    "Отвечай коротко, по делу и на языке вопроса, максимум 40 слов. "
-                    "Без markdown-символов, без списков, без пустых строк — ответ увидят все в чате.")},
-                {"role": "user", "content": question},
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_content},
             ]
             req = urllib.request.Request(
                 "https://api.groq.com/openai/v1/chat/completions", method="POST")
             req.add_header("Authorization", "Bearer " + api_key)
             req.add_header("Content-Type", "application/json")
+            # Как в основном AI-чате: без User-Agent Cloudflare/Groq может
+            # отклонять запрос, из-за чего бот «не отвечает».
+            req.add_header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             data = {"model": "openai/gpt-oss-120b", "messages": memory,
                     "max_completion_tokens": 180}
             try:
@@ -8562,7 +8786,17 @@ if GUI_MODE:
                         req, data=json.dumps(data).encode("utf-8"), timeout=25) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
                     return str(res["choices"][0]["message"]["content"]).strip()[:480]
-            except Exception:
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace")[:200]
+                except Exception:
+                    pass
+                print(f"[NOVIR_AI] HTTP {e.code}: {body}")
+                return None
+            except Exception as e:
+                # Не глушим ошибку молча — логируем, чтобы видеть причину.
+                print(f"[NOVIR_AI] Ошибка запроса к Groq: {e!r}")
                 return None
 
         # ── @упоминания ──
@@ -8768,8 +9002,11 @@ if GUI_MODE:
                     low = self.text.lower()
                     if low.startswith("@novir_ai"):
                         question = self.text[9:].strip(" ,:;!?-")
+                        ctx = self.owner._cm_build_ai_context(
+                            self.text, self.reply)
                         answer = self.owner._cm_ai_ask(
-                            question if question else "Поприветствуй участников чата NoVir и представься одним предложением.")
+                            question if question else "Поприветствуй участников чата NoVir и представься одним предложением.",
+                            context=ctx)
                         if answer is None:
                             answer = "NOVIR AI сейчас недоступен (нет связи с Groq). Попробуй позже."
                         bot_id = hashlib.sha1(("ai" + str(time.time()) + answer).encode()).hexdigest()[:16]
@@ -8839,7 +9076,9 @@ if GUI_MODE:
                         "Сообщения не загружены — нет связи с сервером.\n"
                         "Проверь интернет и что в Supabase выполнены supabase_schema.sql и supabase_community.sql.")
                     refs["line_map"] = []
+                    self._cm_recent_rows = []
                     return
+                self._cm_recent_rows = list(rows)
                 sess = self._cm_session()
                 dev = self._cm_device_id()
                 my_name = sess["username"] if sess else ""
@@ -12796,9 +13035,13 @@ if GUI_MODE:
                         if component_id == "dns":
                             if point["components"].get("network", {}).get("status") != "saved":
                                 raise OSError("Сетевой снимок не сохранён; исправление остановлено")
+                            if win_at_least("8"):
+                                _ps = "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name"
+                            else:
+                                _ps = ("Get-WmiObject Win32_NetworkAdapter -Filter \"NetConnectionStatus=2\" "
+                                       "| Select-Object -ExpandProperty NetConnectionID")
                             result = run_checked([
-                                "powershell", "-NoProfile", "-Command",
-                                "Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty Name",
+                                "powershell", "-NoProfile", "-Command", _ps,
                             ])
                             adapters = [line.strip() for line in result.stdout.splitlines() if line.strip()]
                             if not adapters:
@@ -12898,6 +13141,28 @@ if GUI_MODE:
             self.cb_language.currentIndexChanged.connect(self.change_language)
             layout.addWidget(self.cb_language)
 
+            lbl_win = QLabel("Версия Windows")
+            lbl_win.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
+            layout.addWidget(lbl_win)
+
+            self.cb_win = QComboBox()
+            self.cb_win.addItems(
+                ["Автоопределение (" + detect_windows_version() + ")"] + list(WIN_VERSION_LABELS))
+            self.cb_win.setStyleSheet(self.cb_theme.styleSheet())
+            if _WIN_TARGET["value"] is None:
+                self.cb_win.setCurrentIndex(0)
+            else:
+                self.cb_win.setCurrentIndex(1 + WIN_VERSION_KEYS.index(_WIN_TARGET["value"]))
+            self.cb_win.currentIndexChanged.connect(self.change_win_version)
+            layout.addWidget(self.cb_win)
+
+            lbl_win_hint = QLabel(
+                "Функции будут использовать команды под выбранную версию. "
+                "«Автоопределение» — текущая Windows.")
+            lbl_win_hint.setStyleSheet("color: #888888; font-size: 11px;")
+            lbl_win_hint.setWordWrap(True)
+            layout.addWidget(lbl_win_hint)
+
             lbl_mode = QLabel("Режим использования")
             lbl_mode.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
             layout.addWidget(lbl_mode)
@@ -12920,6 +13185,15 @@ if GUI_MODE:
             localize_widget_tree(self)
             if hasattr(self, "page_explorer"):
                 self.page_explorer.retranslate_ui()
+
+        def change_win_version(self, index):
+            # 0 = автоопределение, 1..5 = "11","10","8.1","8","7"
+            if index == 0:
+                set_win_target("auto")
+            else:
+                set_win_target(WIN_VERSION_KEYS[index - 1])
+            save_win_target()
+            print(f"{Colors.CYAN}[i] Целевая Windows: {win_target()}{Colors.RESET}")
 
         def toggle_advanced_mode(self, index):
             from PySide6.QtWidgets import QFrame, QLabel

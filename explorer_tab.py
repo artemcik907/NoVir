@@ -133,23 +133,18 @@ class ExplorerTab(QWidget):
 
     def get_logical_drives(self):
         drives = []
-        bitmask = 0
-        if novir_native and hasattr(novir_native, 'ctypes'):
-            try:
-                bitmask = novir_native.ctypes.windll.kernel32.GetLogicalDrives()
-            except:
-                pass
-        
-        if bitmask == 0:
-            for letter in string.ascii_uppercase:
-                if os.path.exists(f"{letter}:\\"):
-                    drives.append(f"{letter}:\\")
-        else:
+        try:
+            import ctypes
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
             for letter in string.ascii_uppercase:
                 if bitmask & 1:
                     drives.append(f"{letter}:\\")
                 bitmask >>= 1
-        return drives
+            if drives:
+                return drives
+        except Exception:
+            pass
+        return ["C:\\"]
 
     def refresh_files(self):
         self.file_table.setRowCount(0)

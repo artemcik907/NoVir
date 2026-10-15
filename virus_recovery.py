@@ -3,12 +3,13 @@
 """
 NoVir - Вирусный Реаниматор
 Автор: Недохакер
-Версия: 2.5.1
+Версия: 2.5.3
 Описание: Полный набор инструментов для восстановления системы после вирусной атаки
 """
 import os
 import sys
 import explorer_tab
+import winpe_media
 import subprocess
 import winreg
 import ctypes
@@ -23,7 +24,8 @@ import hashlib
 from datetime import datetime
 from functools import lru_cache
 
-CURRENT_VERSION = "2.5.1"
+CURRENT_VERSION = "2.5.3"
+PROGRAM_WEBSITE_URL = "https://artemcik907.github.io"
 
 try:
     import novir_native
@@ -705,6 +707,31 @@ LANGUAGE_CONFIG_PATH = os.path.join(
 )
 
 
+def load_app_settings():
+    """Load persisted NoVir preferences without assuming the file is valid."""
+    try:
+        with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as settings_file:
+            data = json.load(settings_file)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_app_setting(key, value):
+    """Update one preference while preserving the rest of settings.json."""
+    try:
+        settings = load_app_settings()
+        settings[key] = value
+        os.makedirs(os.path.dirname(LANGUAGE_CONFIG_PATH), exist_ok=True)
+        temporary_path = LANGUAGE_CONFIG_PATH + ".tmp"
+        with open(temporary_path, "w", encoding="utf-8") as settings_file:
+            json.dump(settings, settings_file, ensure_ascii=False, indent=2)
+        os.replace(temporary_path, LANGUAGE_CONFIG_PATH)
+        return True
+    except OSError:
+        return False
+
+
 class LanguageManager:
     """Persist and translate the language selected by the user."""
 
@@ -713,15 +740,25 @@ class LanguageManager:
     # (English, Ukrainian).  The entries below are complete for the visible
     # navigation, settings, dialogs, controls, tables and status messages.
     TRANSLATIONS = {
+        # Полоса состояния дашборда (версия Windows)
+        "Версия винды": ('Windows version', 'Версія Windows', 'Windows-Version', 'Wersja Windows', 'Version de Windows'),
+        "Авто": ('Auto', 'Авто', 'Auto', 'Auto', 'Auto'),
+        "Вручную": ('Manual', 'Вручну', 'Manuell', 'Ręcznie', 'Manuel'),
         'Поиск файлов...': ('Search files...', 'Пошук файлів...', 'Dateien suchen...', 'Wyszukaj pliki...', 'Rechercher des fichiers...'),
         'Скрытые': ('Hidden', 'Приховані', 'Versteckt', 'Ukryte', 'Caché'),
         'Компьютер': ('This PC', 'Цей ПК', 'Dieser PC', 'Ten komputer', 'Ce PC'),
         'Локальный диск': ('Local Disk', 'Локальний диск', 'Lokaler Datenträger', 'Dysk lokalny', 'Disque local'),
         'Отмена': ('Cancel', 'Скасувати', 'Stornieren', 'Anulować', 'Annuler'),
+        'Действие пропущено или не выполнено': ('Action skipped or unsuccessful', 'Дію пропущено або не виконано', 'Aktion übersprungen oder fehlgeschlagen', 'Pominięto działanie lub nie powiodło się', 'Action ignorée ou non terminée'),
+        'Выполнено': ('Completed', 'Виконано', 'Abgeschlossen', 'Ukończono', 'Terminé'),
         'ОТМЕНА': ('CANCEL', 'СКАСУВАТИ', 'STORNIERUNG', 'ANULOWANIE', 'ANNULATION'),
         'Закрыть': ('Close', 'Закрити', 'Schließen', 'Zamknąć', 'Fermer'),
         'Готово': ('Done', 'Готово', 'Bereit', 'Gotowy', 'Prêt'),
         'Ошибка': ('Error', 'Помилка', 'Fehler', 'Błąd', 'Erreur'),
+        'Отключено: массовое завершение процессов может закрыть несохранённые документы и нарушить работу Windows.': ('Disabled: mass process termination may close unsaved documents and disrupt Windows.', 'Вимкнено: масове завершення процесів може закрити незбережені документи та порушити роботу Windows.', 'Deaktiviert: Das massenhafte Beenden von Prozessen kann ungespeicherte Dokumente schließen und Windows beeinträchtigen.', 'Wyłączono: masowe kończenie procesów może zamknąć niezapisane dokumenty i zakłócić działanie Windows.', 'Désactivé : l’arrêt massif des processus peut fermer des documents non enregistrés et perturber Windows.'),
+        'Отключено из соображений безопасности: подмена sethc/utilman может обойти экран входа Windows.': ('Disabled for security: replacing sethc/utilman may bypass the Windows sign-in screen.', 'Вимкнено з міркувань безпеки: підміна sethc/utilman може обійти екран входу Windows.', 'Aus Sicherheitsgründen deaktiviert: Der Austausch von sethc/utilman kann den Windows-Anmeldebildschirm umgehen.', 'Wyłączono ze względów bezpieczeństwa: podmiana sethc/utilman może ominąć ekran logowania Windows.', 'Désactivé pour des raisons de sécurité : remplacer sethc/utilman peut contourner l’écran de connexion Windows.'),
+        'Отключено: массовое удаление драйверов может вывести устройства из строя.': ('Disabled: mass driver removal may make devices stop working.', 'Вимкнено: масове видалення драйверів може вивести пристрої з ладу.', 'Deaktiviert: Das massenhafte Entfernen von Treibern kann Geräte außer Betrieb setzen.', 'Wyłączono: masowe usuwanie sterowników może unieruchomić urządzenia.', 'Désactivé : la suppression massive de pilotes peut rendre des appareils inutilisables.'),
+        'Отключено: сброс системных ACL без проверенной резервной копии может повредить защиту Windows.': ('Disabled: resetting system ACLs without a verified backup may damage Windows security.', 'Вимкнено: скидання системних ACL без перевіреної резервної копії може пошкодити захист Windows.', 'Deaktiviert: Das Zurücksetzen systemweiter ACLs ohne geprüfte Sicherung kann die Windows-Sicherheit beschädigen.', 'Wyłączono: reset systemowych ACL bez sprawdzonej kopii może uszkodzić zabezpieczenia Windows.', 'Désactivé : réinitialiser les ACL système sans sauvegarde vérifiée peut endommager la sécurité de Windows.'),
         'Успех': ('Success', 'Успіх', 'Erfolg', 'Sukces', 'Succès'),
         'Внимание': ('Warning', 'Увага', 'Aufmerksamkeit', 'Uwaga', 'Attention'),
         'Подтверждение': ('Confirmation', 'Підтвердження', 'Bestätigung', 'Potwierdzenie', 'Confirmation'),
@@ -785,6 +822,57 @@ class LanguageManager:
         'МАТОВЫЙ': ('MATTE', 'МАТОВА', 'MATT', 'MATOWY', 'MAT'),
         'ПРОЗРАЧНЫЙ': ('TRANSPARENT', 'ПРОЗОРА', 'TRANSPARENT', 'PRZEZROCZYSTY', 'TRANSPARENT'),
         'Язык интерфейса': ('Interface language', 'Мова інтерфейсу', 'Schnittstellensprache', 'Język interfejsu', "Langue de l'interface"),
+        'Сайт программы': ('Program website', 'Сайт програми', 'Programm-Website', 'Strona programu', 'Site du programme'),
+        'Открыть сайт программы': ('Open program website', 'Відкрити сайт програми', 'Programm-Website öffnen', 'Otwórz stronę programu', 'Ouvrir le site du programme'),
+        'Всегда поверх окон': ('Always on top', 'Завжди поверх вікон', 'Immer im Vordergrund', 'Zawsze na wierzchu', 'Toujours au premier plan'),
+        'Да': ('Yes', 'Так', 'Ja', 'Tak', 'Oui'),
+        'Нет': ('No', 'Ні', 'Nein', 'Nie', 'Non'),
+        'Папка сохранения WinRE': ('WinRE backup folder', 'Папка збереження WinRE', 'WinRE-Sicherungsordner', 'Folder kopii WinRE', 'Dossier de sauvegarde WinRE'),
+        'Изменить папку сохранения': ('Change save folder', 'Змінити папку збереження', 'Speicherordner ändern', 'Zmień folder zapisu', 'Modifier le dossier'),
+        'Вы запустились в среде восстановления:': ('Running in Windows Recovery Environment:', 'Ви запущені в середовищі відновлення:', 'Sie befinden sich in der Windows-Wiederherstellungsumgebung:', 'Uruchomiono w środowisku odzyskiwania:', 'Exécution dans l’environnement de récupération Windows :'),
+        'Текущий пользователь:': ('Current user:', 'Поточний користувач:', 'Aktueller Benutzer:', 'Bieżący użytkownik:', 'Utilisateur actuel :'),
+        'Информация только для просмотра': ('Read-only information', 'Інформація лише для перегляду', 'Nur-Lese-Information', 'Informacja tylko do odczytu', 'Information en lecture seule'),
+        'Отключить удобный запуск': ('Disable quick launch', 'Вимкнути швидкий запуск', 'Schnellstart deaktivieren', 'Wyłącz szybkie uruchamianie', 'Désactiver le lancement rapide'),
+        'Папка WinRE': ('WinRE folder', 'Папка WinRE', 'WinRE-Ordner', 'Folder WinRE', 'Dossier WinRE'),
+        'Выберите папку сохранения WinRE': ('Choose WinRE backup folder', 'Оберіть папку збереження WinRE', 'WinRE-Sicherungsordner auswählen', 'Wybierz folder kopii WinRE', 'Choisir le dossier de sauvegarde WinRE'),
+        'Создать диск восстановления Windows': ('Create a Windows recovery drive', 'Створити диск відновлення Windows', 'Windows-Wiederherstellungslaufwerk erstellen', 'Utwórz dysk odzyskiwania systemu Windows', 'Créer un lecteur de récupération Windows'),
+        'Создание WinPE USB': ('Create WinPE USB', 'Створення WinPE USB', 'WinPE-USB erstellen', 'Tworzenie WinPE USB', 'Créer une clé USB WinPE'),
+        'Для современных устройств с Secure Boot (UEFI CA 2023; требуется ADK от декабря 2024)': ('For newer Secure Boot devices (UEFI CA 2023; requires ADK from December 2024 or later)', 'Для сучасних пристроїв із Secure Boot (UEFI CA 2023; потрібен ADK від грудня 2024 року)', 'Für neuere Secure-Boot-Geräte (UEFI CA 2023; ADK ab Dezember 2024 erforderlich)', 'Dla nowszych urządzeń z Secure Boot (UEFI CA 2023; wymagany ADK z grudnia 2024 lub nowszy)', 'Pour les appareils Secure Boot récents (UEFI CA 2023 ; ADK de décembre 2024 ou ultérieur requis)'),
+        'Создавать носитель с загрузчиком UEFI CA 2023 (ADK от декабря 2024 или новее)': ('Use UEFI CA 2023 boot files (ADK from December 2024 or later)', 'Використовувати файли завантаження UEFI CA 2023 (ADK від грудня 2024 року або новіший)', 'UEFI-CA-2023-Startdateien verwenden (ADK ab Dezember 2024 oder neuer)', 'Użyj plików rozruchowych UEFI CA 2023 (ADK z grudnia 2024 lub nowszy)', 'Utiliser les fichiers de démarrage UEFI CA 2023 (ADK de décembre 2024 ou plus récent)'),
+        'Выбор UEFI CA 2023 зависит от Secure Boot целевого компьютера.': ('Choose UEFI CA 2023 according to the target PC Secure Boot state.', 'Вибір UEFI CA 2023 залежить від стану Secure Boot цільового комп’ютера.', 'Wählen Sie UEFI CA 2023 passend zum Secure-Boot-Status des Ziel-PCs.', 'Wybierz UEFI CA 2023 zgodnie ze stanem Secure Boot komputera docelowego.', 'Choisissez UEFI CA 2023 selon l’état Secure Boot du PC cible.'),
+        'Перезагрузка в WinRE или создание загрузочной WinPE-флешки средствами Windows ADK.': ('Restart into WinRE or create a bootable WinPE USB with Windows ADK.', 'Перезавантаження у WinRE або створення завантажувальної WinPE-флешки засобами Windows ADK.', 'Neustart in WinRE oder Erstellung eines bootfähigen WinPE-USB mit Windows ADK.', 'Uruchom ponownie w WinRE lub utwórz rozruchowy nośnik WinPE USB za pomocą Windows ADK.', 'Redémarrer dans WinRE ou créer une clé USB WinPE amorçable avec Windows ADK.'),
+        'USB-накопитель': ('USB drive', 'USB-накопичувач', 'USB-Laufwerk', 'Dysk USB', 'Lecteur USB'),
+        'Перезагрузка': ('Restart', 'Перезавантаження', 'Neustart', 'Uruchom ponownie', 'Redémarrage'),
+        'Система перезагрузится в WinRE через 5 секунд.': ('The system will restart into WinRE in 5 seconds.', 'Систему буде перезавантажено у WinRE за 5 секунд.', 'Das System startet in 5 Sekunden in WinRE neu.', 'System uruchomi się ponownie w WinRE za 5 sekund.', 'Le système redémarrera dans WinRE dans 5 secondes.'),
+        'Не удалось настроить WinRE. Убедитесь, что программа запущена от имени администратора. ': ('Could not configure WinRE. Make sure the app is running as administrator. ', 'Не вдалося налаштувати WinRE. Переконайтеся, що програму запущено від імені адміністратора. ', 'WinRE konnte nicht eingerichtet werden. Stellen Sie sicher, dass die App als Administrator ausgeführt wird. ', 'Nie można skonfigurować WinRE. Upewnij się, że aplikacja jest uruchomiona jako administrator. ', 'Impossible de configurer WinRE. Vérifiez que l’application est exécutée en tant qu’administrateur. '),
+        'Создать загрузочную WinPE-флешку': ('Create a bootable WinPE USB', 'Створити завантажувальну WinPE-флешку', 'Bootfähigen WinPE-USB-Stick erstellen', 'Utwórz rozruchowy nośnik WinPE USB', 'Créer une clé USB WinPE amorçable'),
+        'Инструменты Windows ADK и WinPE не найдены. Установите Windows ADK и отдельное дополнение Windows PE.': ('Windows ADK and WinPE tools were not found. Install the Windows ADK and the separate Windows PE add-on.', 'Інструменти Windows ADK і WinPE не знайдено. Установіть Windows ADK і окремий додаток Windows PE.', 'Windows ADK- und WinPE-Tools nicht gefunden. Installieren Sie das Windows ADK und das separate Windows-PE-Add-on.', 'Nie znaleziono narzędzi Windows ADK i WinPE. Zainstaluj Windows ADK oraz osobny dodatek Windows PE.', 'Outils Windows ADK et WinPE introuvables. Installez le Windows ADK et le module complémentaire Windows PE.'),
+        'Инструменты ADK и WinPE найдены.': ('ADK and WinPE tools found.', 'Інструменти ADK і WinPE знайдено.', 'ADK- und WinPE-Tools gefunden.', 'Znaleziono narzędzia ADK i WinPE.', 'Outils ADK et WinPE trouvés.'),
+        'USB-флешки не найдены. Подключите съёмную флешку и обновите список.': ('No removable USB drives found. Connect a removable USB drive and refresh the list.', 'USB-флешки не знайдено. Підключіть знімну флешку й оновіть список.', 'Keine entfernbaren USB-Laufwerke gefunden. Schließen Sie einen USB-Stick an und aktualisieren Sie die Liste.', 'Nie znaleziono wymiennych dysków USB. Podłącz dysk USB i odśwież listę.', 'Aucune clé USB amovible détectée. Connectez une clé USB et actualisez la liste.'),
+        'Обновить список USB': ('Refresh USB list', 'Оновити список USB', 'USB-Liste aktualisieren', 'Odśwież listę USB', 'Actualiser la liste USB'),
+        'Открыть страницу установки ADK': ('Open ADK installation page', 'Відкрити сторінку встановлення ADK', 'ADK-Installationsseite öffnen', 'Otwórz stronę instalacji ADK', 'Ouvrir la page d’installation ADK'),
+        'Выберите съёмную USB-флешку. Её раздел будет отформатирован; все данные на нём будут удалены. Сборка использует официальные инструменты Windows ADK.': ('Select a removable USB drive. Its partition will be formatted and all data on it will be erased. Creation uses the official Windows ADK tools.', 'Виберіть знімну USB-флешку. Її розділ буде відформатовано, а всі дані на ньому видалено. Для створення використовуються офіційні інструменти Windows ADK.', 'Wählen Sie ein entfernbares USB-Laufwerk. Die Partition wird formatiert und alle Daten darauf werden gelöscht. Die Erstellung verwendet offizielle Windows-ADK-Tools.', 'Wybierz wymienny nośnik USB. Jego partycja zostanie sformatowana, a wszystkie dane usunięte. Tworzenie używa oficjalnych narzędzi Windows ADK.', 'Sélectionnez une clé USB amovible. Sa partition sera formatée et toutes les données seront supprimées. La création utilise les outils officiels Windows ADK.'),
+        'Подготовка файлов WinPE…': ('Preparing WinPE files…', 'Підготовка файлів WinPE…', 'WinPE-Dateien werden vorbereitet…', 'Przygotowywanie plików WinPE…', 'Préparation des fichiers WinPE…'),
+        'Форматирование USB и запись WinPE…': ('Formatting USB and writing WinPE…', 'Форматування USB і запис WinPE…', 'USB wird formatiert und WinPE geschrieben…', 'Formatowanie USB i zapisywanie WinPE…', 'Formatage de la clé USB et écriture de WinPE…'),
+        'WinPE-флешка создана.': ('WinPE USB created.', 'WinPE-флешку створено.', 'WinPE-USB wurde erstellt.', 'Utworzono nośnik WinPE USB.', 'Clé USB WinPE créée.'),
+        'Создание WinPE завершилось с ошибкой. Рабочие файлы оставлены здесь:': ('WinPE creation failed. Working files were left here:', 'Не вдалося створити WinPE. Робочі файли залишено тут:', 'WinPE-Erstellung fehlgeschlagen. Arbeitsdateien befinden sich hier:', 'Tworzenie WinPE nie powiodło się. Pliki robocze pozostawiono tutaj:', 'Échec de la création de WinPE. Les fichiers de travail sont ici :'),
+        'Не удалось запустить процесс сборки WinPE.': ('Could not start the WinPE build process.', 'Не вдалося запустити процес створення WinPE.', 'Der WinPE-Erstellungsprozess konnte nicht gestartet werden.', 'Nie można uruchomić procesu tworzenia WinPE.', 'Impossible de démarrer le processus de création WinPE.'),
+        'Создание выполняется. Не отключайте USB-флешку.': ('Creation is in progress. Do not disconnect the USB drive.', 'Триває створення. Не від’єднуйте USB-флешку.', 'Erstellung läuft. Trennen Sie den USB-Stick nicht.', 'Trwa tworzenie. Nie odłączaj nośnika USB.', 'Création en cours. Ne déconnectez pas la clé USB.'),
+        'WinPE USB готова:': ('WinPE USB is ready:', 'WinPE USB готова:', 'WinPE-USB ist bereit:', 'WinPE USB jest gotowy:', 'La clé USB WinPE est prête :'),
+        'WinPE создаётся для компьютеров x64 и не содержит приложение NoVir.': ('WinPE is built for x64 PCs and does not include the NoVir application.', 'WinPE створюється для комп’ютерів x64 і не містить програму NoVir.', 'WinPE wird für x64-PCs erstellt und enthält nicht die NoVir-Anwendung.', 'WinPE jest tworzone dla komputerów x64 i nie zawiera aplikacji NoVir.', 'WinPE est créé pour les PC x64 et ne contient pas l’application NoVir.'),
+        'Путь ADK содержит символы, небезопасные для команды Windows:': ('The ADK path contains characters that are unsafe for a Windows command:', 'Шлях ADK містить символи, небезпечні для команди Windows:', 'Der ADK-Pfad enthält Zeichen, die für einen Windows-Befehl unsicher sind:', 'Ścieżka ADK zawiera znaki niebezpieczne dla polecenia Windows:', 'Le chemin ADK contient des caractères dangereux pour une commande Windows :'),
+        'USB-флешка изменилась или отключена. Запись отменена.': ('The USB drive changed or was disconnected. Writing was canceled.', 'USB-флешку змінено або від’єднано. Запис скасовано.', 'Das USB-Laufwerk wurde geändert oder getrennt. Der Schreibvorgang wurde abgebrochen.', 'Dysk USB został zmieniony lub odłączony. Zapis anulowano.', 'La clé USB a changé ou a été déconnectée. Écriture annulée.'),
+        'Переход в WinRE и запуск встроенного мастера Windows для создания USB-диска восстановления.': ('Restart into WinRE or open the built-in Windows wizard to create a recovery USB.', 'Перехід у WinRE або запуск вбудованого майстра Windows для створення USB-диска відновлення.', 'Neustart in WinRE oder Öffnen des Windows-Assistenten zum Erstellen eines Wiederherstellungs-USB.', 'Uruchom WinRE lub otwórz kreator Windows, aby utworzyć dysk odzyskiwania USB.', 'Redémarrer dans WinRE ou ouvrir l’assistant Windows pour créer une clé USB de récupération.'),
+        'Здесь можно перезагрузиться в WinRE или открыть встроенный мастер Windows для создания загрузочной флешки восстановления. NoVir не форматирует накопитель самостоятельно.': ('Restart into WinRE or open the built-in Windows wizard to create a bootable recovery USB. NoVir does not format drives itself.', 'Тут можна перезавантажитися у WinRE або відкрити вбудований майстер Windows для створення завантажувальної флешки відновлення. NoVir самостійно не форматує накопичувачі.', 'Hier können Sie in WinRE neu starten oder den Windows-Assistenten zum Erstellen eines bootfähigen Wiederherstellungs-USB öffnen. NoVir formatiert keine Laufwerke selbst.', 'Tutaj możesz uruchomić WinRE ponownie lub otworzyć wbudowany kreator Windows, aby utworzyć rozruchowy nośnik odzyskiwania. NoVir sam nie formatuje dysków.', 'Vous pouvez redémarrer dans WinRE ou ouvrir l’assistant Windows intégré pour créer une clé USB de récupération amorçable. NoVir ne formate pas les lecteurs.'),
+        'Создание диска восстановления может стереть все данные на выбранной USB-флешке. Продолжить и открыть мастер Windows?': ('Creating a recovery drive may erase all data on the selected USB drive. Continue and open the Windows wizard?', 'Створення диска відновлення може стерти всі дані на вибраній USB-флешці. Продовжити й відкрити майстер Windows?', 'Beim Erstellen eines Wiederherstellungslaufwerks können alle Daten auf dem ausgewählten USB-Laufwerk gelöscht werden. Windows-Assistent öffnen?', 'Tworzenie dysku odzyskiwania może usunąć wszystkie dane z wybranego nośnika USB. Kontynuować i otworzyć kreator Windows?', 'La création d’un lecteur de récupération peut effacer toutes les données de la clé USB choisie. Continuer et ouvrir l’assistant Windows ?'),
+        'Не удалось найти мастер создания диска восстановления Windows.': ('Windows Recovery Drive wizard was not found.', 'Не вдалося знайти майстер створення диска відновлення Windows.', 'Der Windows-Assistent für Wiederherstellungslaufwerke wurde nicht gefunden.', 'Nie znaleziono kreatora dysku odzyskiwania systemu Windows.', 'Assistant de création du lecteur de récupération Windows introuvable.'),
+        'Не удалось открыть мастер создания диска восстановления Windows:': ('Could not open the Windows Recovery Drive wizard:', 'Не вдалося відкрити майстер створення диска відновлення Windows:', 'Der Windows-Assistent für Wiederherstellungslaufwerke konnte nicht geöffnet werden:', 'Nie można otworzyć kreatora dysku odzyskiwania systemu Windows:', 'Impossible d’ouvrir l’assistant de récupération Windows :'),
+        'Создание USB': ('Create USB', 'Створення USB', 'USB erstellen', 'Utwórz USB', 'Créer une clé USB'),
+        'Удобный запуск NoVir отключён. Записи контекстного меню удалены; UAC не изменялся.': ('NoVir quick launch is disabled. Context-menu entries were removed; UAC was not changed.', 'Швидкий запуск NoVir вимкнено. Записи контекстного меню видалено; UAC не змінювався.', 'NoVir-Schnellstart ist deaktiviert. Kontextmenüeinträge wurden entfernt; UAC wurde nicht geändert.', 'Szybkie uruchamianie NoVir wyłączono. Wpisy menu kontekstowego usunięto; UAC nie został zmieniony.', 'Le lancement rapide NoVir est désactivé. Les entrées du menu contextuel ont été supprimées ; l’UAC n’a pas été modifié.'),
+        'Записи удобного запуска NoVir не найдены. UAC не изменялся.': ('No NoVir quick-launch entries were found. UAC was not changed.', 'Записів швидкого запуску NoVir не знайдено. UAC не змінювався.', 'Keine NoVir-Schnellstarteinträge gefunden. UAC wurde nicht geändert.', 'Nie znaleziono wpisów szybkiego uruchamiania NoVir. UAC nie został zmieniony.', 'Aucune entrée de lancement rapide NoVir trouvée. L’UAC n’a pas été modifié.'),
+        'Не удалось полностью отключить удобный запуск. Проверьте права доступа.': ('Quick launch could not be fully disabled. Check permissions.', 'Не вдалося повністю вимкнути швидкий запуск. Перевірте права доступу.', 'Schnellstart konnte nicht vollständig deaktiviert werden. Prüfen Sie die Berechtigungen.', 'Nie udało się całkowicie wyłączyć szybkiego uruchamiania. Sprawdź uprawnienia.', 'Impossible de désactiver complètement le lancement rapide. Vérifiez les autorisations.'),
+        'Отключить быстрый запуск NoVir? Будут удалены только точные записи NoVir из контекстного меню. UAC не изменяется.': ('Disable NoVir quick launch? Only the exact NoVir context-menu entries will be removed. UAC will not be changed.', 'Вимкнути швидкий запуск NoVir? Будуть видалені лише точні записи NoVir з контекстного меню. UAC не змінюється.', 'NoVir-Schnellstart deaktivieren? Nur die exakten NoVir-Kontextmenüeinträge werden entfernt. UAC bleibt unverändert.', 'Wyłączyć szybkie uruchamianie NoVir? Usunięte zostaną tylko dokładne wpisy NoVir z menu kontekstowego. UAC nie zostanie zmieniony.', 'Désactiver le lancement rapide NoVir ? Seules les entrées NoVir exactes du menu contextuel seront supprimées. UAC ne sera pas modifié.'),
+        'Не удалось открыть сайт программы': ('Could not open the program website', 'Не вдалося відкрити сайт програми', 'Die Programm-Website konnte nicht geöffnet werden', 'Nie udało się otworzyć strony programu', 'Impossible d’ouvrir le site du programme'),
         'Выберите язык': ('Choose language', 'Оберіть мову', 'Sprache auswählen', 'Wybierz język', 'Sélectionnez la langue'),
         'Выберите язык интерфейса. Его можно изменить позже в настройках.': ('Choose the interface language. You can change it later in Settings.', 'Оберіть мову інтерфейсу. Її можна змінити пізніше в налаштуваннях.', 'Wählen Sie die Sprache der Benutzeroberfläche aus. Es kann später in den Einstellungen geändert werden.', 'Wybierz język interfejsu. Można to później zmienić w ustawieniach.', "Sélectionnez la langue de l'interface. Il pourra être modifié ultérieurement dans les paramètres."),
         'Диспетчер задач NoVir': ('NoVir Task Manager', 'Диспетчер завдань NoVir', 'NoVir Task-Manager', 'Menedżer zadań NoVir', 'Gestionnaire de tâches NoVir'),
@@ -878,6 +966,8 @@ class LanguageManager:
         'Снять всё': ('Remove all', 'Зняти все', 'Alles entfernen', 'Usuń wszystko', 'Supprimer tout'),
         'Нажмите «Сканировать» для поиска ограничений': ('Click “Scan” to look for restrictions', 'Натисніть «Сканувати», щоб знайти обмеження', 'Klicken Sie auf „Scannen“, um nach Einschränkungen zu suchen', 'Kliknij „Skanuj”, aby wyszukać ograniczenia', 'Cliquez sur "Scan" pour rechercher des restrictions'),
         'Встроенные утилиты': ('Built-in utilities', 'Вбудовані утиліти', 'Integrierte Dienstprogramme', 'Wbudowane narzędzia', 'Utilitaires intégrés'),
+        'Загрузочная WinPE-флешка': ('Bootable WinPE USB', 'Завантажувальна WinPE-флешка', 'Bootfähiger WinPE-USB-Stick', 'Rozruchowy nośnik WinPE USB', 'Clé USB WinPE amorçable'),
+        'Создать загрузочную WinPE-флешку или перезагрузиться в WinRE.': ('Create a bootable WinPE USB or restart into WinRE.', 'Створити завантажувальну WinPE-флешку або перезавантажитися у WinRE.', 'Erstellen Sie einen bootfähigen WinPE-USB-Stick oder starten Sie in WinRE neu.', 'Utwórz rozruchowy nośnik WinPE USB lub uruchom ponownie w WinRE.', 'Créer une clé USB WinPE amorçable ou redémarrer dans WinRE.'),
         'Запустить': ('Run', 'Запустити', 'Start', 'Początek', 'Lancement'),
         'Остановить': ('Stop', 'Зупинити', 'Stoppen', 'Zatrzymywać się', 'Arrêt'),
         'Перезапустить': ('Restart', 'Перезапустити', 'Neustart', 'Uruchom ponownie', 'Redémarrage'),
@@ -1030,6 +1120,79 @@ class LanguageManager:
         'Выбор языка': ('Выбор языка', 'Выбор языка', 'Sprachauswahl', 'Wybór języka', 'Sélection de la langue'),
         '⚠️ Управление дисками': ('⚠️ Управление дисками', '⚠️ Управление дисками', '⚠️ Datenträgerverwaltung', '⚠️ Zarządzanie dyskami', '⚠️ Gestion des disques'),
         '⚠️ Восстановление загрузчика MBR/BCD': ('⚠️ Восстановление загрузчика MBR/BCD', '⚠️ Восстановление загрузчика MBR/BCD', '⚠️ MBR/BCD-Bootloader-Wiederherstellung', '⚠️ Odzyskiwanie bootloadera MBR/BCD', '⚠️ Récupération du chargeur de démarrage MBR/BCD'),
+        # — Меню «ЕЩЁ», заголовки страниц, сообщество —
+        'Поддержать автора': ('Support the author', 'Підтримати автора', 'Autor unterstützen', 'Wesprzyj autora', 'Soutenir l’auteur'),
+        'Выберите язык интерфейса. Позже вы сможете изменить его в Настройках.': ('Choose the interface language. You can change it later in Settings.', 'Оберіть мову інтерфейсу. Пізніше її можна змінити в Налаштуваннях.', 'Wähle die Sprache der Oberfläche. Du kannst sie später in den Einstellungen ändern.', 'Wybierz język interfejsu. Później zmienisz go w Ustawieniach.', 'Choisissez la langue de l’interface. Vous pourrez la modifier plus tard dans les paramètres.'),
+        '✕ Очистить': ('✕ Clear', '✕ Очистити', '✕ Löschen', '✕ Wyczyść', '✕ Effacer'),
+        'Введите команду...': ('Enter a command...', 'Введіть команду...', 'Befehl eingeben...', 'Wpisz polecenie...', 'Saisissez une commande...'),
+        'БЕТА-ВЕРСИЯ: ИИ может ошибаться. Не доверяйте ответам без проверки; перед запуском внимательно проверьте каждую команду. Используйте ИИ на свой риск. NoVir не отвечает за последствия выполнения предложенных команд.': ('BETA: The AI can make mistakes. Do not trust answers without checking; carefully review every command before running. Use the AI at your own risk. NoVir is not responsible for the consequences of running suggested commands.', 'БЕТА: ІІ може помилятися. Не довіряйте відповідям без перевірки; уважно перевірте кожну команду перед запуском. Використовуйте ІІ на свій ризик. NoVir не відповідальні за наслідки виконання запропонованих команд.', 'BETA: Die KI kann Fehler machen. Vertraue Antworten nicht ohne Prüfung; prüfe jeden Befehl vor dem Ausführen sorgfältig. Nutze die KI auf eigenes Risiko. NoVir haftet nicht für die Folgen ausgeführter Befehle.', 'BETA: SI może się mylić. Nie ufaj odpowiedziom bez sprawdzenia; dokładnie sprawdź każde polecenie przed uruchomieniem. Korzystaj z SI na własne ryzyko. NoVir nie ponosi odpowiedzialności za skutki uruchomienia sugerowanych poleceń.', 'BÊTA : l’IA peut se tromper. Ne fais pas confiance aux réponses sans vérification ; examine attentivement chaque commande avant exécution. Utilise l’IA à tes risques et périls. NoVir n’est pas responsable des conséquences de l’exécution des commandes proposées.'),
+        'Напишите ответ или вопрос NoVir AI...': ('Write an answer or question for NoVir AI...', 'Напишіть відповідь або запитання для NoVir AI...', 'Schreibe eine Antwort oder Frage an NoVir AI...', 'Napisz odpowiedź lub pytanie do NoVir AI...', 'Écris une réponse ou une question à NoVir AI...'),
+        'Отправить': ('Send', 'Надіслать', 'Senden', 'Wyślij', 'Envoyer'),
+        'ИИ АССИСТЕНТ': ('AI ASSISTANT', 'ІІ АСИСТЕНТ', 'KI-ASSISTENT', 'ASYSTENT SI', 'ASSISTANT IA'),
+        '♥  ПОДДЕРЖАТЬ АВТОРА': ('♥  SUPPORT THE AUTHOR', '♥  ПІДТРИМАТИ АВТОРА', '♥  AUTOR UNTERSTÜTZEN', '♥  WESPRZYJ AUTORA', '♥  SOUTENIR L’AUTEUR'),
+        'Имя параметра:': ('Parameter name:', 'Назва параметра:', 'Parametername:', 'Nazwa parametru:', 'Nom du paramètre :'),
+        'Значение:': ('Value:', 'Значення:', 'Wert:', 'Wartość:', 'Valeur :'),
+        'Создать': ('Create', 'Створити', 'Erstellen', 'Utwórz', 'Créer'),
+        'Путь к файлу...': ('File path...', 'Шлях до файлу...', 'Dateipfad...', 'Ścieżka do pliku...', 'Chemin du fichier...'),
+        'Анализ ничего не меняет; режим исправления требует отдельного подтверждения': ('Analysis changes nothing; fix mode requires separate confirmation.', 'Аналіз нічого не змінює; режим виправлення вимагає окремого підтвердження.', 'Die Analyse ändert nichts; der Reparaturmodus erfordert eine separate Bestätigung.', 'Analiza niczego nie zmienia; tryb naprawy wymaga osobnego potwierdzenia.', 'L’analyse ne modifie rien ; le mode correction demande une confirmation séparée.'),
+        'Корреляция Malware-процессов': ('Malware process correlation', 'Кореляція malware-процесів', 'Malware-Prozesskorrelation', 'Korelacja procesów malware', 'Corrélation des processus malware'),
+        'Сравнение запущенных процессов с активными службами и задачами (эвристика):': ('Comparing running processes with active services and tasks (heuristics):', 'Порівняння запущених процесів з активними службами та завданнями (евристика):', 'Vergleich laufender Prozesse mit aktiven Diensten und Aufgaben (Heuristik):', 'Porównanie uruchomionych procesów z aktywnymi usługami i zadaniami (heurystyka):', 'Comparaison des processus en cours avec les services et tâches actifs (heuristique) :'),
+        'Восстановление драйверов': ('Driver recovery', 'Відновлення драйверів', 'Treiber-Wiederherstellung', 'Odzyskiwanie sterowników', 'Récupération des pilotes'),
+        'Укажите папку с резервной копией драйверов (содержит .inf файлы).': ('Specify the folder with the driver backup (contains .inf files).', 'Вкажіть папку з резервною копією драйверів (містить файли .inf).', 'Gib den Ordner mit der Treibersicherung an (enthält .inf-Dateien).', 'Wskaż folder z kopią zapasową sterowników (zawiera pliki .inf).', 'Indique le dossier de sauvegarde des pilotes (contient des fichiers .inf).'),
+        'Указать папку и восстановить': ('Choose folder and restore', 'Вказати папку та відновити', 'Ordner wählen und wiederherstellen', 'Wskaż folder i przywróć', 'Choisir le dossier et restaurer'),
+        'Здесь можно перезагрузиться в среду восстановления Windows (WinRE) или подготовить USB.': ('Restart into Windows recovery environment (WinRE) or prepare a USB here.', 'Тут можна перезавантажитися в середовище відновлення Windows (WinRE) або підготувати USB.', 'Hier kannst du in die Windows-Wiederherstellungsumgebung (WinRE) neu starten oder ein USB vorbereiten.', 'Tutaj możesz zrestartować się do środowiska odzyskiwania Windows (WinRE) lub przygotować USB.', 'Redémarrez ici vers l’environnement de récupération Windows (WinRE) ou préparez une clé USB.'),
+        'Перезагрузка в WinRE': ('Restart to WinRE', 'Перезавантаження в WinRE', 'Neustart in WinRE', 'Restart do WinRE', 'Redémarrage vers WinRE'),
+        'Версия Windows': ('Windows version', 'Версія Windows', 'Windows-Version', 'Wersja Windows', 'Version de Windows'),
+        'Функции будут использовать команды под выбранную версию. «Автоопределение» — текущая Windows.': ('Features will use commands for the selected version. "Auto-detect" — the current Windows.', 'Функції використовуватимуть команди для обраної версії. «Автовизначення» — поточна Windows.', 'Die Funktionen verwenden Befehle für die gewählte Version. „Automatische Erkennung“ — die aktuelle Windows.', 'Funkcje będą używać poleceń dla wybranej wersji. „Wykrywanie automatyczne” — bieżące Windows.', 'Les fonctionnalités utiliseront les commandes pour la version sélectionnée. « Détection automatique » — Windows actuel.'),
+        'Режим использования': ('Usage mode', 'Режим використання', 'Verwendungsmodus', 'Tryb użytkowania', 'Mode d’utilisation'),
+        'Что нового в этом обновлении': ('What’s new in this update', 'Що нового в цьому оновленні', 'Neuigkeiten in diesem Update', 'Co nowego w tej aktualizacji', 'Nouveautés de cette mise à jour'),
+        'ЕЩЁ  ▾': ('MORE  ▾', 'ЩЕ  ▾', 'MEHR  ▾', 'WIĘCEJ  ▾', 'PLUS  ▾'),
+        'СООБЩЕСТВО': ('COMMUNITY', 'СПІЛЬНОТА', 'COMMUNITY', 'SPOŁECZNOŚĆ', 'COMMUNAUTÉ'),
+        'Чат сообщества NoVir. Гостям 5 сообщений в час, зарегистрированным — 60.\n@novir_ai — спроси бота прямо в чате. ПКМ по сообщению: ответить, упомянуть, удалить (5 мин).': ('NoVir community chat. Guests get 5 messages per hour, registered users — 60.\n@novir_ai — ask the bot right in the chat. Right-click a message: reply, mention, delete (5 min).', 'Чат спільноти NoVir. Гостям — 5 повідомлень на годину, зареєстрованим — 60.\n@novir_ai — запитай бота прямо в чаті. ПКМ по повідомленню: відповісти, згадати, видалити (5 хв).', 'NoVir-Community-Chat. Gäste: 5 Nachrichten pro Stunde, Registrierte: 60.\n@novir_ai — frag den Bot direkt im Chat. Rechtsklick auf eine Nachricht: antworten, erwähnen, löschen (5 Min).', 'Czat społeczności NoVir. Goście: 5 wiadomości na godzinę, zarejestrowani: 60.\n@novir_ai — zapytaj bota prosto na czacie. PPM na wiadomość: odpowiedz, wspomnij, usuń (5 min).', 'Chat de la communauté NoVir. Invités : 5 messages par heure, inscrits — 60.\n@novir_ai — pose ta question au bot directement dans le chat. Clic droit sur un message : répondre, mentionner, supprimer (5 min).'),
+        'Гость': ('Guest', 'Гість', 'Gast', 'Gość', 'Invité'),
+        '[ ВОЙТИ ]': ('[ LOG IN ]', '[ УВІЙТИ ]', '[ ANMELDEN ]', '[ ZALOGUJ ]', '[ CONNEXION ]'),
+        '[ РЕГИСТРАЦИЯ ]': ('[ SIGN UP ]', '[ РЕЄСТРАЦІЯ ]', '[ REGISTRIEREN ]', '[ REJESTRACJA ]', '[ INSCRIPTION ]'),
+        '[ ВЫЙТИ ]': ('[ LOG OUT ]', '[ ВИЙТИ ]', '[ ABMELDEN ]', '[ WYLOGUJ ]', '[ DÉCONNEXION ]'),
+        'Сообщение...': ('Message...', 'Повідомлення...', 'Nachricht...', 'Wiadomość...', 'Message...'),
+        '[ ОТПРАВИТЬ ]': ('[ SEND ]', '[ НАДІСЛАТИ ]', '[ SENDEN ]', '[ WYŚLIJ ]', '[ ENVOYER ]'),
+        'Отменить ответ': ('Cancel reply', 'Скасувати відповідь', 'Antwort abbrechen', 'Anuluj odpowiedź', 'Annuler la réponse'),
+        'Вход в NoVir Community': ('Log in to NoVir Community', 'Вхід у NoVir Community', 'Anmeldung bei NoVir Community', 'Logowanie do NoVir Community', 'Connexion à NoVir Community'),
+        'Регистрация в NoVir Community': ('Sign up for NoVir Community', 'Реєстрація в NoVir Community', 'Registrierung bei NoVir Community', 'Rejestracja w NoVir Community', 'Inscription à NoVir Community'),
+        'Повтори пароль:': ('Repeat password:', 'Повтори пароль:', 'Passwort wiederholen:', 'Powtórz hasło:', 'Répéter le mot de passe :'),
+        'Регистрация увеличивает лимит с 5 до 60 сообщений в час.\nИмя: 3–20 символов (латиница, цифры, _). Пароль: от 4 символов.': ('Registration raises the limit from 5 to 60 messages per hour.\nName: 3–20 characters (latin, digits, _). Password: at least 4 characters.', 'Реєстрація підвищує ліміт з 5 до 60 повідомлень на годину.\nІм’я: 3–20 символів (латиниця, цифри, _). Пароль: від 4 символів.', 'Die Registrierung erhöht das Limit von 5 auf 60 Nachrichten pro Stunde.\nName: 3–20 Zeichen (lateinisch, Ziffern, _). Passwort: mindestens 4 Zeichen.', 'Rejestracja podnosi limit z 5 do 60 wiadomości na godzinę.\nNazwa: 3–20 znaków (łacina, cyfry, _). Hasło: od 4 znaków.', 'L’inscription porte la limite de 5 à 60 messages par heure.\nNom : 3 à 20 caractères (latin, chiffres, _). Mot de passe : 4 caractères minimum.'),
+        '[ ЗАРЕГИСТРИРОВАТЬСЯ ]': ('[ SIGN UP ]', '[ ЗАРЕЄСТРУВАТИСЯ ]', '[ REGISTRIEREN ]', '[ ZAREJESTRUJ SIĘ ]', '[ S’INSCRIRE ]'),
+        'Вы: %s': ('You: %s', 'Ви: %s', 'Sie: %s', 'Ty: %s', 'Vous : %s'),
+        'Сообщение от имени %s...': ('Message as %s...', 'Повідомлення від імені %s...', 'Nachricht als %s...', 'Wiadomość jako %s...', 'Message en tant que %s...'),
+        'Сообщение (гость, лимит 5/час)...': ('Message (guest, limit 5/hour)...', 'Повідомлення (гість, ліміт 5/год)...', 'Nachricht (Gast, Limit 5/Std.)...', 'Wiadomość (gość, limit 5/godz.)...', 'Message (invité, limite 5/h)...'),
+        '%s · лимит %s сообщ./час · осталось %s · %s': ('%s · limit %s msg/hour · %s left · %s', '%s · ліміт %s повід./год · лишилося %s · %s', '%s · Limit %s Msg./Std. · %s übrig · %s', '%s · limit %s wiad./godz · pozostało %s · %s', '%s · limite %s msg/h · %s restant · %s'),
+        '✓ можно писать': ('✓ you can write', '✓ можна писати', '✓ du kannst schreiben', '✓ można pisać', '✓ tu peux écrire'),
+        '⌛ лимит исчерпан, подожди до конца часа': ('⌛ limit reached, wait until the hour ends', '⌛ ліміт вичерпано, зачекай до кінця години', '⌛ Limit erreicht, warte bis Stundenschluss', '⌛ limit wyczerpany, poczekaj do końca godziny', '⌛ limite atteint, attends la fin de l’heure'),
+        '⚡ ТЕБЯ УПОМЯНУЛ %s: %s': ('⚡ %s MENTIONED YOU: %s', '⚡ ТЕБЯ ЗГАДАВ %s: %s', '⚡ %s HAT DICH ERWÄHNT: %s', '⚡ %s CIĘ WSPOMNIAŁ: %s', '⚡ %s T’A MENTIONNÉ : %s'),
+        'NOVIR AI думает над ответом...': ('NOVIR AI is thinking...', 'NOVIR AI думає над відповіддю...', 'NOVIR AI denkt nach...', 'NOVIR AI myśli nad odpowiedzią...', 'NOVIR AI réfléchit...'),
+        'ОТВЕТИТЬ': ('REPLY', 'ВІДПОВІСТИ', 'ANTWORTEN', 'ODPOWIEDZ', 'RÉPONDRE'),
+        'УПОМЯНУТЬ @%s': ('MENTION @%s', 'ЗГАДАТИ @%s', 'ERWÄHNNEN @%s', 'WSPOMNIJ @%s', 'MENTIONNER @%s'),
+        'КОПИРОВАТЬ ТЕКСТ': ('COPY TEXT', 'КОПІЮВАТИ ТЕКСТ', 'TEXT KOPIEREN', 'KOPIUJ TEKST', 'COPIER LE TEXTE'),
+        'УДАЛИТЬ (осталось %d мин)': ('DELETE (%d min left)', 'ВИДАЛИТИ (%d хв лишилося)', 'LÖSCHEN (%d Min. übrig)', 'USUŃ (pozostało %d min)', 'SUPPRIMER (%d min rest.)'),
+        'Ответ %s: %s': ('Reply to %s: %s', 'Відповідь %s: %s', 'Antwort an %s: %s', 'Odpowiedź do %s: %s', 'Réponse à %s : %s'),
+        'Удалить можно только своё сообщение\nи только в течение %d минут.': ('You can delete only your own message\nand only within %d minutes.', 'Видалити можна лише своє повідомлення\nі лише протягом %d хвилин.', 'Du kannst nur deine eigene Nachricht löschen\nund nur innerhalb von %d Minuten.', 'Można usunąć tylko własną wiadomość\ni tylko w ciągu %d minut.', 'Vous ne pouvez supprimer que votre propre message\net seulement dans les %d minutes.'),
+        'Удалить своё сообщение?': ('Delete your own message?', 'Видалити своє повідомлення?', 'Eigene Nachricht löschen?', 'Usunąć własną wiadomość?', 'Supprimer votre message?'),
+        'Не удалось удалить (нет связи с сервером).': ('Could not delete (no server connection).', 'Не вдалося видалити (немає зв’язку з сервером).', 'Löschen fehlgeschlagen (keine Serververbindung).', 'Nie udało się usunąć (brak połączenia z serwerem).', 'Suppression impossible (pas de connexion au serveur).'),
+        'Сообщение длиннее 500 символов.': ('Message is longer than 500 characters.', 'Повідомлення довше за 500 символів.', 'Die Nachricht ist länger als 500 Zeichen.', 'Wiadomość jest dłuższa niż 500 znaków.', 'Le message dépasse 500 caractères.'),
+        'Лимит 5 сообщений в час исчерпан.\nЗарегистрируйся — и лимит станет 60 сообщений в час.': ('The 5 messages per hour limit is used up.\nRegister — and the limit becomes 60 messages per hour.', 'Ліміт 5 повідомлень на годину вичерпано.\nЗареєструйся — і ліміт стане 60 повідомлень на годину.', 'Das Limit von 5 Nachrichten pro Stunde ist aufgebraucht.\nRegistriere dich — dann beträgt das Limit 60 Nachrichten pro Stunde.', 'Limit 5 wiadomości na godzinę wyczerpany.\nZarejestruj się — limit wyniesie 60 wiadomości na godzinę.', 'La limite de 5 messages par heure est atteinte.\nInscris-toi — la limite passera à 60 messages par heure.'),
+        'Аккаунт «%s» создан!\nТеперь лимит — 60 сообщений в час.': ('Account "%s" created!\nThe limit is now 60 messages per hour.', 'Обліковий запис «%s» створено!\nТепер ліміт — 60 повідомлень на годину.', 'Konto "%s" erstellt!\nJetzt gilt ein Limit von 60 Nachrichten pro Stunde.', 'Konto "%s" utworzone!\nTeraz limit to 60 wiadomości na godzinę.', 'Compte « %s » créé !\nLa limite est maintenant de 60 messages par heure.'),
+        'Ошибка отправки.': ('Send error.', 'Помилка надсилання.', 'Sendefehler.', 'Błąd wysyłania.', 'Erreur d’envoi.'),
+        'Заполни имя и пароль.': ('Fill in the name and password.', 'Введи ім’я та пароль.', 'Name und Passwort ausfüllen.', 'Podaj nazwę i hasło.', 'Renseigne le nom et le mot de passe.'),
+        'Проверка...': ('Checking...', 'Перевірка...', 'Prüfe...', 'Sprawdzanie...', 'Vérification...'),
+        'Нет связи с сервером. Проверь интернет и supabase_community.sql.': ('No server connection. Check your internet and supabase_community.sql.', 'Немає зв’язку з сервером. Перевір інтернет і supabase_community.sql.', 'Keine Serververbindung. Prüfe Internet und supabase_community.sql.', 'Brak połączenia z serwerem. Sprawdź internet i supabase_community.sql.', 'Pas de connexion au serveur. Vérifiez internet et supabase_community.sql.'),
+        'Пользователь не найден.': ('User not found.', 'Користувача не знайдено.', 'Benutzer nicht gefunden.', 'Nie znaleziono użytkownika.', 'Utilisateur introuvable.'),
+        'Неверный пароль.': ('Wrong password.', 'Невірний пароль.', 'Falsches Passwort.', 'Nieprawidłowe hasło.', 'Mot de passe incorrect.'),
+        'Ошибка.': ('Error.', 'Помилка.', 'Fehler.', 'Błąd.', 'Erreur.'),
+        'Имя: 3–20 символов, только латиница, цифры и _.': ('Name: 3–20 chars, latin, digits and _ only.', 'Ім’я: 3–20 символів, лише латиниця, цифри і _.', 'Name: 3–20 Zeichen, nur lateinisch, Ziffern und _.', 'Nazwa: 3–20 znaków, tylko łacina, cyfry i _.', 'Nom : 3 à 20 caractères, latin, chiffres et _ uniquement.'),
+        'Пароль от 4 символов.': ('Password must be at least 4 characters.', 'Пароль від 4 символів.', 'Passwort ab 4 Zeichen.', 'Hasło od 4 znaków.', 'Mot de passe : 4 caractères minimum.'),
+        'Пароли не совпадают.': ('Passwords do not match.', 'Паролі не збігаються.', 'Die Passwörter stimmen nicht überein.', 'Hasła nie są zgodne.', 'Les mots de passe ne correspondent pas.'),
+        'Создание аккаунта...': ('Creating account...', 'Створення облікового запису...', 'Konto wird erstellt...', 'Tworzenie konta...', 'Création du compte...'),
+        'Это имя уже занято.': ('This name is already taken.', 'Це ім’я вже зайняте.', 'Dieser Name ist bereits vergeben.', 'Ta nazwa jest już zajęta.', 'Ce nom est déjà pris.'),
+        'Не удалось создать аккаунт (сервер отклонил запрос).': ('Could not create the account (server rejected the request).', 'Не вдалося створити обліковий запис (сервер відхилив запит).', 'Konto konnte nicht erstellt werden (Server hat die Anfrage abgelehnt).', 'Nie udało się utworzyć konta (serwer odrzucił zapytanie).', 'Impossible de créer le compte (le serveur a refusé la requête).'),
     }
 
     # A safe fallback prevents untranslated Russian fragments in dynamic status
@@ -1650,25 +1813,30 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hi
     success = False
     for current_hive in hives:
         hive_name = "HKLM" if current_hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
+        hive_success = False
         try:
             for access in [winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY, winreg.KEY_SET_VALUE | winreg.KEY_WOW64_32KEY]:
                 try:
                     rollback_mgr.snapshot_value(current_hive, key_path, value_name)
-                    key = winreg.CreateKeyEx(current_hive, key_path, 0, access)
-                    winreg.SetValueEx(key, value_name, 0, value_type, value_data)
-                    winreg.CloseKey(key)
-                    success = True
+                    with winreg.CreateKeyEx(current_hive, key_path, 0, access) as key:
+                        winreg.SetValueEx(key, value_name, 0, value_type, value_data)
+                    hive_success = True
                     break
                 except Exception:
                     continue
             
-            if not success:
+            if not hive_success:
                 v_type = "REG_SZ" if value_type == winreg.REG_SZ else "REG_DWORD"
-                cmd = f'reg add "{hive_name}\{key_path}" /v "{value_name}" /t {v_type} /d "{value_data}" /f'
                 res, _, _ = run_command(["reg", "add", f"{hive_name}\\{key_path}", "/v", value_name, "/t", v_type, "/d", str(value_data), "/f"])
-                if res: success = True
+                hive_success = bool(res)
         except Exception:
             continue
+        success = success or hive_success
+        # `hive=None` means HKLM first, then HKCU only as a fallback. Writing
+        # the same setting to both hives can unexpectedly override per-user
+        # policy and creates duplicate state.
+        if hive_success:
+            break
     return success
 
 def reg_delete_value(key_path, value_name, hive=None):
@@ -1725,7 +1893,7 @@ def reg_delete_key(key_path, recursive=False, hive=None):
         hive_str = "HKLM" if current_hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
         try:
             if recursive:
-                res = subprocess.run(['reg', 'delete', f'{hive_str}\{key_path}', '/f'], 
+                res = subprocess.run(['reg', 'delete', f'{hive_str}\\{key_path}', '/f'],
                                      shell=False, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 if res.returncode == 0:
                     success_any = True
@@ -1753,6 +1921,32 @@ WIN_VERSION_KEYS = ("11", "10", "8.1", "8", "7")
 WIN_VERSION_LABELS = ("Windows 11", "Windows 10", "Windows 8.1",
                       "Windows 8", "Windows 7")
 _WIN_TARGET = {"value": None}  # None = автоопределение
+
+# Иконки версий для комбобокса «Версия Windows»: папка win_icons/ рядом
+# с программой (у собранного exe — внутри _MEIPASS).
+WIN_ICON_FILES = {"11": "w11.png", "10": "w10.png",
+                  "8.1": "w8.png", "8": "w8.png", "7": "w7.png"}
+_WIN_ICON_CACHE = {}
+
+
+def win_version_icon(version):
+    """QIcon версии Windows; пустой QIcon, если файл иконки не найден."""
+    from PySide6.QtGui import QIcon
+    key = version if version in WIN_ICON_FILES else "10"
+    if key in _WIN_ICON_CACHE:
+        return _WIN_ICON_CACHE[key]
+    icon = QIcon()
+    try:
+        base = getattr(sys, "_MEIPASS", None)
+        if not base:
+            base = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base, "win_icons", WIN_ICON_FILES[key])
+        if os.path.exists(path):
+            icon = QIcon(path)
+    except Exception:
+        pass
+    _WIN_ICON_CACHE[key] = icon
+    return icon
 
 
 def detect_windows_version():
@@ -1833,6 +2027,29 @@ def save_win_target():
 
 # Применяем сохранённый выбор при старте приложения.
 load_win_target()
+
+
+# ═══════════════════════════════════════════════════════════════
+# ЗАЩИТА ФОНОВЫХ QThread-ВОРКЕРОВ ОТ РАННЕГО УНИЧТОЖЕНИЯ
+# ═══════════════════════════════════════════════════════════════
+# Пока на QThread есть Python-ссылка, C++ объект жив. Если воркер
+# хранится в локальной переменной или перезаписывается
+# (self.worker = Worker(...)), сборщик мусора уничтожает работающий
+# поток, и Qt печатает «QThread: Destroyed while thread is still
+# running» (вплоть до падения). keep_thread() держит поток в реестре
+# до сигнала finished; наружу возвращается сам поток, поэтому все
+# последующие connect()/start() работают как раньше.
+_LIVE_QTHREADS = set()
+
+
+def keep_thread(thread):
+    """Держит ссылку на поток до его завершения. Возвращает поток."""
+    try:
+        _LIVE_QTHREADS.add(thread)
+        thread.finished.connect(lambda: _LIVE_QTHREADS.discard(thread))
+    except Exception:
+        pass
+    return thread
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2555,30 +2772,11 @@ def LogonUI_Restore():
     return True
 
 def Emergency_Recovery():
-    """Экстренное восстановление: убить сторонние процессы"""
-    print_hacker_message("Экстренное восстановление: закрытие всех неизвестных процессов.")
-    if not confirm_high_risk_action(
-        "Опасная операция: экстренное завершение процессов",
-        "Будут принудительно завершены почти все процессы, кроме системного и NoVir-процессов. Несохранённые данные могут быть потеряны.",
-    ):
-        logger.log("Emergency_Recovery", "warning", "Операция отменена пользователем")
-        return False
-    if not DRY_RUN:
-        try:
-            for proc in psutil.process_iter(['pid', 'name']):
-                name = proc.info['name'].lower()
-                if name not in ['explorer.exe', 'taskmgr.exe', 'svchost.exe', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe', 'lsass.exe', 'winlogon.exe', 'novir.exe', 'python.exe']:
-                    try:
-                        proc.kill()
-                    except Exception as _e:
-                        # Expected exception, intentionally ignored
-                        pass
-            run_command(["taskkill", "/f", "/im", "explorer.exe"])
-            run_command(["explorer.exe"])
-        except Exception as _e:
-            # Expected exception, intentionally ignored
-            pass
-    return True
+    """Отключено: массовое завершение процессов может терять данные пользователя."""
+    message = "Операция отключена: завершение всех сторонних процессов может закрыть несохранённые документы и нарушить работу Windows."
+    print(f"[!] {message}")
+    logger.log("Emergency_Recovery", "warning", message)
+    return False
 
 def Disable_Test_Mode():
     """Отключение тестового режима Windows"""
@@ -2589,50 +2787,11 @@ def Disable_Test_Mode():
     return True
 
 def Replace_Sethc_Utilman():
-    """Заменить sethc и utilman"""
-    print_hacker_message("Запуск замены sethc и utilman.")
-    if not confirm_high_risk_action(
-        "Опасная операция: sethc/utilman",
-        "Будут изменены системные файлы экрана входа Windows с правами администратора.",
-    ):
-        logger.log("Replace_Sethc_Utilman", "warning", "Операция отменена пользователем")
-        return False
-    if not DRY_RUN:
-        import sys, shutil, os
-        novir_path = sys.executable
-        if not novir_path.endswith('.exe'):
-            novir_path = os.path.abspath(__file__) # For dev environment
-            
-        sys32 = r"C:\Windows\System32"
-        files = ["sethc.exe", "utilman.exe"]
-        restored = False
-        
-        for file in files:
-            target = os.path.join(sys32, file)
-            bak = target + ".bak"
-            
-            run_command(["takeown", "/f", target])
-            run_command(["icacls", target, "/grant", "administrators:F"])
-            
-            if os.path.exists(bak):
-                # Restore
-                try:
-                    safe_remove(target)
-                    shutil.move(bak, target)
-                    restored = True
-                except: pass
-            else:
-                # Replace
-                try:
-                    shutil.move(target, bak)
-                    shutil.copy(novir_path, target)
-                except: pass
-                
-        if restored:
-            print("Оригинальные файлы sethc и utilman восстановлены.")
-        else:
-            print("Файлы sethc и utilman заменены на NoVir.exe.")
-    return True
+    """Отключено: подмена средств доступности может обойти экран входа Windows."""
+    message = "Операция отключена из соображений безопасности: подмена sethc/utilman создаёт риск обхода авторизации Windows."
+    print(f"[!] {message}")
+    logger.log("Replace_Sethc_Utilman", "warning", message)
+    return False
 
 def File_Full_Access():
     """Полный доступ к файлу (Takeown & Icacls)"""
@@ -2656,18 +2815,11 @@ def File_Full_Access():
     return True
 
 def Driver_Cleanup():
-    """Очистка драйверов"""
-    print_hacker_message("Удаление всех нештатных драйверов.")
-    if not confirm_high_risk_action(
-        "Опасная операция: удаление драйверов",
-        "Будут удалены сторонние драйверы из хранилища Windows.",
-    ):
-        logger.log("Driver_Cleanup", "warning", "Операция отменена пользователем")
-        return False
-    if not DRY_RUN:
-        run_command(["pnputil", "/delete-driver", "oem*.inf", "/uninstall", "/force"])
-        print("Сторонние драйверы удалены.")
-    return True
+    """Отключено: массовое удаление OEM-драйверов может вывести устройства из строя."""
+    message = "Операция отключена: пакеты драйверов нельзя безопасно удалять общим шаблоном. Удаляйте только выбранный пакет после проверки зависимостей."
+    print(f"[!] {message}")
+    logger.log("Driver_Cleanup", "warning", message)
+    return False
 
 def Alt_N_Fix():
     """Alt+N"""
@@ -4353,52 +4505,11 @@ def SafeMode_Full_Repair():
         return False
 
 def TrustedInstaller_Restore():
-    """Восстановление прав TrustedInstaller для системных файлов"""
-    print_hacker_message("Права на системные файлы слетели? Щас верну TrustedInstaller!")
-    
-    if DRY_RUN:
-        print(f"{Colors.CYAN}[DRY-RUN] Будут восстановлены права TrustedInstaller через icacls{Colors.RESET}")
-        logger.log("TrustedInstaller_Restore", "success", "Права будут восстановлены")
-        print(f"{Colors.GREEN}[+] Права TrustedInstaller будут восстановлены{Colors.RESET}")
-        return True
-    
-    try:
-        # Системные папки для восстановления прав
-        system_paths = [
-            os.path.join(os.environ['SystemRoot'], 'System32'),
-            os.path.join(os.environ['SystemRoot'], 'SysWOW64'),
-            os.path.join(os.environ['SystemRoot'], 'winsxs'),
-        ]
-        
-        restored_count = 0
-        for path in system_paths:
-            if os.path.exists(path):
-                # Восстанавливаем права через icacls
-                ps_cmd = f"icacls '{path}' /restore '{path}\\acl_backup.txt' /T /C /Q"
-                # Это упрощенная версия - полный бэкап ACL требует больше логики
-                try:
-                    subprocess.run(["icacls", path, "/reset", "/T", "/C", "/Q"], capture_output=True)
-                    restored_count += 1
-                except Exception as _e:
-                    # Expected exception, intentionally ignored
-                    pass
-        
-        # Также восстанавливаем права для ключей реестра
-        try:
-            # Восстанавливаем владение для ключей HKLM\SOFTWARE
-            ps_cmd = "Get-Acl HKLM:\\SOFTWARE | Set-Acl HKLM:\\SOFTWARE"
-            subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
-        except Exception as _e:
-            # Expected exception, intentionally ignored
-            pass
-        
-        logger.log("TrustedInstaller_Restore", "success", f"Права восстановлены для {restored_count} папок")
-        print(f"{Colors.GREEN}[+] Права TrustedInstaller восстановлены ({restored_count} папок){Colors.RESET}")
-        return True
-    except Exception as e:
-        logger.log("TrustedInstaller_Restore", "error", str(e))
-        print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
-        return False
+    """Отключено: icacls /reset меняет, а не восстанавливает штатные ACL."""
+    message = "Операция отключена: массовый сброс ACL в системных папках может повредить защиту Windows. Для восстановления нужна проверенная резервная копия ACL."
+    print(f"[!] {message}")
+    logger.log("TrustedInstaller_Restore", "warning", message)
+    return False
 
 def EXE_Assoc():
     """Исправление ассоциаций .exe файлов (если они открываются через блокнот)"""
@@ -6049,7 +6160,6 @@ def get_repair_function_catalog():
             ("AppInit Nuke", "Удаление троянских DLL-инъекций", AppInit_DLLs_Clean),
             ("DisallowRun", "Разблокировка антивирусов", DisallowRun_Nuke),
             ("SafeBoot", "Восстановление Безопасного режима", SafeBoot_Repair),
-            ("System Restore", "Включение Восстановления системы", System_Restore_Enable),
             ("Defender Fix", "Воскрешение Защитника Windows", Defender_Enable),
             ("Win Update", "Починка служб обновлений", Windows_Update_Fix),
             ("AutoLogon OFF", "Снятие авто-входа локеров", AutoAdminLogon_Disable),
@@ -6068,14 +6178,13 @@ def get_repair_function_catalog():
         "Система": [
             ("Выйти из пользователя", "Завершение текущего сеанса.", Logoff_User),
             ("Войти в winRE", "Загрузка среды восстановления Windows.", Boot_WinRE),
-            ("Вернуть русский язык", "Восстанавливает стандартную раскладку после вирусной блокировки.", Restore_Russian_Keyboard),
             ("sfc /scannow", "Проверяет целостность системных файлов.", SFC_Scannow),
             ("Восстановить LogonUI", "Некоторые вирусы могут заменять данный файл для своих целей.", LogonUI_Restore),
-            ("Экстренное восстановление", "Экстренная функция восстановления системы при блокировках вирусами.", Emergency_Recovery),
+            ("Экстренное восстановление", "Отключено: массовое завершение процессов может закрыть несохранённые документы и нарушить работу Windows.", Emergency_Recovery),
             ("Выключить тестовый режим", "Вирусы могут использовать автозагрузку через драйвера. Выключение тестового режима отключит их.", Disable_Test_Mode),
-            ("Заменить sethc и utilman", "Заменяет программы экрана блокировки нашей утилитой. При повторном нажатии восстанавливаются.", Replace_Sethc_Utilman),
+            ("Заменить sethc и utilman", "Отключено из соображений безопасности: подмена sethc/utilman может обойти экран входа Windows.", Replace_Sethc_Utilman),
             ("Полный доступ к файлу", "Позволяет разблокировать доступ к системным и скрытым файлам.", File_Full_Access),
-            ("Очистка драйверов", "[ОПАСНО] Удаление всех нештатных драйверов.", Driver_Cleanup),
+            ("Очистка драйверов", "Отключено: массовое удаление драйверов может вывести устройства из строя.", Driver_Cleanup),
             ("Удобный запуск", "Запуск утилиты через cmd nov или контекстное меню, отключает UAC.", Easy_Launcher),
             ("Alt+N", "После ввода пароля нажмите Alt+N, и запустится утилита. Отключить в настройках.", Alt_N_Fix),
         ],
@@ -6124,7 +6233,7 @@ def get_repair_function_catalog():
             ("Print Spooler", "Очищает очередь печати и запускает службу", Print_Spooler_Fix),
             ("Self Defense", "Включает базовую самооборону процесса", Self_Defense_Engine),
             ("Safe Mode Full", "Полностью восстанавливает SafeBoot Minimal и Network", SafeMode_Full_Repair),
-            ("TrustedInstaller", "Восстанавливает права системных папок", TrustedInstaller_Restore),
+            ("TrustedInstaller", "Отключено: сброс системных ACL без проверенной резервной копии может повредить защиту Windows.", TrustedInstaller_Restore),
             ("EXE Association", "Исправляет ассоциацию .exe", EXE_Assoc),
             ("Self Protect", "Защищает файл программы атрибутами", Self_Protect),
             ("Admin Force", "Проверяет и усиливает права администратора", Admin_Force),
@@ -6166,6 +6275,7 @@ HIGH_RISK_FUNCTION_NAMES = {
     "Easy_Launcher",
     "Process_Blacklist_Kill",
     "TrustedInstaller_Restore",
+    "MSCONFIG_Unlock",
     "Policies_Nuke",
     "Temp_Deep_Clean",
     "Prefetch_Wipe",
@@ -6390,6 +6500,96 @@ if GUI_MODE:
                                  QStackedWidget, QFrame, QTabWidget, QTabBar, QTextBrowser)
     from PySide6.QtGui import QColor, QIcon, QFont, QPixmap
     from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QTimer
+
+    class WinPEBuildWorker(QThread):
+        """Run the official ADK preparation and USB-writing scripts off the UI thread."""
+        stage_changed = Signal(str)
+        result_ready = Signal(object)
+
+        def __init__(self, tools, working_directory, usb_root, usb_serial, use_bootex, parent=None):
+            super().__init__(parent)
+            self.tools = tools
+            self.working_directory = working_directory
+            self.usb_root = usb_root
+            self.usb_serial = usb_serial
+            self.use_bootex = use_bootex
+
+        def _run_adk_command(self, command):
+            comspec = os.environ.get(
+                "COMSPEC",
+                os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe"),
+            )
+            # A raw Windows command line is used intentionally: passing nested
+            # quoted paths as a QProcess argument makes cmd.exe treat \" as text.
+            command_line = f'"{comspec}" /d /c {command}'
+            return subprocess.run(
+                command_line,
+                executable=comspec,
+                cwd=os.path.dirname(self.tools["environment"]),
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="mbcs" if sys.platform == "win32" else "utf-8",
+                errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
+        def run(self):
+            output = []
+            steps = (
+                (
+                    "Подготовка файлов WinPE…",
+                    f'call "{self.tools["environment"]}" && '
+                    f'call "{self.tools["copype"]}" amd64 "{self.working_directory}"',
+                ),
+                (
+                    "Форматирование USB и запись WinPE…",
+                    f'call "{self.tools["environment"]}" && '
+                    f'call "{self.tools["make_media"]}" /UFD /F '
+                    f'"{self.working_directory}" "{self.usb_root}"'
+                    f'{" /bootex" if self.use_bootex else ""}',
+                ),
+            )
+            current_stage = steps[0][0]
+            try:
+                for stage_index, (stage, command) in enumerate(steps):
+                    current_stage = stage
+                    self.stage_changed.emit(stage)
+                    if stage_index == 1:
+                        current_drive = next((drive for drive in winpe_media.enumerate_removable_usb_drives()
+                                              if drive["root"] == self.usb_root
+                                              and drive.get("serial") == self.usb_serial), None)
+                        if current_drive is None:
+                            self.result_ready.emit({
+                                "success": False,
+                                "stage": "USB_CHANGED",
+                                "output": "USB-флешка изменилась или отключена. Запись отменена.",
+                            })
+                            return
+                    result = self._run_adk_command(command)
+                    if result.stdout:
+                        output.append(result.stdout)
+                    if result.returncode != 0:
+                        self.result_ready.emit({
+                            "success": False,
+                            "stage": stage,
+                            "output": "\n".join(output)[-12000:],
+                        })
+                        return
+                self.result_ready.emit({
+                    "success": True,
+                    "stage": "",
+                    "output": "\n".join(output)[-12000:],
+                })
+            except Exception as error:
+                output.append(str(error))
+                self.result_ready.emit({
+                    "success": False,
+                    "stage": current_stage,
+                    "output": "\n".join(output)[-12000:],
+                })
 
     def _remember_source(widget, property_name, value):
         """Return the unlocalized value retained on a Qt object."""
@@ -6912,7 +7112,7 @@ if GUI_MODE:
                 if exe_path:
                     processes_to_scan.append((r, exe_path))
 
-            self.scanner_thread = DefenderScannerThread(processes_to_scan, self)
+            self.scanner_thread = keep_thread(DefenderScannerThread(processes_to_scan, self))
             self.scanner_thread.update_threat_signal.connect(self.update_threat_ui)
             self.scanner_thread.start()
             
@@ -8058,11 +8258,15 @@ if GUI_MODE:
             req.add_header(
                 "User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             )
             data = {
                 "model": "openai/gpt-oss-120b",
                 "messages": self.memory,
-                "max_completion_tokens": 200,
+                "max_completion_tokens": 400,
+                # gpt-oss — reasoning-модель: без low размышления съедают
+                # лимит токенов, и content приходит пустым.
+                "reasoning_effort": "low",
             }
             try:
                 with urllib.request.urlopen(
@@ -8071,7 +8275,13 @@ if GUI_MODE:
                     timeout=20,
                 ) as response:
                     res = json.loads(response.read().decode("utf-8"))
-                    reply = res["choices"][0]["message"]["content"]
+                    reply = str(res["choices"][0]["message"].get("content") or "").strip()
+                    if not reply:
+                        self.response_ready.emit(
+                            "[Ошибка AI]: Пустой ответ модели. "
+                            "Повторите вопрос."
+                        )
+                        return
                     self.response_ready.emit(reply)
             except urllib.error.HTTPError as e:
                 body = ""
@@ -8208,7 +8418,7 @@ if GUI_MODE:
             
         def process_ai(self):
             self.btn_send.setEnabled(False)
-            self.worker = GroqAIWorker(self.api_key, self.memory)
+            self.worker = keep_thread(GroqAIWorker(self.api_key, self.memory))
             self.worker.response_ready.connect(self.on_response)
             self.worker.start()
             
@@ -8283,7 +8493,11 @@ if GUI_MODE:
             self.dragPos = None
             self.setWindowTitle("NoVir - Восстановление системы")
             self.setMinimumSize(1000, 700)
-            self.setWindowFlags(Qt.FramelessWindowHint) # Безрамочное окно
+            self._always_on_top_enabled = bool(load_app_settings().get("always_on_top", False))
+            window_flags = Qt.FramelessWindowHint
+            if self._always_on_top_enabled:
+                window_flags |= Qt.WindowStaysOnTopHint
+            self.setWindowFlags(window_flags) # Безрамочное окно
             self.setAttribute(Qt.WA_TranslucentBackground)
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
@@ -8332,7 +8546,8 @@ if GUI_MODE:
                     background-color: #000000;
                     color: #ffffff;
                     border: 1px solid #333333;
-                    font-size: 18px;
+                    padding: 12px;
+                    font-size: 16px;
                     font-weight: bold;
                     text-align: center;
                 }
@@ -8340,6 +8555,14 @@ if GUI_MODE:
                     background-color: #111111;
                     border: 1px solid #ffffff;
                     color: #ffffff;
+                }
+                QPushButton#DashboardTile:focus {
+                    background-color: #111111;
+                    border: 2px solid #ffffff;
+                }
+                QPushButton#DashboardTile:pressed {
+                    background-color: #222222;
+                    border: 2px solid #ffffff;
                 }
                 /* Таблицы */
                 QTableWidget, QTreeWidget {
@@ -8401,6 +8624,21 @@ if GUI_MODE:
                     border: 1px solid #ffffff;
                     padding: 6px;
                 }
+                QPushButton:focus, QLineEdit:focus, QTextEdit:focus,
+                QComboBox:focus, QTableWidget:focus, QTreeWidget:focus {
+                    border: 1px solid #ffffff;
+                    outline: 1px solid #666666;
+                }
+                QPushButton:disabled {
+                    color: #666666;
+                    border-color: #333333;
+                }
+                QToolTip {
+                    background: #111111;
+                    color: #ffffff;
+                    border: 1px solid #555555;
+                    padding: 4px;
+                }
             ''')
 
             # Главный контейнер
@@ -8419,7 +8657,7 @@ if GUI_MODE:
             top_layout = QHBoxLayout(self.top_bar)
             top_layout.setContentsMargins(15, 0, 15, 0)
             
-            self.btn_back = QPushButton("< НАЗАД")
+            self.btn_back = QPushButton(language_manager.translate("< НАЗАД"))
             self.btn_back.setFixedSize(100, 30)
             self.btn_back.setStyleSheet("border: none; font-size: 14px;")
             self.btn_back.clicked.connect(lambda: self.switch_page(0))
@@ -8433,7 +8671,7 @@ if GUI_MODE:
             
             top_layout.addStretch()
             
-            self.btn_ai = QPushButton("ИИ АССИСТЕНТ")
+            self.btn_ai = QPushButton(language_manager.translate("ИИ АССИСТЕНТ"))
             self.btn_ai.setFixedSize(120, 30)
             self.btn_ai.setStyleSheet("border: 1px solid #00e87a; color: #00e87a; font-size: 12px; font-weight: bold;")
             self.btn_ai.clicked.connect(self.open_global_ai_chat)
@@ -8519,7 +8757,7 @@ if GUI_MODE:
             separator.setStyleSheet("background: #2a2a2a; border: none;")
             bottom_layout.addWidget(separator)
 
-            self.btn_quick_actions = QPushButton("ЕЩЁ  ▾")
+            self.btn_quick_actions = QPushButton(language_manager.translate("ЕЩЁ  ▾"))
             self.btn_quick_actions.setFixedSize(88, 36)
             self.btn_quick_actions.setStyleSheet(
                 "QPushButton { background: #111; color: #aaa; border: 1px solid #2a2a2a; "
@@ -8533,22 +8771,30 @@ if GUI_MODE:
                 "QMenu::item { padding: 8px 20px; font-size: 12px; }"
                 "QMenu::item:selected { background: #222; color: #fff; }"
             )
-            fix_all_action = quick_actions_menu.addAction("ПОЧИНИТЬ ВСЁ")
+            fix_all_action = quick_actions_menu.addAction(language_manager.translate("ПОЧИНИТЬ ВСЁ"))
             fix_all_action.triggered.connect(lambda checked=False: self.run_fix_all())
-            audit_action = quick_actions_menu.addAction("ЖУРНАЛ")
+            audit_action = quick_actions_menu.addAction(language_manager.translate("ЖУРНАЛ"))
             audit_action.triggered.connect(lambda checked=False: self.show_audit_log())
-            rollback_action = quick_actions_menu.addAction("ОТКАТ")
+            rollback_action = quick_actions_menu.addAction(language_manager.translate("ОТКАТ"))
             rollback_action.triggered.connect(lambda checked=False: self.show_rollback_dialog())
-            update_action = quick_actions_menu.addAction("ОБНОВИТЬ")
+            update_action = quick_actions_menu.addAction(language_manager.translate("ОБНОВИТЬ"))
             update_action.triggered.connect(lambda checked=False: self.check_for_updates(manual=True))
             backup_action = quick_actions_menu.addAction(language_manager.translate("БЭКАПЫ"))
             backup_action.triggered.connect(lambda checked=False: self.show_backup_manager())
-            community_action = quick_actions_menu.addAction("СООБЩЕСТВО")
+            community_action = quick_actions_menu.addAction(language_manager.translate("СООБЩЕСТВО"))
             community_action.triggered.connect(lambda checked=False: self.switch_page(8))
+            self._quick_action_refs = {
+                "fix_all": fix_all_action,
+                "audit": audit_action,
+                "rollback": rollback_action,
+                "update": update_action,
+                "backups": backup_action,
+                "community": community_action,
+            }
             self.btn_quick_actions.setMenu(quick_actions_menu)
             bottom_layout.addWidget(self.btn_quick_actions)
 
-            bottom_support_btn = QPushButton("♥  ПОДДЕРЖАТЬ АВТОРА")
+            bottom_support_btn = QPushButton(language_manager.translate("♥  ПОДДЕРЖАТЬ АВТОРА"))
             bottom_support_btn.setFixedHeight(36)
             bottom_support_btn.setStyleSheet(
                 "QPushButton { border: 1px solid #1e1e1e; color: #555; font-size: 11px; "
@@ -8609,10 +8855,17 @@ if GUI_MODE:
             req.add_header("apikey", SUPABASE_KEY)
             req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
             req.add_header("Content-Type", "application/json")
+            # Cloudflare (прокси Supabase/Groq) отдаёт "403 error code: 1010"
+            # на urllib-UX без User-Agent — шлём полноценный Chrome UA.
+            req.add_header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            req.add_header("Accept", "application/json")
 
             data = json.dumps(body).encode("utf-8") if body else None
             try:
-                with urllib.request.urlopen(req, data=data, timeout=12) as resp:
+                with urllib.request.urlopen(req, data=data, timeout=20) as resp:
                     raw = resp.read().decode("utf-8")
                     return json.loads(raw) if raw else []
             except urllib.error.HTTPError as e:
@@ -8774,18 +9027,23 @@ if GUI_MODE:
                 "https://api.groq.com/openai/v1/chat/completions", method="POST")
             req.add_header("Authorization", "Bearer " + api_key)
             req.add_header("Content-Type", "application/json")
-            # Как в основном AI-чате: без User-Agent Cloudflare/Groq может
-            # отклонять запрос, из-за чего бот «не отвечает».
+            # Как в основном AI-чате: без User-Agent Cloudflare (error 1010)
+            # отклоняет запрос, из-за чего бот «не отвечает».
             req.add_header(
                 "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
             data = {"model": "openai/gpt-oss-120b", "messages": memory,
-                    "max_completion_tokens": 180}
+                    "max_completion_tokens": 400, "reasoning_effort": "low"}
             try:
                 with urllib.request.urlopen(
                         req, data=json.dumps(data).encode("utf-8"), timeout=25) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
-                    return str(res["choices"][0]["message"]["content"]).strip()[:480]
+                    answer = str(
+                        res["choices"][0]["message"].get("content") or "").strip()[:480]
+                    # Пустой content (токены ушли в reasoning) = недоступен,
+                    # чтобы в чат не ушло пустое сообщение бота.
+                    return answer or None
             except urllib.error.HTTPError as e:
                 body = ""
                 try:
@@ -8836,6 +9094,7 @@ if GUI_MODE:
         # ── NoVir Community: страница чата ──
         def create_community_page(self):
             from PySide6.QtCore import QTimer
+            tr = language_manager.translate
 
             page = QFrame()
             page.setStyleSheet("QFrame { background-color: #000000; color: #ffffff; }")
@@ -8928,25 +9187,25 @@ if GUI_MODE:
             def _update_auth_ui():
                 sess = self._cm_session()
                 if sess:
-                    lbl_who.setText("Вы: " + sess["username"])
+                    lbl_who.setText(tr("Вы: %s") % sess["username"])
                     btn_login.hide()
                     btn_reg.hide()
                     btn_logout.show()
-                    inp.setPlaceholderText("Сообщение от имени " + sess["username"] + "...")
+                    inp.setPlaceholderText(tr("Сообщение от имени %s...") % sess["username"])
                 else:
-                    lbl_who.setText("Гость")
+                    lbl_who.setText(tr("Гость"))
                     btn_login.show()
                     btn_reg.show()
                     btn_logout.hide()
-                    inp.setPlaceholderText("Сообщение (гость, лимит 5/час)...")
+                    inp.setPlaceholderText(tr("Сообщение (гость, лимит 5/час)..."))
                 _update_rate()
 
             def _update_rate():
                 left, limit, logged = self._cm_rate_left()
-                who = self._cm_session()["username"] if logged else "Гость"
-                state = "✓ можно писать" if left > 0 else "⌛ лимит исчерпан, подожди до конца часа"
+                who = self._cm_session()["username"] if logged else tr("Гость")
+                state = tr("✓ можно писать") if left > 0 else tr("⌛ лимит исчерпан, подожди до конца часа")
                 lbl_rate.setText(
-                    f"{who} · лимит {limit} сообщ./час · осталось {left} · {state}")
+                    tr("%s · лимит %s сообщ./час · осталось %s · %s") % (who, limit, left, state))
 
             # ── фоновая отправка ──
             class _CmSendWorker(QThread):
@@ -9095,7 +9354,7 @@ if GUI_MODE:
                 line_map = []
                 new_mentions = []
                 for m in reversed(rows):
-                    who = str(m.get("username") or "Гость")
+                    who = str(m.get("username") or tr("Гость"))
                     body = str(m.get("body") or "").replace("\n", " ")
                     ts = str(m.get("created_at") or "")
                     try:
@@ -9125,7 +9384,7 @@ if GUI_MODE:
                 # ── всплывающее уведомление «тебя упомянули» ──
                 if new_mentions and not refs.get("first_seen_load"):
                     who0, txt0 = new_mentions[0]
-                    lbl_notice.setText("⚡ ТЕБЯ УПОМЯНУЛ " + who0 + ": " + txt0)
+                    lbl_notice.setText(tr("⚡ ТЕБЯ УПОМЯНУЛ %s: %s") % (who0, txt0))
                     lbl_notice.show()
                     QTimer.singleShot(12000, lbl_notice.hide)
                 for m in rows:
@@ -9144,11 +9403,11 @@ if GUI_MODE:
                 if not self._cm_is_deletable(m):
                     QMessageBox.information(
                         self, "Community",
-                        "Удалить можно только своё сообщение\nи только в течение %d минут." % self.CM_DELETE_MINUTES)
+                        tr("Удалить можно только своё сообщение\nи только в течение %d минут.") % self.CM_DELETE_MINUTES)
                     return
                 if QMessageBox.question(self, "Community", "Удалить своё сообщение?") != QMessageBox.Yes:
                     return
-                w = _CmDeleteWorker(self, str(m.get("id") or ""))
+                w = keep_thread(_CmDeleteWorker(self, str(m.get("id") or "")))
 
                 def on_del(res):
                     if res.get("ok"):
@@ -9167,25 +9426,25 @@ if GUI_MODE:
                 if not (0 <= idx < len(line_map)) or not line_map[idx]:
                     return
                 m = line_map[idx]
-                who = str(m.get("username") or "Гость")
+                who = str(m.get("username") or tr("Гость"))
                 menu = QMenu(chat)
                 menu.setStyleSheet(
                     "QMenu { background: #000; color: #fff; border: 1px solid #fff; }"
                     " QMenu::item { padding: 6px 18px; }"
                     " QMenu::item:selected { background: #fff; color: #000; }")
-                a_reply = menu.addAction("ОТВЕТИТЬ")
-                a_mention = menu.addAction("УПОМЯНУТЬ @" + who)
-                a_copy = menu.addAction("КОПИРОВАТЬ ТЕКСТ")
+                a_reply = menu.addAction(tr("ОТВЕТИТЬ"))
+                a_mention = menu.addAction(tr("УПОМЯНУТЬ @%s") % who)
+                a_copy = menu.addAction(tr("КОПИРОВАТЬ ТЕКСТ"))
                 a_del = None
                 if who != "NOVIR_AI" and self._cm_is_deletable(m):
                     a_del = menu.addAction(
-                        "УДАЛИТЬ (осталось %d мин)" % self._cm_minutes_left(m))
+                        tr("УДАЛИТЬ (осталось %d мин)") % self._cm_minutes_left(m))
                 act = menu.exec(chat.mapToGlobal(pos))
                 if act is None:
                     return
                 if act is a_reply:
                     refs["reply"] = {"user": who, "text": str(m.get("body") or "")[:80]}
-                    lbl_reply.setText("Ответ " + who + ": " + refs["reply"]["text"][:60])
+                    lbl_reply.setText(tr("Ответ %s: %s") % (who, refs["reply"]["text"][:60]))
                     lbl_reply.show()
                     btn_reply_cancel.show()
                     inp.setFocus()
@@ -9210,7 +9469,7 @@ if GUI_MODE:
             def _refresh_now():
                 if refs["ref_w"] is not None and refs["ref_w"].isRunning():
                     return
-                w = _CmRefreshWorker(self)
+                w = keep_thread(_CmRefreshWorker(self))
                 w.done.connect(_render)
                 w.start()
                 refs["ref_w"] = w
@@ -9234,9 +9493,9 @@ if GUI_MODE:
                 rep = refs.get("reply")
                 ai_asked = text.lower().startswith("@novir_ai")
                 if ai_asked:
-                    lbl_notice.setText("NOVIR AI думает над ответом...")
+                    lbl_notice.setText(tr("NOVIR AI думает над ответом..."))
                     lbl_notice.show()
-                w = _CmSendWorker(self, text, self._cm_session(), self._cm_device_id(), rep)
+                w = keep_thread(_CmSendWorker(self, text, self._cm_session(), self._cm_device_id(), rep))
 
                 def on_done(res):
                     btn_send.setEnabled(True)
@@ -9248,7 +9507,7 @@ if GUI_MODE:
                         _update_rate()
                         _refresh_now()
                     else:
-                        QMessageBox.information(self, "Community", res.get("msg", "Ошибка отправки."))
+                        QMessageBox.information(self, "Community", res.get("msg", tr("Ошибка отправки.")))
 
                 w.done.connect(on_done)
                 w.start()
@@ -9289,10 +9548,10 @@ if GUI_MODE:
                     name = u.text().strip()
                     pwd = p.text()
                     if not name or not pwd:
-                        err.setText("Заполни имя и пароль.")
+                        err.setText(tr("Заполни имя и пароль."))
                         return
                     btn_go.setEnabled(False)
-                    err.setText("Проверка...")
+                    err.setText(tr("Проверка..."))
 
                     class _LoginW(QThread):
                         done = Signal(object)
@@ -9320,9 +9579,9 @@ if GUI_MODE:
                                 _refresh_now()
                                 dlg.accept()
                             else:
-                                err.setText(res.get("err", "Ошибка."))
+                                err.setText(tr(res.get("err", "Ошибка.")))
 
-                    lw = _LoginW()
+                    lw = keep_thread(_LoginW())
                     lw.done.connect(lw.on_res)
                     lw.start()
                     dlg._w = lw
@@ -9375,16 +9634,16 @@ if GUI_MODE:
                     name = u.text().strip()
                     pwd = p.text()
                     if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", name):
-                        err.setText("Имя: 3–20 символов, только латиница, цифры и _.")
+                        err.setText(tr("Имя: 3–20 символов, только латиница, цифры и _."))
                         return
                     if len(pwd) < 4:
-                        err.setText("Пароль от 4 символов.")
+                        err.setText(tr("Пароль от 4 символов."))
                         return
                     if pwd != p2.text():
-                        err.setText("Пароли не совпадают.")
+                        err.setText(tr("Пароли не совпадают."))
                         return
                     btn_go.setEnabled(False)
-                    err.setText("Создание аккаунта...")
+                    err.setText(tr("Создание аккаунта..."))
 
                     class _RegW(QThread):
                         done = Signal(object)
@@ -9420,11 +9679,11 @@ if GUI_MODE:
                                 dlg.accept()
                                 QMessageBox.information(
                                     self, "Community",
-                                    f"Аккаунт «{name}» создан!\nТеперь лимит — 60 сообщений в час.")
+                                    tr("Аккаунт «%s» создан!\nТеперь лимит — 60 сообщений в час.") % name)
                             else:
-                                err.setText(res.get("err", "Ошибка."))
+                                err.setText(tr(res.get("err", "Ошибка.")))
 
-                    rw = _RegW()
+                    rw = keep_thread(_RegW())
                     rw.done.connect(rw.on_res)
                     rw.start()
                     dlg._w = rw
@@ -9446,6 +9705,9 @@ if GUI_MODE:
             timer.timeout.connect(lambda: _refresh_now())
             timer.start()
 
+            # Динамические строки (гость/пользователь, лимит) переводятся
+            # повторно при смене языка — см. change_language.
+            page.retranslate_ui = _update_auth_ui
             _update_auth_ui()
             _refresh_now()
             return page
@@ -9472,14 +9734,105 @@ if GUI_MODE:
             for position, (name, idx) in zip(positions, tiles):
                 btn = QPushButton(name)
                 btn.setObjectName("DashboardTile")
-                btn.setFixedSize(250, 150)
+                from PySide6.QtWidgets import QSizePolicy
+                btn.setMinimumSize(230, 128)
+                btn.setMaximumSize(300, 156)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 btn.clicked.connect(lambda checked=False, x=idx: self.switch_page(x))
                 grid.addWidget(btn, *position)
+            for column in range(3):
+                grid.setColumnStretch(column, 1)
+            for row in range(2):
+                grid.setRowStretch(row, 1)
 
             layout.addStretch(1)
             layout.addLayout(grid)
+            layout.addSpacing(10)
+
+            # Полоса состояния дашборда: только целевая Windows (авто- или
+            # ручной выбор из настроек) — локальные данные, без опросов.
+            status_row = QHBoxLayout()
+            status_row.setSpacing(10)
+            status_row.addStretch()
+            cell = QFrame()
+            # #StatusCell — чтобы рамка ячейки не «наследовалась»
+            # текстовыми QLabel (QLabel наследует QFrame).
+            cell.setObjectName("StatusCell")
+            cell.setStyleSheet(
+                "QFrame#StatusCell { background-color: #000000;"
+                " border: 1px solid #333333; }")
+            cell_lay = QHBoxLayout(cell)
+            cell_lay.setContentsMargins(14, 10, 12, 10)
+            cell_lay.setSpacing(12)
+
+            # Иконка версии в рамке-контейнере
+            self._status_icon = QLabel()
+            self._status_icon.setFixedSize(38, 38)
+            self._status_icon.setAlignment(Qt.AlignCenter)
+            self._status_icon.setStyleSheet(
+                "QLabel { background-color: #0a0a0a; border: 1px solid #2a2a2a; }")
+            cell_lay.addWidget(self._status_icon)
+            cell_lay.setAlignment(self._status_icon, Qt.AlignVCenter)
+
+            # Разделитель — как в нижней панели приложения
+            sep_line = QFrame()
+            sep_line.setFixedWidth(1)
+            sep_line.setFixedHeight(30)
+            sep_line.setStyleSheet("background: #2a2a2a; border: none;")
+            cell_lay.addWidget(sep_line)
+            cell_lay.setAlignment(sep_line, Qt.AlignVCenter)
+
+            text_lay = QVBoxLayout()
+            text_lay.setSpacing(3)
+            self._status_title = QLabel()
+            self._status_title.setStyleSheet(
+                "border: none; background: transparent;"
+                " color: #666666; font-size: 9px; font-weight: bold;"
+                " letter-spacing: 1px;"
+                " font-family: Consolas, 'Courier New', monospace;")
+            self._status_value = QLabel()
+            self._status_value.setStyleSheet(
+                "border: none; background: transparent;"
+                " color: #ffffff; font-size: 15px; font-weight: bold;"
+                " font-family: Consolas, 'Courier New', monospace;")
+            text_lay.addWidget(self._status_value)
+            text_lay.addWidget(self._status_title)
+            cell_lay.addLayout(text_lay)
+            cell_lay.setAlignment(text_lay, Qt.AlignVCenter)
+
+            # Режим выбора — пилюля справа
+            self._status_mode = QLabel()
+            self._status_mode.setStyleSheet(
+                "QLabel { color: #aaaaaa; background-color: #111111;"
+                " border: 1px solid #333333; padding: 4px 10px;"
+                " font-size: 10px; font-weight: bold; letter-spacing: 1px;"
+                " font-family: Consolas, 'Courier New', monospace; }")
+            cell_lay.addWidget(self._status_mode)
+            cell_lay.setAlignment(self._status_mode, Qt.AlignVCenter)
+
+            status_row.addWidget(cell)
+            status_row.addStretch()
+            layout.addLayout(status_row)
             layout.addStretch(1)
+            self._status_refresh()
             return page
+
+        # ── полоса состояния дашборда ──
+
+        def _status_refresh(self):
+            """Обновляет строку цели Windows на дашборде (локальные данные)."""
+            tr = language_manager.translate
+            ver = win_target()
+            auto = _WIN_TARGET["value"] is None
+            self._status_title.setText(tr("Версия винды").upper())
+            self._status_value.setText("WINDOWS %s" % ver)
+            self._status_mode.setText(
+                (tr("Авто") if auto else tr("Вручную")).upper())
+            # Гладкое масштабирование: QIcon.pixmap даёт «лесенку».
+            pm = win_version_icon(ver).pixmap(80, 80)
+            pm.setDevicePixelRatio(1.0)
+            self._status_icon.setPixmap(
+                pm.scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         def _ensure_page(self, index):
             """Лениво строит страницу при первом показе и подставляет её
@@ -9530,22 +9883,32 @@ if GUI_MODE:
             # Гарантированно строим нужную страницу до показа.
             self._ensure_page(index)
             self.main_content.setCurrentIndex(index)
+            self._page_idx = index
             if index == 0:
                 self.btn_back.hide()
-                self.title_label.setText("NOVIR")
+                self._status_refresh()
             else:
                 self.btn_back.show()
-                titles = {
-                    1: "АВТОЗАГРУЗКА",
-                    2: "ПРОВОДНИК",
-                    3: "СНЯТИЕ ОГРАНИЧЕНИЙ",
-                    4: "ДОП. ВОЗМОЖНОСТИ",
-                    5: "АНЛОКЕР",
-                    6: "НАСТРОЙКИ",
-                    7: language_manager.translate("УМНАЯ ДИАГНОСТИКА"),
-                    8: "СООБЩЕСТВО",
-                }
-                self.title_label.setText(titles.get(index, "NOVIR"))
+            self._apply_page_title()
+
+        def _apply_page_title(self):
+            """Заголовок верхней панели для текущей страницы (переводится)."""
+            index = getattr(self, "_page_idx", 0)
+            if index == 0:
+                self.title_label.setText("NOVIR")
+                return
+            tr = language_manager.translate
+            titles = {
+                1: tr("АВТОЗАГРУЗКА"),
+                2: tr("ПРОВОДНИК"),
+                3: tr("СНЯТИЕ ОГРАНИЧЕНИЙ"),
+                4: tr("ДОП. ВОЗМОЖНОСТИ"),
+                5: tr("АНЛОКЕР"),
+                6: tr("НАСТРОЙКИ"),
+                7: tr("УМНАЯ ДИАГНОСТИКА"),
+                8: tr("СООБЩЕСТВО"),
+            }
+            self.title_label.setText(titles.get(index, "NOVIR"))
 
 
         def show_support_dialog(self):
@@ -9716,7 +10079,8 @@ if GUI_MODE:
                     background-color: #000000;
                     color: #ffffff;
                     border: 1px solid #333333;
-                    font-size: 18px;
+                    padding: 12px;
+                    font-size: 16px;
                     font-weight: bold;
                     text-align: center;
                 }
@@ -9724,6 +10088,8 @@ if GUI_MODE:
                     background-color: #111111;
                     border: 1px solid #ffffff;
                 }
+                QPushButton#DashboardTile:focus { background-color: #111111; border: 2px solid #ffffff; }
+                QPushButton#DashboardTile:pressed { background-color: #222222; border: 2px solid #ffffff; }
                 QTableWidget, QTreeWidget {
                     background-color: #000000;
                     alternate-background-color: #0a0a0a;
@@ -9776,8 +10142,9 @@ if GUI_MODE:
                     QWidget { background-color: #000000; color: #ffffff; font-family: Consolas; font-size: 13px; }
                     QPushButton { background-color: #111111; color: #ffffff; border: 1px solid #222222; padding: 6px 14px; }
                     QPushButton:hover { background-color: #222222; color: #ffffff; }
-                    QPushButton#DashboardTile { background-color: #000000; color: #ffffff; border: 1px solid #222222; font-size: 18px; font-weight: bold; }
-                    QPushButton#DashboardTile:hover { background-color: #111111; border-color: #ffffff; color: #ffffff; }
+                    QPushButton#DashboardTile { background-color: #000000; color: #ffffff; border: 1px solid #222222; padding: 12px; font-size: 16px; font-weight: bold; }
+                    QPushButton#DashboardTile:hover, QPushButton#DashboardTile:focus { background-color: #111111; border: 2px solid #ffffff; color: #ffffff; }
+                    QPushButton#DashboardTile:pressed { background-color: #222222; }
                     QTableWidget, QTreeWidget { background-color: #000000; color: #ffffff; gridline-color: #222222; border: 1px solid #222222; selection-background-color: #222222; selection-color: #fff; }
                     QHeaderView::section { background-color: #111111; color: #ffffff; border: 1px solid #222222; padding: 8px; font-weight: bold; }
                     QTabBar::tab { background: #000000; color: #888888; border: 1px solid #222222; padding: 10px 20px; }
@@ -9793,8 +10160,9 @@ if GUI_MODE:
                     QWidget { background-color: #000000; color: #ffffff; font-family: Consolas; font-size: 13px; }
                     QPushButton { background-color: #222222; color: #ffffff; border: 1px solid #2a2a2a; padding: 6px 14px; }
                     QPushButton:hover { background-color: #333333; }
-                    QPushButton#DashboardTile { background-color: #000000; color: #ffffff; border: 1px solid #2a2a2a; font-size: 18px; font-weight: bold; }
-                    QPushButton#DashboardTile:hover { background-color: #222222; border-color: #aaaaaa; }
+                    QPushButton#DashboardTile { background-color: #000000; color: #ffffff; border: 1px solid #2a2a2a; padding: 12px; font-size: 16px; font-weight: bold; }
+                    QPushButton#DashboardTile:hover, QPushButton#DashboardTile:focus { background-color: #222222; border: 2px solid #aaaaaa; }
+                    QPushButton#DashboardTile:pressed { background-color: #333333; }
                     QTableWidget, QTreeWidget { background-color: #000000; color: #ffffff; gridline-color: #333333; border: 1px solid #333333; selection-background-color: #444444; selection-color: #fff; }
                     QHeaderView::section { background-color: #222222; color: #ffffff; border: 1px solid #333333; padding: 8px; }
                     QTabBar::tab { background: #222222; color: #888888; border: 1px solid #333333; padding: 10px 20px; }
@@ -9810,8 +10178,9 @@ if GUI_MODE:
                     QWidget { background-color: rgba(20, 20, 25, 180); color: #ffffff; font-family: Consolas; font-size: 13px; }
                     QPushButton { background-color: rgba(30, 30, 40, 180); color: #ffffff; border: 1px solid rgba(255,255,255,80); padding: 6px 14px; }
                     QPushButton:hover { background-color: rgba(60, 60, 80, 200); }
-                    QPushButton#DashboardTile { background-color: rgba(20,20,30,160); color: #ffffff; border: 1px solid rgba(255,255,255,60); font-size: 18px; }
-                    QPushButton#DashboardTile:hover { border-color: rgba(255,255,255,200); }
+                    QPushButton#DashboardTile { background-color: rgba(20,20,30,160); color: #ffffff; border: 1px solid rgba(255,255,255,60); padding: 12px; font-size: 16px; }
+                    QPushButton#DashboardTile:hover, QPushButton#DashboardTile:focus { border: 2px solid rgba(255,255,255,220); }
+                    QPushButton#DashboardTile:pressed { background-color: rgba(60,60,70,200); }
                     QTableWidget, QTreeWidget { background-color: rgba(15,15,20,160); color: #ffffff; gridline-color: rgba(255,255,255,30); border: 1px solid rgba(255,255,255,30); selection-background-color: rgba(255,255,255,80); }
                     QHeaderView::section { background-color: rgba(20,20,30,160); color: #ffffff; border: 1px solid rgba(255,255,255,30); padding: 8px; }
                     QTabBar::tab { background: rgba(20,20,25,160); color: #aaaaaa; border: 1px solid rgba(255,255,255,30); padding: 10px 20px; }
@@ -10216,7 +10585,7 @@ if GUI_MODE:
                 placeholder.setForeground(QColor('#888888'))
                 self.table_scheduler.setItem(0, 0, placeholder)
 
-                self._scheduler_loader = SchedulerLoader(self.get_scheduler_startup)
+                self._scheduler_loader = keep_thread(SchedulerLoader(self.get_scheduler_startup))
                 self._scheduler_loader.data_signal.connect(
                     self._on_scheduler_loaded, Qt.QueuedConnection
                 )
@@ -10251,7 +10620,7 @@ if GUI_MODE:
                         normalized.append(tuple(entry[:5]))
                     elif isinstance(entry, (list, tuple)) and len(entry) == 2:
                         name, val = entry[0], entry[1]
-                        source = "Системная" if name.startswith("\Microsoft") else "Пользовательская"
+                        source = "Системная" if name.startswith("\\Microsoft") else "Пользовательская"
                         normalized.append((name, val, "", "", source))
                     else:
                         continue
@@ -11484,9 +11853,12 @@ if GUI_MODE:
                         from contextlib import redirect_stdout
                         buf = io.StringIO()
                         with redirect_stdout(buf):
-                            fn()
+                            action_result = fn()
                         out = buf.getvalue().strip()
-                        results.append(f"✓ {getattr(fn, '__name__', str(fn))}: выполнено")
+                        status = language_manager.translate(
+                            "Действие пропущено или не выполнено" if action_result is False else "Выполнено"
+                        )
+                        results.append(f"{'!' if action_result is False else '✓'} {getattr(fn, '__name__', str(fn))}: {status}")
                     except Exception as ex:
                         results.append(f"✗ {getattr(fn, '__name__', str(fn))}: {ex}")
                 return "\n".join(results)
@@ -11645,7 +12017,7 @@ if GUI_MODE:
                 ("Отчёт автозагрузки", "Считает записи автозапуска в реестре и папке Startup.", self.scan_startup_report),
                 ("Сетевые порты", "Показывает слушающие порты и активные сетевые соединения.", self.check_network_ports),
                 ("Перезапустить Explorer", "Перезапускает оболочку Windows после подтверждения.", self.restart_explorer),
-                ("WinRE / USB Boot", "Загрузка в среду восстановления (WinRE) и создание загрузочных накопителей.", self.show_winre_usb_window),
+                ("Загрузочная WinPE-флешка", "Создать загрузочную WinPE-флешку или перезагрузиться в WinRE.", self.show_winre_usb_window),
                 ("Корреляция Malware", "Сравнение процессов с задачами планировщика и службами.", self.show_malware_correlation_window),
                 ("Восстановление драйверов", "Пакетная установка/восстановление драйверов из резервной копии (.inf).", self.show_driver_recovery_window),
             ]
@@ -11895,7 +12267,7 @@ if GUI_MODE:
                     res = do_scan()
                     self.scan_finished.emit(res)
 
-            self.scan_thread = ScanThread()
+            self.scan_thread = keep_thread(ScanThread())
             self.scan_thread.scan_finished.connect(self._on_scan_done)
             self.scan_thread.start()
 
@@ -12535,7 +12907,13 @@ if GUI_MODE:
             layout.addWidget(table)
             
             try:
-                tasks = subprocess.check_output('schtasks /query /fo csv /nh', shell=True, text=True, errors='ignore')
+                tasks = subprocess.check_output(
+                    ["schtasks", "/query", "/fo", "csv", "/nh"],
+                    shell=False,
+                    text=True,
+                    errors="ignore",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
                 for line in tasks.splitlines()[:15]:
                     if line.strip():
                         r = table.rowCount()
@@ -12568,7 +12946,12 @@ if GUI_MODE:
                 folder = QFileDialog.getExistingDirectory(dlg, "Выберите папку с драйверами")
                 if folder:
                     try:
-                        subprocess.Popen(f'pnputil /add-driver "{folder}\\\*.inf" /subdirs /install', shell=True)
+                        driver_pattern = os.path.join(folder, "*.inf")
+                        subprocess.Popen(
+                            ["pnputil", "/add-driver", driver_pattern, "/subdirs", "/install"],
+                            shell=False,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                        )
                         QMessageBox.information(dlg, "Готово", "Процесс установки драйверов запущен.")
                         dlg.accept()
                     except Exception as e:
@@ -12580,28 +12963,244 @@ if GUI_MODE:
             dlg.exec_()
 
         def show_winre_usb_window(self):
-            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QMessageBox
-            import subprocess
-            dlg = QDialog(self)
-            dlg.setWindowTitle("WinRE / USB Boot")
-            dlg.resize(400, 200)
+            from PySide6.QtWidgets import (
+                QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                QMessageBox, QComboBox, QCheckBox,
+            )
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            class WinPEBuildDialog(QDialog):
+                def closeEvent(dialog_self, event):
+                    if dialog_self.property("winpe_build_active"):
+                        event.ignore()
+                        return
+                    super().closeEvent(event)
+
+            dlg = WinPEBuildDialog(self)
+            dlg.setWindowTitle(language_manager.translate("Создание WinPE USB"))
+            dlg.resize(610, 430)
             layout = QVBoxLayout(dlg)
-            info = QLabel("Здесь можно перезагрузиться в среду восстановления Windows (WinRE) или подготовить USB.")
+            info = QLabel(language_manager.translate(
+                "WinPE создаётся для компьютеров x64 и не содержит приложение NoVir."
+            ))
             info.setWordWrap(True)
             layout.addWidget(info)
-            
+
+            bootex_checkbox = QCheckBox(language_manager.translate(
+                "Создавать носитель с загрузчиком UEFI CA 2023 (ADK от декабря 2024 или новее)"
+            ))
+            bootex_checkbox.setChecked(True)
+            bootex_checkbox.setToolTip(language_manager.translate(
+                "Выбор UEFI CA 2023 зависит от Secure Boot целевого компьютера."
+            ))
+            layout.addWidget(bootex_checkbox)
+
+            tools_status = QLabel()
+            tools_status.setWordWrap(True)
+            layout.addWidget(tools_status)
+
+            drive_row = QHBoxLayout()
+            drive_label = QLabel(language_manager.translate("USB-накопитель"))
+            drive_row.addWidget(drive_label)
+            drive_combo = QComboBox()
+            drive_combo.setMinimumWidth(330)
+            drive_row.addWidget(drive_combo, 1)
+            refresh_button = QPushButton(language_manager.translate("Обновить список USB"))
+            drive_row.addWidget(refresh_button)
+            layout.addLayout(drive_row)
+
+            status = QLabel()
+            status.setWordWrap(True)
+            status.setStyleSheet("color: #aaaaaa; padding: 5px 0;")
+            layout.addWidget(status)
+
+            tool_cache = [None]
+            def refresh_usb_list():
+                tool_cache[0] = winpe_media.find_adk_tools()
+                drives = winpe_media.enumerate_removable_usb_drives()
+                previous_drive = drive_combo.currentData()
+                drive_combo.clear()
+                for drive in drives:
+                    size_gib = drive["total"] / (1024 ** 3)
+                    label = f'{drive["root"]}  {drive["label"]}  {size_gib:.1f} GB'
+                    drive_combo.addItem(label, drive["root"])
+                    drive_combo.setItemData(drive_combo.count() - 1, drive["serial"], Qt.UserRole + 1)
+                if previous_drive:
+                    previous_index = drive_combo.findData(previous_drive)
+                    if previous_index >= 0:
+                        drive_combo.setCurrentIndex(previous_index)
+                if tool_cache[0]:
+                    tools_status.setText(language_manager.translate("Инструменты ADK и WinPE найдены."))
+                else:
+                    tools_status.setText(language_manager.translate(
+                        "Инструменты Windows ADK и WinPE не найдены. Установите Windows ADK и отдельное дополнение Windows PE."
+                    ))
+                if not drives:
+                    status.setText(language_manager.translate(
+                        "USB-флешки не найдены. Подключите съёмную флешку и обновите список."
+                    ))
+                else:
+                    status.setText("")
+                create_button.setEnabled(bool(tool_cache[0]) and bool(drives))
+
+            refresh_button.clicked.connect(refresh_usb_list)
+
+            install_adk_button = QPushButton(language_manager.translate("Открыть страницу установки ADK"))
+            install_adk_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl(winpe_media.ADK_INSTALL_URL))
+            )
+            layout.addWidget(install_adk_button)
+
+            create_button = QPushButton(language_manager.translate("Создать загрузочную WinPE-флешку"))
+            create_button.setMinimumHeight(42)
+
+            def create_bootable_usb():
+                if getattr(self, "_winpe_worker", None) is not None and self._winpe_worker.isRunning():
+                    return
+                tools = winpe_media.find_adk_tools()
+                if not tools:
+                    refresh_usb_list()
+                    QMessageBox.warning(
+                        dlg,
+                        language_manager.translate("Ошибка"),
+                        language_manager.translate(
+                            "Инструменты Windows ADK и WinPE не найдены. Установите Windows ADK и отдельное дополнение Windows PE."
+                        ),
+                    )
+                    return
+                drive_root = drive_combo.currentData()
+                drive_serial = drive_combo.currentData(Qt.UserRole + 1)
+                if not drive_root:
+                    return
+                drive = next((item for item in winpe_media.enumerate_removable_usb_drives()
+                              if item["root"] == drive_root
+                              and item.get("serial") == drive_serial), None)
+                if drive is None:
+                    refresh_usb_list()
+                    QMessageBox.warning(dlg, language_manager.translate("Ошибка"), language_manager.translate(
+                        "USB-флешки не найдены. Подключите съёмную флешку и обновите список."
+                    ))
+                    return
+
+                answer = QMessageBox.question(
+                    dlg,
+                    language_manager.translate("Создать загрузочную WinPE-флешку"),
+                    language_manager.translate(
+                        "Выберите съёмную USB-флешку. Её раздел будет отформатирован; все данные на нём будут удалены. Сборка использует официальные инструменты Windows ADK."
+                    ) + f'\n\n{drive["root"]}  {drive["label"]}  {drive["total"] / (1024 ** 3):.1f} GB',
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    return
+
+                try:
+                    work_root, work_dir = winpe_media.make_working_directory()
+                except OSError as error:
+                    QMessageBox.critical(dlg, language_manager.translate("Ошибка"), str(error))
+                    return
+
+                command_paths = [tools["environment"], tools["copype"], tools["make_media"], work_dir]
+                if any("%" in path or "!" in path or '"' in path for path in command_paths):
+                    try:
+                        winpe_media.cleanup_working_directory(work_root, work_dir)
+                    except (OSError, ValueError):
+                        pass
+                    QMessageBox.critical(
+                        dlg,
+                        language_manager.translate("Ошибка"),
+                        language_manager.translate("Путь ADK содержит символы, небезопасные для команды Windows:")
+                        + " " + work_dir,
+                    )
+                    return
+
+                self._winpe_work_root = work_root
+                self._winpe_work_dir = work_dir
+                self._winpe_completion_handled = False
+                worker = WinPEBuildWorker(
+                    tools,
+                    work_dir,
+                    drive_root,
+                    drive_serial,
+                    use_bootex=bootex_checkbox.isChecked(),
+                    parent=self,
+                )
+                self._winpe_worker = keep_thread(worker)
+
+                def on_stage_changed(stage_text):
+                    status.setText(language_manager.translate(stage_text))
+
+                def on_result_ready(result):
+                    if self._winpe_completion_handled:
+                        return
+                    self._winpe_completion_handled = True
+                    dlg.setProperty("winpe_build_active", False)
+                    if result.get("success"):
+                        try:
+                            winpe_media.cleanup_working_directory(work_root, work_dir)
+                        except (OSError, ValueError):
+                            pass
+                        status.setText(language_manager.translate("WinPE USB готова:") + " " + drive_root)
+                        QMessageBox.information(
+                            dlg,
+                            language_manager.translate("Готово"),
+                            language_manager.translate("WinPE USB готова:") + " " + drive_root,
+                        )
+                    else:
+                        details = (result.get("output") or "").strip()[-3500:]
+                        if result.get("stage") == "USB_CHANGED":
+                            details = language_manager.translate(
+                                "USB-флешка изменилась или отключена. Запись отменена."
+                            )
+                        full_message = (
+                            language_manager.translate(
+                                "Создание WinPE завершилось с ошибкой. Рабочие файлы оставлены здесь:"
+                            ) + "\n" + work_dir
+                        )
+                        if details:
+                            full_message += "\n\n" + details
+                        status.setText(language_manager.translate("Ошибка") + ": " + result.get("stage", ""))
+                        QMessageBox.critical(dlg, language_manager.translate("Ошибка"), full_message)
+
+                def on_worker_finished():
+                    create_button.setEnabled(bool(tool_cache[0]) and bool(drive_combo.count()))
+                    refresh_button.setEnabled(True)
+                    drive_combo.setEnabled(True)
+
+                worker.stage_changed.connect(on_stage_changed)
+                worker.result_ready.connect(on_result_ready)
+                worker.finished.connect(on_worker_finished)
+                dlg.setProperty("winpe_build_active", True)
+                create_button.setEnabled(False)
+                refresh_button.setEnabled(False)
+                drive_combo.setEnabled(False)
+                status.setText(language_manager.translate("Создание выполняется. Не отключайте USB-флешку."))
+                worker.start()
+
+            create_button.clicked.connect(create_bootable_usb)
+            layout.addWidget(create_button)
+
             def do_winre():
                 try:
                     subprocess.run(["reagentc", "/boottore"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
                     subprocess.Popen(["shutdown", "/r", "/t", "5"])
-                    QMessageBox.information(dlg, "Перезагрузка", "Система перезагрузится в WinRE через 5 секунд.")
+                    QMessageBox.information(
+                        dlg,
+                        language_manager.translate("Перезагрузка"),
+                        language_manager.translate("Система перезагрузится в WinRE через 5 секунд."),
+                    )
                     dlg.accept()
                 except Exception as e:
-                    QMessageBox.critical(dlg, "Ошибка", "Не удалось настроить WinRE. Убедитесь, что программа запущена от имени администратора. " + str(e))
-                    
-            btn_winre = QPushButton("Перезагрузка в WinRE")
+                    QMessageBox.critical(
+                        dlg,
+                        language_manager.translate("Ошибка"),
+                        language_manager.translate("Не удалось настроить WinRE. Убедитесь, что программа запущена от имени администратора. ") + str(e),
+                    )
+
+            btn_winre = QPushButton(language_manager.translate("Перезагрузка в WinRE"))
             btn_winre.clicked.connect(do_winre)
             layout.addWidget(btn_winre)
+            refresh_usb_list()
             dlg.exec_()
 
 
@@ -13087,11 +13686,16 @@ if GUI_MODE:
             return _run_recovery_fix(self)
 
         def create_program_page(self):
-            """Настройки - только выбор темы"""
-            page = QFrame()
-            layout = QVBoxLayout(page)
-            layout.setContentsMargins(30, 30, 30, 30)
-            layout.setSpacing(20)
+            """Настройки приложения и системные параметры пользователя."""
+            from PySide6.QtWidgets import QScrollArea
+
+            page = QScrollArea()
+            page.setWidgetResizable(True)
+            page.setFrameShape(QFrame.NoFrame)
+            content = QFrame()
+            layout = QVBoxLayout(content)
+            layout.setContentsMargins(24, 18, 24, 18)
+            layout.setSpacing(12)
             layout.setAlignment(Qt.AlignTop)
 
             hdr = QLabel("НАСТРОЙКИ")
@@ -13102,6 +13706,83 @@ if GUI_MODE:
             sep.setFrameShape(QFrame.HLine)
             sep.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep)
+
+            website_row = QHBoxLayout()
+            website_label = QLabel(language_manager.translate("Сайт программы"))
+            website_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: bold;")
+            website_row.addWidget(website_label)
+            website_link = QLabel(f'<a href="{PROGRAM_WEBSITE_URL}">{PROGRAM_WEBSITE_URL}</a>')
+            website_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
+            website_link.setOpenExternalLinks(True)
+            website_link.setStyleSheet("QLabel { color: #bbbbbb; padding: 2px 0; } QLabel a { color: #ffffff; }")
+            website_row.addWidget(website_link)
+            website_row.addStretch()
+            website_button = QPushButton(language_manager.translate("Открыть сайт программы"))
+            website_button.setMinimumHeight(34)
+            website_button.setStyleSheet(
+                "QPushButton { background: #111111; color: #ffffff; border: 1px solid #444444;"
+                " font-weight: bold; padding: 6px 12px; }"
+                "QPushButton:hover, QPushButton:focus { background: #1b1b1b; border-color: #ffffff; }"
+                "QPushButton:pressed { background: #2a2a2a; }"
+            )
+            website_button.clicked.connect(self.open_program_website)
+            website_row.addWidget(website_button)
+            layout.addLayout(website_row)
+
+            settings = load_app_settings()
+            self.cb_always_on_top = QCheckBox(language_manager.translate("Всегда поверх окон"))
+            self.cb_always_on_top.setChecked(bool(settings.get("always_on_top", False)))
+            self.cb_always_on_top.stateChanged.connect(self.toggle_always_on_top)
+            layout.addWidget(self.cb_always_on_top)
+
+            winre_title = QLabel(language_manager.translate("Папка сохранения WinRE"))
+            winre_title.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 8px;")
+            layout.addWidget(winre_title)
+            self.winre_backup_path = os.path.abspath(settings.get(
+                "winre_backup_dir",
+                os.path.join(os.path.expanduser("~"), "Documents", "NoVir", "WinRE"),
+            ))
+            winre_folder_row = QHBoxLayout()
+            self.winre_path_edit = QLineEdit(self.winre_backup_path)
+            self.winre_path_edit.setReadOnly(True)
+            self.winre_path_edit.setToolTip(self.winre_backup_path)
+            winre_folder_row.addWidget(self.winre_path_edit, 1)
+            self.winre_folder_button = QPushButton(language_manager.translate("Изменить папку сохранения"))
+            self.winre_folder_button.setMinimumHeight(38)
+            self.winre_folder_button.clicked.connect(self.choose_winre_backup_folder)
+            winre_folder_row.addWidget(self.winre_folder_button)
+            layout.addLayout(winre_folder_row)
+
+            recovery_row = QHBoxLayout()
+            self.winre_status_label = QLabel(language_manager.translate("Вы запустились в среде восстановления:"))
+            recovery_row.addWidget(self.winre_status_label, 1)
+            system_root = os.environ.get("SystemRoot", os.environ.get("WINDIR", ""))
+            self.in_winre_environment = os.path.splitdrive(system_root)[0].upper() == "X:"
+            self.winre_status_value = QLabel()
+            self.winre_status_value.setObjectName("ReadOnlySettingValue")
+            self.winre_status_value.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            self.winre_status_value.setMinimumWidth(100)
+            self.winre_status_value.setStyleSheet("QLabel#ReadOnlySettingValue { border: 1px solid #444444; padding: 8px; color: #bbbbbb; }")
+            recovery_row.addWidget(self.winre_status_value)
+            layout.addLayout(recovery_row)
+
+            user_row = QHBoxLayout()
+            self.current_user_label = QLabel(language_manager.translate("Текущий пользователь:"))
+            user_row.addWidget(self.current_user_label, 1)
+            current_user = os.environ.get("USERNAME") or os.environ.get("USER") or "Unknown"
+            self.current_user_value = QLabel(current_user)
+            self.current_user_value.setObjectName("ReadOnlySettingValue")
+            self.current_user_value.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            self.current_user_value.setMinimumWidth(180)
+            self.current_user_value.setStyleSheet("QLabel#ReadOnlySettingValue { border: 1px solid #444444; padding: 8px; color: #bbbbbb; }")
+            self.current_user_value.setToolTip(language_manager.translate("Информация только для просмотра"))
+            user_row.addWidget(self.current_user_value)
+            layout.addLayout(user_row)
+
+            self.disable_quick_launch_button = QPushButton(language_manager.translate("Отключить удобный запуск"))
+            self.disable_quick_launch_button.setMinimumHeight(42)
+            self.disable_quick_launch_button.clicked.connect(self.disable_easy_launcher)
+            layout.addWidget(self.disable_quick_launch_button)
 
             lbl_theme = QLabel("ТЕМА ОФОРМЛЕНИЯ")
             lbl_theme.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold;")
@@ -13146,8 +13827,13 @@ if GUI_MODE:
             layout.addWidget(lbl_win)
 
             self.cb_win = QComboBox()
-            self.cb_win.addItems(
-                ["Автоопределение (" + detect_windows_version() + ")"] + list(WIN_VERSION_LABELS))
+            _auto_ver = detect_windows_version()
+            self.cb_win.setIconSize(QSize(20, 20))
+            # Порядок обязателен: 0 = автоопределение, 1..5 = WIN_VERSION_KEYS.
+            self.cb_win.addItem(win_version_icon(_auto_ver),
+                                "Автоопределение (" + _auto_ver + ")")
+            for _vkey, _vlabel in zip(WIN_VERSION_KEYS, WIN_VERSION_LABELS):
+                self.cb_win.addItem(win_version_icon(_vkey), _vlabel)
             self.cb_win.setStyleSheet(self.cb_theme.styleSheet())
             if _WIN_TARGET["value"] is None:
                 self.cb_win.setCurrentIndex(0)
@@ -13176,15 +13862,163 @@ if GUI_MODE:
             layout.addWidget(self.cb_mode)
 
             layout.addStretch()
+            page.setWidget(content)
+
+            def retranslate_settings():
+                website_label.setText(language_manager.translate("Сайт программы"))
+                website_button.setText(language_manager.translate("Открыть сайт программы"))
+                self.cb_always_on_top.setText(language_manager.translate("Всегда поверх окон"))
+                winre_title.setText(language_manager.translate("Папка сохранения WinRE"))
+                self.winre_folder_button.setText(language_manager.translate("Изменить папку сохранения"))
+                self.winre_status_label.setText(language_manager.translate("Вы запустились в среде восстановления:"))
+                self.winre_status_value.setText(language_manager.translate("Да" if self.in_winre_environment else "Нет"))
+                self.current_user_label.setText(language_manager.translate("Текущий пользователь:"))
+                self.disable_quick_launch_button.setText(language_manager.translate("Отключить удобный запуск"))
+
+            retranslate_settings()
+            page.retranslate_ui = retranslate_settings
             return page
+
+        def toggle_always_on_top(self, state):
+            enabled = bool(state)
+            try:
+                if sys.platform == "win32":
+                    import ctypes
+                    from ctypes import wintypes
+
+                    user32 = ctypes.windll.user32
+                    user32.SetWindowPos.argtypes = (
+                        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+                    )
+                    user32.SetWindowPos.restype = wintypes.BOOL
+                    hwnd = wintypes.HWND(int(self.winId()))
+                    z_order = wintypes.HWND(-1 if enabled else -2)  # TOPMOST / NOTOPMOST
+                    flags = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
+                    if not user32.SetWindowPos(hwnd, z_order, 0, 0, 0, 0, flags):
+                        raise ctypes.WinError()
+                else:
+                    handle = self.windowHandle()
+                    if handle is not None:
+                        handle.setFlag(Qt.WindowStaysOnTopHint, enabled)
+                    else:
+                        self.setWindowFlag(Qt.WindowStaysOnTopHint, enabled)
+                self._always_on_top_enabled = enabled
+                save_app_setting("always_on_top", enabled)
+            except Exception as error:
+                # Keep the checkbox aligned with the actual state if the OS
+                # rejects the z-order update; do not hide/recreate the window.
+                self.cb_always_on_top.blockSignals(True)
+                self.cb_always_on_top.setChecked(not enabled)
+                self.cb_always_on_top.blockSignals(False)
+                logger.log("AlwaysOnTop", "error", str(error))
+
+        def choose_winre_backup_folder(self):
+            current = getattr(self, "winre_backup_path", os.path.expanduser("~"))
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                language_manager.translate("Выберите папку сохранения WinRE"),
+                current,
+            )
+            if folder:
+                self.winre_backup_path = os.path.abspath(folder)
+                self.winre_path_edit.setText(self.winre_backup_path)
+                self.winre_path_edit.setToolTip(self.winre_backup_path)
+                save_app_setting("winre_backup_dir", self.winre_backup_path)
+
+        def disable_easy_launcher(self):
+            """Remove only NoVir's exact context-menu entries; never alter UAC."""
+            from PySide6.QtWidgets import QMessageBox
+
+            answer = QMessageBox.question(
+                self,
+                language_manager.translate("Отключить удобный запуск"),
+                language_manager.translate(
+                    "Отключить быстрый запуск NoVir? Будут удалены только точные записи NoVir из контекстного меню. UAC не изменяется."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+
+            try:
+                import winreg
+                base = r"Directory\Background\shell\NoVir"
+                removed_any = False
+                for subkey in (base + r"\command", base):
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, subkey, 0, winreg.KEY_READ):
+                            pass
+                        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, subkey)
+                        removed_any = True
+                    except FileNotFoundError:
+                        continue
+                # The installer copies itself to %WINDIR%\nov.exe for Win+R.
+                # Remove it only when its bytes exactly match this running build;
+                # never delete an unrelated file that happens to share the name.
+                import hashlib
+                import sys
+                launcher_copy = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "nov.exe")
+                try:
+                    if (os.path.isfile(launcher_copy) and not os.path.islink(launcher_copy)
+                            and getattr(sys, "frozen", False)
+                            and os.path.isfile(sys.executable)):
+                        def sha256_file(path):
+                            digest = hashlib.sha256()
+                            with open(path, "rb") as file_obj:
+                                for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+                                    digest.update(chunk)
+                            return digest.digest()
+                        if sha256_file(launcher_copy) == sha256_file(sys.executable):
+                            os.remove(launcher_copy)
+                            removed_any = True
+                except OSError:
+                    pass
+                message = "Удобный запуск NoVir отключён. Записи контекстного меню удалены; UAC не изменялся."
+                if not removed_any:
+                    message = "Записи удобного запуска NoVir не найдены. UAC не изменялся."
+                QMessageBox.information(self, language_manager.translate("Готово"), language_manager.translate(message))
+            except (OSError, ImportError):
+                QMessageBox.warning(
+                    self,
+                    language_manager.translate("Ошибка"),
+                    language_manager.translate("Не удалось полностью отключить удобный запуск. Проверьте права доступа."),
+                )
 
         def change_language(self, index):
             language_manager.set_language(("en", "uk", "ru", "de", "pl", "fr")[index])
             # Re-use the retained source strings, so changing the language does
             # not require an application restart.
             localize_widget_tree(self)
+            for key, source_text in {
+                "fix_all": "ПОЧИНИТЬ ВСЁ",
+                "audit": "ЖУРНАЛ",
+                "rollback": "ОТКАТ",
+                "update": "ОБНОВИТЬ",
+                "backups": "БЭКАПЫ",
+                "community": "СООБЩЕСТВО",
+            }.items():
+                action = getattr(self, "_quick_action_refs", {}).get(key)
+                if action is not None:
+                    action.setText(language_manager.translate(source_text))
             if hasattr(self, "page_explorer"):
                 self.page_explorer.retranslate_ui()
+            settings_retrans = getattr(
+                getattr(self, "page_program", None), "retranslate_ui", None)
+            if callable(settings_retrans):
+                settings_retrans()
+            # Динамические строки сообщества (лимит, гость/пользователь).
+            community_retrans = getattr(
+                getattr(self, "page_community", None), "retranslate_ui", None)
+            if callable(community_retrans):
+                community_retrans()
+            # Заголовок текущей страницы задаётся кодом, а не виджетом.
+            if hasattr(self, "title_label") and hasattr(self, "_page_idx"):
+                self._apply_page_title()
+            if hasattr(self, "_status_value"):
+                # Перевести строку цели на дашборде.
+                self._status_refresh()
 
         def change_win_version(self, index):
             # 0 = автоопределение, 1..5 = "11","10","8.1","8","7"
@@ -13211,7 +14045,7 @@ if GUI_MODE:
                     labels = card.findChildren(QLabel)
                     if labels:
                         tool_name = labels[0].text()
-                        if tool_name in ["WinRE / USB Boot", "Корреляция Malware", "Восстановление драйверов"]:
+                        if tool_name in ["Корреляция Malware", "Восстановление драйверов"]:
                             card.setVisible(self.advanced_mode)
 
         def create_whats_new_page(self):
@@ -13292,6 +14126,16 @@ if GUI_MODE:
             )
             return page
 
+        def open_program_website(self):
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            if not QDesktopServices.openUrl(QUrl(PROGRAM_WEBSITE_URL)):
+                QMessageBox.warning(
+                    self,
+                    language_manager.translate("Ошибка"),
+                    language_manager.translate("Не удалось открыть сайт программы"),
+                )
+
         def toggle_advanced_mode(self, index):
             from PySide6.QtWidgets import QFrame, QLabel
             self.advanced_mode = (index == 1)
@@ -13308,7 +14152,7 @@ if GUI_MODE:
                     labels = card.findChildren(QLabel)
                     if labels:
                         tool_name = labels[0].text()
-                        if tool_name in ["WinRE / USB Boot", "Корреляция Malware", "Восстановление драйверов"]:
+                        if tool_name in ["Корреляция Malware", "Восстановление драйверов"]:
                             card.setVisible(self.advanced_mode)
 
         def _legacy_whats_new_page(self):
@@ -13706,7 +14550,7 @@ if GUI_MODE:
                 if reply != QMessageBox.Yes:
                     return
 
-            self.worker = Worker(func)
+            self.worker = keep_thread(Worker(func))
             
             def on_finish(result_text):
                 if result_text.strip():
@@ -14281,6 +15125,11 @@ if GUI_MODE:
                 threads_to_stop.append(self.worker)
             if hasattr(self, '_services_loader') and self._services_loader is not None:
                 threads_to_stop.append(self._services_loader)
+            # Потоки из общего реестра keep_thread(): community-чат, AI,
+            # сканеры, диалоги входа — всё, что не перечислено выше.
+            for _t in list(_LIVE_QTHREADS):
+                if _t not in threads_to_stop:
+                    threads_to_stop.append(_t)
 
             for thread in threads_to_stop:
                 try:

@@ -45,22 +45,22 @@ class ExplorerTab(QWidget):
         top_layout.setSpacing(10)
 
         self.btn_back = QPushButton("◀")
-        self.btn_back.setFixedSize(30, 30)
-        self.btn_back.setStyleSheet("QPushButton { background-color: transparent; border: none; color: #ffffff; font-size: 16px; font-weight: bold; } QPushButton:hover { background-color: #4a4a5a; border-radius: 0px; }")
+        self.btn_back.setFixedSize(34, 32)
+        self.btn_back.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid transparent; color: #ffffff; font-size: 16px; font-weight: bold; } QPushButton:hover, QPushButton:focus { background-color: #111111; border-color: #ffffff; }")
         self.btn_back.setToolTip(tr("Назад"))
         self.btn_back.clicked.connect(self.go_back)
         top_layout.addWidget(self.btn_back)
 
         self.btn_refresh = QPushButton("↻")
-        self.btn_refresh.setFixedSize(30, 30)
-        self.btn_refresh.setStyleSheet("QPushButton { background-color: transparent; border: none; color: #ffffff; font-size: 16px; font-weight: bold; } QPushButton:hover { background-color: #4a4a5a; border-radius: 0px; }")
+        self.btn_refresh.setFixedSize(34, 32)
+        self.btn_refresh.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid transparent; color: #ffffff; font-size: 16px; font-weight: bold; } QPushButton:hover, QPushButton:focus { background-color: #111111; border-color: #ffffff; }")
         self.btn_refresh.setToolTip(tr("Обновить список"))
         self.btn_refresh.clicked.connect(self.refresh_files)
         top_layout.addWidget(self.btn_refresh)
 
         self.path_edit = QLineEdit()
         self.path_edit.setFixedHeight(30)
-        self.path_edit.setStyleSheet("QLineEdit { background-color: #000000; border: 1px solid #333333; border-radius: 0px; padding: 0 10px; color: #ffffff; }")
+        self.path_edit.setStyleSheet("QLineEdit { background-color: #080808; border: 1px solid #333333; border-radius: 0px; padding: 0 10px; color: #ffffff; } QLineEdit:focus { border-color: #ffffff; }")
         self.path_edit.returnPressed.connect(self.navigate_to_path)
         top_layout.addWidget(self.path_edit)
 
@@ -81,23 +81,26 @@ class ExplorerTab(QWidget):
         self.file_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.file_table.setAlternatingRowColors(True)
+        self.file_table.verticalHeader().setDefaultSectionSize(30)
 
         self.file_table.setStyleSheet("""
             QTableWidget {
                 background-color: #000000;
                 color: #ffffff;
-                border: none;
-                alternate-background-color: #000000;
+                border: 1px solid #222222;
+                alternate-background-color: #090909;
             }
             QHeaderView::section {
                 background-color: #000000;
                 color: #ffffff;
-                padding: 5px;
+                padding: 7px 8px;
                 border: none;
                 font-weight: bold;
+                border-bottom: 1px solid #333333;
             }
             QTableWidget::item:selected {
-                background-color: #000000;
+                background-color: #181818;
+                color: #ffffff;
             }
         """)
 
@@ -110,13 +113,13 @@ class ExplorerTab(QWidget):
         search_layout = QHBoxLayout()
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText(tr("Поиск файлов..."))
-        self.search_edit.setStyleSheet("QLineEdit { background-color: #111; color: #fff; border: 1px solid #333; padding: 4px; }")
+        self.search_edit.setStyleSheet("QLineEdit { background-color: #080808; color: #fff; border: 1px solid #333; padding: 7px 9px; } QLineEdit:focus { border-color: #fff; }")
         self.search_edit.textChanged.connect(self.filter_files)
         
         self.btn_hidden = QPushButton(tr("Скрытые"))
         self.btn_hidden.setCheckable(True)
         self.btn_hidden.setFixedSize(80, 28)
-        self.btn_hidden.setStyleSheet("QPushButton { background-color: #111; color: #888; border: 1px solid #333; } QPushButton:checked { color: #fff; border-color: #fff; }")
+        self.btn_hidden.setStyleSheet("QPushButton { background-color: #080808; color: #aaa; border: 1px solid #333; padding: 4px 8px; } QPushButton:hover, QPushButton:focus { color: #fff; border-color: #aaa; } QPushButton:checked { color: #fff; border-color: #fff; background-color: #181818; }")
         self.btn_hidden.clicked.connect(self.refresh_files)
         
         search_layout.addWidget(self.search_edit)

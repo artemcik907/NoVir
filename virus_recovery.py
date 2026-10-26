@@ -17,6 +17,10 @@ import shutil
 import glob
 import platform
 import time
+
+
+
+
 import json
 import threading
 import re
@@ -27,9 +31,9 @@ from functools import lru_cache
 CURRENT_VERSION = "2.5.3"
 PROGRAM_WEBSITE_URL = "https://artemcik907.github.io"
 
+PSUTIL_AVAILABLE = False
 try:
     import novir_native
-    PSUTIL_AVAILABLE = True
 except ImportError:
     pass
 try:
@@ -63,13 +67,20 @@ if GUI_MODE:
                                      QDialog, QLineEdit, QTableWidget, QTableWidgetItem,
                                      QHeaderView, QTabWidget, QFrame, QCheckBox,
                                      QTreeWidget, QTreeWidgetItem, QSlider,
-                                     QGridLayout, QStackedWidget)
+                                     QGridLayout, QStackedWidget, QAbstractItemView, QStyle)
         from PySide6.QtCore import Qt, QThread, Signal, Slot, QEvent, QObject, QProcess
         from PySide6.QtGui import QClipboard
         PYSIDE_AVAILABLE = True
     except ImportError:
         print("PySide6 не установлен. Запуск в консольном режиме.")
         GUI_MODE = False
+
+    if GUI_MODE:
+        class NoWheelComboBox(QComboBox):
+            """QComboBox, который не меняет выбор колесом мыши — только кликами."""
+
+            def wheelEvent(self, event):
+                event.ignore()
 
 init()
 if sys.platform == 'win32':
@@ -1193,6 +1204,96 @@ class LanguageManager:
         'Создание аккаунта...': ('Creating account...', 'Створення облікового запису...', 'Konto wird erstellt...', 'Tworzenie konta...', 'Création du compte...'),
         'Это имя уже занято.': ('This name is already taken.', 'Це ім’я вже зайняте.', 'Dieser Name ist bereits vergeben.', 'Ta nazwa jest już zajęta.', 'Ce nom est déjà pris.'),
         'Не удалось создать аккаунт (сервер отклонил запрос).': ('Could not create the account (server rejected the request).', 'Не вдалося створити обліковий запис (сервер відхилив запит).', 'Konto konnte nicht erstellt werden (Server hat die Anfrage abgelehnt).', 'Nie udało się utworzyć konta (serwer odrzucił zapytanie).', 'Impossible de créer le compte (le serveur a refusé la requête).'),
+        'ЗАПУСТИТЕ СКАНИРОВАНИЕ ДЛЯ АНАЛИЗА СИСТЕМНЫХ ОГРАНИЧЕНИЙ': ('RUN A SCAN TO ANALYZE SYSTEM RESTRICTIONS', 'ЗАПУСТІТЬ СКАНУВАННЯ ДЛЯ АНАЛІЗУ СИСТЕМНИХ ОБМЕЖЕНЬ', 'SCAN STARTEN, UM SYSTEMEINSCHRÄNKUNGEN ZU ANALYSIEREN', 'URUCHOM SKANOWANIE, ABY PRZEANALIZOWAĆ OGRANICZENIA SYSTEMU', 'LANCER UNE ANALYSE POUR EXAMINER LES RESTRICTIONS SYSTÈME'),
+        'АВТО-СНЯТИЕ': ('AUTO-REMOVE', 'АВТО-ЗНЯТТЯ', 'AUTO-ENTFERNEN', 'AUTO-USUWANIE', 'SUPPRESSION AUTO'),
+        'СНЯТЬ ВСЕ': ('REMOVE ALL', 'ЗНЯТИ ВСЕ', 'ALLE ENTFERNEN', 'USUŃ WSZYSTKO', 'TOUT SUPPRIMER'),
+        'СКАНИРОВАТЬ': ('SCAN', 'СКАНУВАТИ', 'SCANNEN', 'SKANUJ', 'ANALYSER'),
+        'СНЯТЬ ВЫБРАННЫЕ': ('REMOVE SELECTED', 'ЗНЯТИ ВИБРАНІ', 'AUSGEWÄHLTE ENTFERNEN', 'USUŃ WYBRANE', 'SUPPRIMER LA SÉLECTION'),
+        'СКАНИРОВАНИЕ...': ('SCANNING...', 'СКАНУВАННЯ...', 'SCANNEN...', 'SKANOWANIE...', 'ANALYSE...'),
+        'ЧТО ЗАБЛОКИРОВАНО': ('WHAT IS BLOCKED', 'ЩО ЗАБЛОКОВАНО', 'WAS IST BLOCKIERT', 'CO JEST ZABLOKOWANE', 'CE QUI EST BLOQUÉ'),
+        'КЛЮЧ РЕЕСТРА / GPO': ('REGISTRY KEY / GPO', 'КЛЮЧ РЕЄСТРУ / GPO', 'REGISTRIERUNGSSCHLÜSSEL / GPO', 'KLUCZ REJESTRU / GPO', 'CLÉ DE REGISTRE / GPO'),
+        'СТАТУС': ('STATUS', 'СТАТУС', 'STATUS', 'STATUS', 'STATUT'),
+        'ДОПОЛНИТЕЛЬНЫЕ ВОЗМОЖНОСТИ': ('EXTRA FEATURES', 'ДОДАТКОВІ МОЖЛИВОСТІ', 'ZUSÄTZLICHE FUNKTIONEN', 'DODATKOWE FUNKCJE', 'FONCTIONNALITÉS SUPPLÉMENTAIRES'),
+        'СИСТЕМНЫЕ КОМАНДЫ': ('SYSTEM COMMANDS', 'СИСТЕМНІ КОМАНДИ', 'SYSTEMBEFEHLE', 'POLECENIA SYSTEMOWE', 'COMMANDES SYSTÈME'),
+        'ВСТРОЕННОЕ ПО': ('BUILT-IN SOFTWARE', 'ВБУДОВАНЕ ПЗ', 'INTEGRIERTE SOFTWARE', 'WBUILTOWANE OPROGRAMOWANIE', 'LOGICIEL INTÉGRÉ'),
+        'СИСТЕМНЫЕ ВОССТАНОВИТЕЛЬНЫЕ КОМАНДЫ И АВТОНОМНОЕ ВСТРОЕННОЕ ПО NOVIR': ('SYSTEM RECOVERY COMMANDS AND NOVIR STANDALONE BUILT-IN TOOLS', 'СИСТЕМНІ ВІДНОВЛЮВАЛЬНІ КОМАНДИ ТА АВТОНОМНЕ ВБУДОВАНЕ ПЗ NOVIR', 'SYSTEMWIEDERHERSTELLUNGSBEFEHLE UND AUTONOME INTEGRIERTE NOVIR-TOOLS', 'POLECENIA NAPRAWY SYSTEMU I AUTONOMICZNE WBUILTOWANE NARZĘDZIA NOVIR', 'COMMANDES DE RÉCUPÉRATION SYSTÈME ET OUTILS INTÉGRÉS AUTONOMES NOVIR'),
+        'Войти в WinRE': ('Enter WinRE', 'Увійти в WinRE', 'WinRE starten', 'Wejdź do WinRE', 'Entrer dans WinRE'),
+        'Вернуть стандартную тему': ('Restore default theme', 'Повернути стандартну тему', 'Standarddesign wiederherstellen', 'Przywróć domyślny motyw', 'Restaurer le thème par défaut'),
+        'Починить шрифты': ('Repair fonts', 'Полагодити шрифти', 'Schriften reparieren', 'Napraw czcionki', 'Réparer les polices'),
+        'Включить UAC': ('Enable UAC', 'Увімкнути UAC', 'UAC aktivieren', 'Włącz UAC', 'Activer l’UAC'),
+        'sfc /scannow': ('sfc /scannow', 'sfc /scannow', 'sfc /scannow', 'sfc /scannow', 'sfc /scannow'),
+        'Ctrl+Alt+N': ('Ctrl+Alt+N', 'Ctrl+Alt+N', 'Ctrl+Alt+N', 'Ctrl+Alt+N', 'Ctrl+Alt+N'),
+        'mbrRE': ('mbrRE', 'mbrRE', 'mbrRE', 'mbrRE', 'mbrRE'),
+        'Управление ассоциациями': ('Association manager', 'Керування асоціаціями', 'Zuordnungsverwaltung', 'Zarządzanie skojarzeniami', 'Gestion des associations'),
+        'Сохранение WinRE': ('WinRE backup', 'Збереження WinRE', 'WinRE-Sicherung', 'Kopia zapasowa WinRE', 'Sauvegarde WinRE'),
+        'Сведения о системе': ('System information', 'Відомості про систему', 'Systeminformationen', 'Informacje o systemie', 'Informations système'),
+        'Корреляция Malware': ('Malware correlation', 'Кореляція Malware', 'Malware-Korrelation', 'Korelacja Malware', 'Corrélation Malware'),
+        'ПАСХАЛКО': ('EASTER EGG', 'ПАСХАЛКА', 'OSTEREI', 'PISANKA', 'ŒUF DE PÂQUES'),
+        'ЗАКРЫТЬ': ('CLOSE', 'ЗАКРИТИ', 'SCHLIESSEN', 'ZAMKNIJ', 'FERMER'),
+        'ПИЗДЕЦ': ('PIZDETS', 'ПІЗДЕЦЬ', 'PIZDETS', 'PIZDIEC', 'PIZDETS'),
+        'Очистить': ('Clear', 'Очистити', 'Leeren', 'Wyczyść', 'Effacer'),
+        'ОГРАНИЧЕНИЙ НЕ НАЙДЕНО': ('NO RESTRICTIONS FOUND', 'ОБМЕЖЕНЬ НЕ ЗНАЙДЕНО', 'KEINE EINSCHRÄNKUNGEN GEFUNDEN', 'NIE ZNALEZIONO OGRANICZEŃ', 'AUCUNE RESTRICTION TROUVÉE'),
+        'НАЙДЕНО:': ('FOUND:', 'ЗНАЙДЕНО:', 'GEFUNDEN:', 'ZNALEZIONO:', 'TROUVÉ :'),
+        'РЕДАКТОР РЕЕСТРА': ('REGISTRY EDITOR', 'РЕДАКТОР РЕЄСТРУ', 'REGISTRIERUNGSEDITOR', 'EDYTOR REJESTRU', 'ÉDITEUR DE REGISTRE'),
+        'УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ': ('USER MANAGEMENT', 'КЕРУВАННЯ КОРИСТУВАЧАМИ', 'BENUTZERVERWALTUNG', 'ZARZĄDZANIE UŻYTKOWNIKAMI', 'GESTION DES UTILISATEURS'),
+        'ДИСПЕТЧЕР ЗАДАЧ': ('TASK MANAGER', 'ДИСПЕТЧЕР ЗАВДАНЬ', 'TASK-MANAGER', 'MENEDŻER ZADAŃ', 'GESTIONNAIRE DES TÂCHES'),
+        'СОХРАНЕНИЕ WINRE': ('WINRE BACKUP', 'ЗБЕРЕЖЕННЯ WINRE', 'WINRE-SICHERUNG', 'KOPIA ZAPASOWA WINRE', 'SAUVEGARDE WINRE'),
+        'КОРРЕЛЯЦИЯ MALWARE': ('MALWARE CORRELATION', 'КОРЕЛЯЦІЯ MALWARE', 'MALWARE-KORRELATION', 'KORELACJA MALWARE', 'CORRÉLATION MALWARE'),
+        'СЕТЕВЫЕ ПОРТЫ': ('NETWORK PORTS', 'МЕРЕЖЕВІ ПОРТИ', 'NETZWERKPORTS', 'PORTY SIECIOWE', 'PORTS RÉSEAU'),
+        'СБРОС ПАРОЛЯ': ('PASSWORD RESET', 'СКИДАННЯ ПАРОЛЯ', 'PASSWORT ZURÜCKSETZEN', 'RESET HASŁA', 'RÉINITIALISATION DU MOT DE PASSE'),
+        'СВЕДЕНИЯ О СИСТЕМЕ': ('SYSTEM INFORMATION', 'ВІДОМОСТІ ПРО СИСТЕМУ', 'SYSTEMINFORMATIONEN', 'INFORMACJE O SYSTEMIE', 'INFORMATIONS SYSTÈME'),
+        'ВОССТАНОВЛЕНИЕ ДРАЙВЕРОВ': ('DRIVER RECOVERY', 'ВІДНОВЛЕННЯ ДРАЙВЕРІВ', 'TREIBERWIEDERHERSTELLUNG', 'PRZYWRACANIE STEROWNIKÓW', 'RÉCUPÉRATION DES PILOTES'),
+        'ОСТАНОВИТЬ': ('STOP', 'ЗУПИНИТИ', 'STOPPEN', 'ZATRZYMAJ', 'ARRÊTER'),
+        'ПЕРЕЗАПУСТИТЬ': ('RESTART', 'ПЕРЕЗАПУСТИТИ', 'NEU STARTEN', 'URUCHOM PONOWNIE', 'REDÉMARRER'),
+        'СОЗДАТЬ ЗАДАЧУ': ('CREATE TASK', 'СТВОРИТИ ЗАВДАННЯ', 'AUFGABE ERSTELLEN', 'UTWÓRZ ZADANIE', 'CRÉER UNE TÂCHE'),
+        'ДОБАВИТЬ ФАЙЛ': ('ADD FILE', 'ДОДАТИ ФАЙЛ', 'DATEI HINZUFÜGEN', 'DODAJ PLIK', 'AJOUTER UN FICHIER'),
+        'ОТКРЫТЬ ПАПКУ': ('OPEN FOLDER', 'ВІДКРИТИ ПАПКУ', 'ORDNER ÖFFNEN', 'OTWÓRZ FOLDER', 'OUVRIR LE DOSSIER'),
+        'ДОБАВИТЬ': ('ADD', 'ДОДАТИ', 'HINZUFÜGEN', 'DODAJ', 'AJOUTER'),
+        'ИМЯ': ('NAME', 'ІМʼЯ', 'NAME', 'NAZWA', 'NOM'),
+        'ЗАДАЧА': ('TASK', 'ЗАВДАННЯ', 'AUFGABE', 'ZADANIE', 'TÂCHE'),
+        'ПАПКА': ('FOLDER', 'ПАПКА', 'ORDNER', 'FOLDER', 'DOSSIER'),
+        'КОРЕНЬ': ('ROOT', 'КОРІНЬ', 'STAMM', 'KORZEŃ', 'RACINE'),
+        'СОСТОЯНИЕ': ('STATE', 'СТАН', 'STATUS', 'STAN', 'ÉTAT'),
+        'РАСПОЛОЖЕНИЕ': ('LOCATION', 'РОЗТАШУВАННЯ', 'SPEICHERORT', 'LOKALIZACJA', 'EMPLACEMENT'),
+        'ОТКРЫТЬ РАСПОЛОЖЕНИЕ ФАЙЛА': ('OPEN FILE LOCATION', 'ВІДКРИТИ РОЗТАШУВАННЯ ФАЙЛУ', 'DATEISPEICHERORT ÖFFNEN', 'OTWÓRZ LOKALIZACJĘ PLIKU', 'OUVRIR L’EMPLACEMENT DU FICHIER'),
+        'ОПИСАНИЕ': ('DESCRIPTION', 'ОПИС', 'BESCHREIBUNG', 'OPIS', 'DESCRIPTION'),
+        'ТРИГГЕРЫ': ('TRIGGERS', 'ТРИГЕРИ', 'TRIGGER', 'WYZWALACZE', 'DÉCLENCHEURS'),
+        'УДАЛИТЬ ЗАДАЧУ': ('DELETE TASK', 'ВИДАЛИТИ ЗАВДАННЯ', 'AUFGABE LÖSCHEN', 'USUŃ ZADANIE', 'SUPPRIMER LA TÂCHE'),
+        'НАЗАД': ('BACK', 'НАЗАД', 'ZURÜCK', 'WSTECZ', 'RETOUR'),
+        'ДЕЙСТВИЕ': ('ACTION', 'ДІЯ', 'AKTION', 'AKCJA', 'ACTION'),
+        'АВТОР': ('AUTHOR', 'АВТОР', 'AUTOR', 'AUTOR', 'AUTEUR'),
+        'ИЗМЕНИТЬ': ('EDIT', 'ЗМІНИТИ', 'ÄNDERN', 'ZMIEŃ', 'MODIFIER'),
+        'WIN RE РЕЖИМ': ('WIN RE MODE', 'РЕЖИМ WIN RE', 'WIN-RE-MODUS', 'TRYB WIN RE', 'MODE WIN RE'),
+        'СРЕДА ВОССТАНОВЛЕНИЯ WINDOWS': ('WINDOWS RECOVERY ENVIRONMENT', 'СЕРЕДОВИЩЕ ВІДНОВЛЕННЯ WINDOWS', 'WINDOWS-WIEDERHERSTELLUNGSUMGEBUNG', 'ŚRODOWISKO ODZYSKIWANIA SYSTEMU WINDOWS', 'ENVIRONNEMENT DE RÉCUPÉRATION WINDOWS'),
+        'БЕЗОПАСНЫЙ РЕЖИМ': ('SAFE MODE', 'БЕЗПЕЧНИЙ РЕЖИМ', 'ABGESICHERTER MODUS', 'TRYB AWARYJNY', 'MODE SANS ÉCHEC'),
+        'БЕЗОПАСНЫЙ РЕЖИМ + СЕТЬ': ('SAFE MODE + NETWORK', 'БЕЗПЕЧНИЙ РЕЖИМ + МЕРЕЖА', 'ABGESICHERTER MODUS + NETZWERK', 'TRYB AWARYJNY + SIEĆ', 'MODE SANS ÉCHEC + RÉSEAU'),
+        'МИНИМАЛЬНЫЙ НАБОР СЛУЖБ': ('MINIMAL SERVICE SET', 'МІНІМАЛЬНИЙ НАБІР СЛУЖБ', 'MINIMALER DIENSTSATZ', 'MINIMALNY ZESTAW USŁUG', 'ENSEMBLE MINIMAL DE SERVICES'),
+        'МИНИМАЛЬНЫЙ НАБОР СЛУЖБ И СЕТЬ': ('MINIMAL SERVICES AND NETWORK', 'МІНІМАЛЬНИЙ НАБІР СЛУЖБ І МЕРЕЖА', 'MINIMALE DIENSTE UND NETZWERK', 'MINIMALNE USŁUGI I SIEĆ', 'SERVICES MINIMAUX ET RÉSEAU'),
+        'СПЕЦИАЛЬНЫЙ РЕЖИМ': ('SPECIAL MODE', 'СПЕЦІАЛЬНИЙ РЕЖИМ', 'SPEZIALMODUS', 'TRYB SPECJALNY', 'MODE SPÉCIAL'),
+        'NoVir запущен в специальной среде. Часть функций Windows может быть недоступна.': (
+            'NoVir is running in a special environment. Some Windows features may be unavailable.',
+            'NoVir запущено в спеціальному середовищі. Частина функцій Windows може бути недоступною.',
+            'NoVir läuft in einer speziellen Umgebung. Einige Windows-Funktionen sind möglicherweise nicht verfügbar.',
+            'NoVir działa w środowisku specjalnym. Niektóre funkcje Windows mogą być niedostępne.',
+            'NoVir fonctionne dans un environnement spécial. Certaines fonctions Windows peuvent être indisponibles.',
+        ),
+        'Поиск службы...': ('Search service...', 'Пошук служби...', 'Dienst suchen...', 'Szukaj usługi...', 'Rechercher un service...'),
+        'НЕТ ДАННЫХ': ('NO DATA', 'НЕМАЄ ДАНИХ', 'KEINE DATEN', 'BRAK DANYCH', 'AUCUNE DONNÉE'),
+        'СЛУЖБЫ': ('SERVICES', 'СЛУЖБИ', 'DIENSTE', 'USŁUGI', 'SERVICES'),
+        'ДРАЙВЕРЫ': ('DRIVERS', 'ДРАЙВЕРИ', 'TREIBER', 'STERYWNIKI', 'PILOTES'),
+        'ЗАГРУЗКА': ('BOOT', 'ЗАВАНТАЖЕННЯ', 'START', 'ROZRUCH', 'DÉMARRAGE'),
+        'СИСТЕМА': ('SYSTEM', 'СИСТЕМА', 'SYSTEM', 'SYSTEM', 'SYSTÈME'),
+        'АВТОЗАПУСК': ('AUTOSTART', 'АВТОЗАПУСК', 'AUTOSTART', 'AUTOSTART', 'DÉMARRAGE AUTO'),
+        'ВРУЧНУЮ': ('MANUAL', 'ВРУЧНУ', 'MANUELL', 'RĘCZNIE', 'MANUEL'),
+        'ОТКЛЮЧЕНО': ('DISABLED', 'ВИМКНЕНО', 'DEAKTIVIERT', 'WYŁĄCZONE', 'DÉSACTIVÉ'),
+        'ПРОЧИЕ': ('OTHER', 'ІНШІ', 'SONSTIGE', 'INNE', 'AUTRES'),
+        'БЫСТРЫЙ ДОСТУП': ('QUICK ACCESS', 'ШВИДКИЙ ДОСТУП', 'SCHNELLZUGRIFF', 'SZYBKI DOSTĘP', 'ACCÈS RAPIDE'),
+        'ЗАПУСТИТЬ': ('START', 'ЗАПУСТИТИ', 'STARTEN', 'URUCHOM', 'DÉMARRER'),
+        'ОТКЛЮЧИТЬ': ('DISABLE', 'ВИМКНУТИ', 'DEAKTIVIEREN', 'WYŁĄCZ', 'DÉSACTIVER'),
+        'ВКЛЮЧИТЬ': ('ENABLE', 'УВІМКНУТИ', 'AKTIVIEREN', 'WŁĄCZ', 'ACTIVER'),
+        'КОМАНДНАЯ СТРОКА': ('COMMAND PROMPT', 'КОМАНДНИЙ РЯДОК', 'EINGABEAUFFORDERUNG', 'WIERSZ POLECENIA', 'INVITE DE COMMANDE'),
+        'УПРАВЛЕНИЕ ДИСКАМИ': ('DISK MANAGEMENT', 'КЕРУВАННЯ ДИСКАМИ', 'DATENTRÄGERVERWALTUNG', 'ZARZĄDZANIE DYSKAMI', 'GESTION DES DISQUES'),
+        'ВОССТАНОВЛЕНИЕ ЗАГРУЗЧИКА MBR/BCD': ('MBR/BCD BOOTLOADER RECOVERY', 'ВІДНОВЛЕННЯ ЗАВАНТАЖУВАЧА MBR/BCD', 'MBR/BCD-BOOTLOADER-WIEDERHERSTELLUNG', 'ODZYSKIWANIE BOOTLOADERA MBR/BCD', 'RÉCUPÉRATION DU CHARGEUR MBR/BCD'),
     }
 
     # A safe fallback prevents untranslated Russian fragments in dynamic status
@@ -2507,34 +2608,63 @@ def HiddenFiles_Show():
         return False
 
 def Shell_Validation():
-    """Проверка ключа Winlogon/Shell (должен быть только explorer.exe)"""
-    print_hacker_message("Проверяю, что в Shell только explorer.exe, а не вирус!")
-    
+    """Проверка ключа Winlogon/Shell.
+
+    На чистой Windows значение Shell часто отсутствует или пустое — это
+    нормальное поведение (система использует explorer.exe по умолчанию),
+    поэтому такие случаи НЕ считаются заражением и не подсвечиваются красным.
+    """
+    print_hacker_message("Проверяю целостность ключа Shell")
+
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Будет проверен ключ Winlogon\\Shell{Colors.RESET}")
         logger.log("Shell_Validation", "success", "Ключ Shell будет проверен")
         print(f"{Colors.GREEN}[+] Ключ Shell будет проверен{Colors.RESET}")
         return True
-    
+
     try:
         key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_READ)
-        shell_value, _ = winreg.QueryValueEx(key, "Shell")
+        try:
+            shell_value, _ = winreg.QueryValueEx(key, "Shell")
+        except FileNotFoundError:
+            # Значения Shell нет — это стандарт на чистой Windows.
+            winreg.CloseKey(key)
+            print(f"{Colors.GREEN}[+] Shell не задан — стандартное поведение (explorer.exe){Colors.RESET}")
+            logger.log("Shell_Validation", "success", "Shell не задан — стандарт")
+            return True
         winreg.CloseKey(key)
-        
-        if shell_value.strip().lower() != "explorer.exe":
-            print(f"{Colors.YELLOW}[!] Обнаружен модифицированный Shell: {shell_value}{Colors.RESET}")
+
+        # Нормализация: кавычки, пробелы, %SystemRoot%, полный путь, лишние аргументы.
+        normalized = str(shell_value or "").strip().strip('"').strip("'")
+        if not normalized:
+            print(f"{Colors.GREEN}[+] Shell пуст — стандартное поведение (explorer.exe){Colors.RESET}")
+            logger.log("Shell_Validation", "success", "Shell пуст — стандарт")
+            return True
+
+        if "%SystemRoot%" in normalized:
+            system_root = os.environ.get("SystemRoot", r"C:\Windows")
+            normalized = normalized.replace("%SystemRoot%", system_root)
+
+        basename = normalized.replace("/", "\\").split("\\")[-1].strip().lower()
+        if basename == "explorer.exe" or basename.startswith("explorer.exe "):
+            print(f"{Colors.GREEN}[+] Shell корректен: explorer.exe{Colors.RESET}")
+            logger.log("Shell_Validation", "success", "Shell корректен")
+            return True
+
+        print(f"{Colors.YELLOW}[!] Обнаружен модифицированный Shell: {shell_value}{Colors.RESET}")
+        try:
             reg_set_value(key_path, "Shell", "explorer.exe", winreg.REG_SZ)
             logger.log("Shell_Validation", "success", "Shell восстановлен на explorer.exe")
             print(f"{Colors.GREEN}[+] Shell восстановлен на explorer.exe{Colors.RESET}")
-        else:
-            print(f"{Colors.GREEN}[+] Shell корректен: explorer.exe{Colors.RESET}")
-        
-        return True
-    except Exception as e:
-        logger.log("Shell_Validation", "error", str(e))
-        print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
+        except Exception as reg_e:
+            print(f"{Colors.RED}[!] Не удалось записать Shell: {reg_e}{Colors.RESET}")
         return False
+    except Exception as e:
+        # Нет доступа/ключа — не признак заражения, проверка просто пропущена.
+        logger.log("Shell_Validation", "warning", f"Проверка пропущена: {e}")
+        print(f"{Colors.YELLOW}[!] Проверка Shell пропущена: {e}{Colors.RESET}")
+        return True
 
 def Userinit_Fix():
     """Проверка ключа Userinit (чтобы вирус не запускался перед входом)"""
@@ -6866,7 +6996,7 @@ if GUI_MODE:
             layout.addWidget(scroll)
             
             close_btn = QPushButton("Отмена")
-            close_btn.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; font-weight: bold; padding: 10px;")
+            close_btn.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold; padding: 10px;")
             close_btn.clicked.connect(self.close)
             layout.addWidget(close_btn)
         
@@ -6907,12 +7037,12 @@ if GUI_MODE:
             super().__init__(parent)
             self.setWindowTitle("Диспетчер задач NoVir")
             self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
-            self.showMaximized()
+            self.resize(1120, 730)
             self.setStyleSheet("background-color: #000000; color: #ffffff;")
             self.init_ui()
             
         def init_ui(self):
-            self.setMinimumSize(1120, 730)
+            self.setMinimumSize(900, 500)
             self.setStyleSheet("""
                 QDialog {
                     background-color: #000000;
@@ -6938,12 +7068,9 @@ if GUI_MODE:
             header_layout.setContentsMargins(18, 14, 18, 14)
             header_layout.setSpacing(4)
 
-            title = QLabel("Диспетчер задач")
-            title.setStyleSheet("font-size: 24px; font-weight: 700; color: #f7f9ff; letter-spacing: 0.4px;")
-            subtitle = QLabel("Современный контроль процессов, быстрые действия и аккуратный интерфейс в одном окне")
-            subtitle.setStyleSheet("font-size: 12px; color: #888888;")
+            title = QLabel("ДИСПЕТЧЕР ЗАДАЧ")
+            title.setStyleSheet("font-size: 18px; font-weight: 700; color: #ffffff; letter-spacing: 2px;")
             header_layout.addWidget(title)
-            header_layout.addWidget(subtitle)
             layout.addWidget(header)
 
             buttons_frame = QFrame()
@@ -7022,7 +7149,6 @@ if GUI_MODE:
             self.table.setSelectionMode(QTableWidget.SingleSelection)
             self.table.setEditTriggers(QTableWidget.NoEditTriggers)
             self.table.setShowGrid(False)
-            self.table.setUniformRowHeights(True)
             self.table.setStyleSheet("""
                 QTableWidget {
                     background-color: transparent;
@@ -7063,12 +7189,13 @@ if GUI_MODE:
             self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             self.table.horizontalHeader().setStretchLastSection(True)
             self.table.setSortingEnabled(False)
-            self.table.setMinimumHeight(420)
+            self.table.setMinimumHeight(260)
             table_layout.addWidget(self.table)
             layout.addWidget(table_frame)
 
             status_label = QLabel("Выберите процесс и выполните нужное действие: обновить, заморозить, завершить или заблокировать")
             status_label.setStyleSheet("color: #8da0bd; font-size: 11px; margin-top: 2px;")
+            self.status_label = status_label
             layout.addWidget(status_label)
 
             self.refresh_processes()
@@ -7076,7 +7203,12 @@ if GUI_MODE:
         def refresh_processes(self):
             self.table.setUpdatesEnabled(False)
             self.table.setRowCount(0)
-            processes = ProcessAnalyzer.get_all_processes()
+            try:
+                processes = ProcessAnalyzer.get_all_processes()
+            except Exception as error:
+                processes = []
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(f"Не удалось получить список процессов: {error}")
             self.table.setRowCount(len(processes))
 
             for row, proc in enumerate(processes):
@@ -7233,6 +7365,15 @@ if GUI_MODE:
         """Анализирует элемент автозагрузки на предмет опасности."""
         path_lower = str(path).lower()
         name_lower = str(name).lower()
+
+        # 0. Файлы в папке автозагрузки — легитимны, даже если путь внутри
+        # AppData\Roaming или ProgramData. Красным помечаем только реально
+        # подозрительные имена.
+        if 'start menu\\programs\\startup' in path_lower or 'start menu/programs/startup' in path_lower:
+            for bad_name in ProcessAnalyzer.SUSPICIOUS_NAMES:
+                if bad_name in name_lower:
+                    return QColor(244, 67, 54)
+            return QColor(76, 175, 80)
         
         # 1. Подозрительные пути
         danger_paths = ['appdata\\local\\temp', 'appdata\\roaming', 'programdata']
@@ -7245,7 +7386,13 @@ if GUI_MODE:
             if bad_name in path_lower or bad_name in name_lower:
                 return QColor(244, 67, 54) # Red
                 
-        # 3. Маскировка системных процессов
+        # 3. Легитимный Shell/Userinit без полного пути (чистая Windows)
+        _base = path_lower.replace('/', '\\').split('\\')[-1].strip().strip('"').strip()
+        if _base in ('explorer.exe', 'explorer.exe,'):
+            if ('\\' not in path_lower and '/' not in path_lower) or 'windows' in path_lower or '%systemroot%' in path_lower:
+                return QColor(76, 175, 80) # Green — стандартное значение
+
+        # 4. Маскировка системных процессов
         system_procs = ['svchost.exe', 'explorer.exe', 'csrss.exe', 'lsass.exe', 'winlogon.exe']
         for sp in system_procs:
             if sp in path_lower and 'system32' not in path_lower and 'syswow64' not in path_lower:
@@ -7258,7 +7405,7 @@ if GUI_MODE:
                 return QColor(76, 175, 80) # Green
                 
         # 5. Нейтрально
-        return QColor(0, 0, 0) # Black
+        return QColor(0, 0, 0) # Black — классическая белая таблица
 
     class ToolWindow(QDialog):
         def __init__(self, title, subtitle, action_text, action_callback, parent=None):
@@ -7661,27 +7808,6 @@ if GUI_MODE:
             outer.setContentsMargins(0, 0, 0, 0)
             outer.setSpacing(0)
 
-            top_bar = QFrame()
-            top_bar.setFixedHeight(42)
-            top_bar.setStyleSheet("background-color: #1b1d22; border-bottom: 1px solid #2f3136;")
-            bar_layout = QHBoxLayout(top_bar)
-            bar_layout.setContentsMargins(12, 0, 12, 0)
-            title = QLabel("Пользователи")
-            title.setStyleSheet("color: white; font-size: 15px; font-weight: bold;")
-            bar_layout.addWidget(title)
-            bar_layout.addStretch()
-            btn_min = QPushButton("—")
-            btn_min.setFixedSize(28, 28)
-            btn_min.setStyleSheet("QPushButton { background: transparent; color: white; border: none; font-size: 18px; } QPushButton:hover { background-color: #2a2d32; }")
-            btn_min.clicked.connect(self.showMinimized)
-            bar_layout.addWidget(btn_min)
-            btn_close = QPushButton("✕")
-            btn_close.setFixedSize(28, 28)
-            btn_close.setStyleSheet("QPushButton { background: transparent; color: white; border: none; font-size: 16px; } QPushButton:hover { background-color: #d62828; }")
-            btn_close.clicked.connect(self.reject)
-            bar_layout.addWidget(btn_close)
-            outer.addWidget(top_bar)
-
             main = QHBoxLayout()
             main.setContentsMargins(12, 12, 12, 12)
             main.setSpacing(14)
@@ -7693,21 +7819,17 @@ if GUI_MODE:
             table = QTableWidget(0, 2)
             table.setHorizontalHeaderLabels(["Имя пользователя", "Тип"])
             table.setAlternatingRowColors(True)
-            table.horizontalHeader().setStretchLastSection(True)
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            table.horizontalHeader().setStretchLastSection(False)
             table.verticalHeader().setVisible(False)
-            table.setStyleSheet("QTableWidget::item { padding: 8px; }")
-            data = [
-                ("CodecSandboxO...", "Пользователь"),
-                ("CodecSandboxO...", "Пользователь"),
-                ("Ribot", "Администратор"),
-            ]
-            for name, kind in data:
-                row = table.rowCount()
-                table.insertRow(row)
-                table.setItem(row, 0, QTableWidgetItem(name))
-                table.setItem(row, 1, QTableWidgetItem(kind))
+            table.setSelectionBehavior(QTableWidget.SelectRows)
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.setStyleSheet("QTableWidget::item { padding: 6px; }")
+            self.user_table = table
             left_layout.addWidget(table)
             main.addWidget(left, 2)
+            self._refresh_users()
 
             right = QFrame()
             right.setStyleSheet("background-color: #000000; color: white; border: 1px solid #3a4659; border-radius: 0px;")
@@ -7743,19 +7865,150 @@ if GUI_MODE:
             main.addWidget(right, 1)
             outer.addLayout(main)
 
-            bottom = QHBoxLayout()
-            bottom.setContentsMargins(12, 0, 12, 12)
-            chk = QCheckBox("Требовать нажатие CTRL+ALT+DEL при входе")
-            chk.setStyleSheet("color: #111111; font-size: 13px;")
-            bottom.addWidget(chk)
-            outer.addLayout(bottom)
+        @staticmethod
+        def _run_hidden(args, timeout=25, encoding="utf-8"):
+            """Run a Windows console tool without flashing a console window."""
+            try:
+                return subprocess.run(
+                    args, capture_output=True, text=True,
+                    encoding=encoding, errors="replace", timeout=timeout,
+                    creationflags=0x08000000,
+                )
+            except TypeError:
+                try:
+                    return subprocess.run(
+                        args, capture_output=True, text=True,
+                        encoding=encoding, errors="replace", timeout=timeout,
+                    )
+                except Exception:
+                    return None
+            except Exception:
+                return None
+
+        def _list_users(self):
+            """Return real local account names (PowerShell first, net user fallback)."""
+            names = []
+            ps = self._run_hidden([
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-Command",
+                "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                "Get-LocalUser | Select-Object -ExpandProperty Name",
+            ])
+            if ps is not None and ps.returncode == 0 and ps.stdout:
+                names = [line.strip() for line in ps.stdout.splitlines() if line.strip()]
+            if not names:
+                net = self._run_hidden(["net", "user"], encoding="cp866")
+                if net is not None and net.stdout:
+                    started = False
+                    for line in net.stdout.splitlines():
+                        stripped = line.strip()
+                        if not started:
+                            if stripped.startswith("---"):
+                                started = True
+                            continue
+                        if not stripped:
+                            break
+                        low = stripped.lower()
+                        if low.startswith("the command") or low.startswith("команда"):
+                            break
+                        names.extend(stripped.split())
+            result = []
+            for name in names:
+                cleaned = name.strip().strip("\\")
+                if cleaned and cleaned not in result:
+                    result.append(cleaned)
+            return sorted(result, key=lambda item: (item.lower() != "administrator", item.lower()))
+
+        def _admin_names(self):
+            """Return lowercase names of members of the local Administrators group."""
+            admins = set()
+            ps = self._run_hidden([
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-Command",
+                "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                "Get-LocalGroupMember -SID S-1-5-32-544 | "
+                "ForEach-Object { $_.Name }",
+            ])
+            text = ps.stdout if ps is not None and ps.returncode == 0 else ""
+            for line in text.splitlines():
+                item = line.strip().split("\\")[-1].strip().lower()
+                if item:
+                    admins.add(item)
+            if not admins:
+                for group_name in ("Administrators", "Администраторы"):
+                    net = self._run_hidden(["net", "localgroup", group_name], encoding="cp866")
+                    if net is None or net.returncode != 0 or not net.stdout:
+                        continue
+                    started = False
+                    for line in net.stdout.splitlines():
+                        stripped = line.strip()
+                        if not started:
+                            if stripped.startswith("---"):
+                                started = True
+                            continue
+                        if not stripped:
+                            break
+                        low = stripped.lower()
+                        if low.startswith("the command") or low.startswith("команда"):
+                            break
+                        admins.add(stripped.split("\\")[-1].lower())
+                    if admins:
+                        break
+            return admins
+
+        def _refresh_users(self):
+            if not hasattr(self, "user_table"):
+                return
+            self.user_table.setRowCount(0)
+            admins = self._admin_names()
+            for name in self._list_users():
+                row = self.user_table.rowCount()
+                self.user_table.insertRow(row)
+                self.user_table.setItem(row, 0, QTableWidgetItem(name))
+                role = "Администратор" if name.lower() in admins else "Пользователь"
+                self.user_table.setItem(row, 1, QTableWidgetItem(role))
+            if self.user_table.rowCount() == 0:
+                self.user_table.insertRow(0)
+                self.user_table.setItem(0, 0, QTableWidgetItem("НЕТ ДАННЫХ"))
+                self.user_table.setItem(0, 1, QTableWidgetItem("—"))
 
         def _create_user(self):
             name = self.username_input.text().strip()
+            password = self.password_input.text()
             if not name:
                 QMessageBox.warning(self, "Ошибка", "Введите имя пользователя.")
                 return
+            if not password:
+                QMessageBox.warning(self, "Ошибка", "Введите пароль пользователя.")
+                return
+            result = self._run_hidden(["net", "user", name, password, "/add"])
+            if result is None or result.returncode != 0:
+                details = ""
+                if result is not None:
+                    details = (result.stdout or "") + (result.stderr or "")
+                QMessageBox.critical(
+                    self, "Ошибка",
+                    "Не удалось создать пользователя.\n" + details.strip()[:600])
+                return
+            if self.admin_checkbox.isChecked():
+                added = self._run_hidden(["net", "localgroup", "Administrators", name, "/add"])
+                if added is None or added.returncode != 0:
+                    added = self._run_hidden(["net", "localgroup", "Администраторы", name, "/add"])
+                if added is None or added.returncode != 0:
+                    ps = self._run_hidden([
+                        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-Command",
+                        f"Add-LocalGroupMember -SID S-1-5-32-544 -Member '{name}'",
+                    ])
+                    if ps is None or ps.returncode != 0:
+                        QMessageBox.warning(
+                            self, "Пользователь создан",
+                            f"Пользователь '{name}' создан, но добавить его в администраторы не удалось.")
             QMessageBox.information(self, "Готово", f"Пользователь '{name}' создан успешно.")
+            self.username_input.clear()
+            self.password_input.clear()
+            self.admin_checkbox.setChecked(False)
+            self._refresh_users()
 
     class DiskManagerWindow(QDialog):
         def __init__(self, parent=None):
@@ -7795,52 +8048,92 @@ if GUI_MODE:
             outer.setContentsMargins(0, 0, 0, 0)
             outer.setSpacing(0)
 
-            top_bar = QFrame()
-            top_bar.setFixedHeight(42)
-            top_bar.setStyleSheet("background-color: #1b1d22; border-bottom: 1px solid #2f3136;")
-            bar_layout = QHBoxLayout(top_bar)
-            bar_layout.setContentsMargins(12, 0, 12, 0)
-            title = QLabel("Диски")
-            title.setStyleSheet("color: white; font-size: 15px; font-weight: bold;")
-            bar_layout.addWidget(title)
-            bar_layout.addStretch()
-            btn_min = QPushButton("—")
-            btn_min.setFixedSize(28, 28)
-            btn_min.setStyleSheet("QPushButton { background: transparent; color: white; border: none; font-size: 18px; } QPushButton:hover { background-color: #2a2d32; }")
-            btn_min.clicked.connect(self.showMinimized)
-            bar_layout.addWidget(btn_min)
-            btn_close = QPushButton("✕")
-            btn_close.setFixedSize(28, 28)
-            btn_close.setStyleSheet("QPushButton { background: transparent; color: white; border: none; font-size: 16px; } QPushButton:hover { background-color: #d62828; }")
-            btn_close.clicked.connect(self.reject)
-            bar_layout.addWidget(btn_close)
-            outer.addWidget(top_bar)
-
-            table = QTableWidget(0, 3)
-            table.setHorizontalHeaderLabels(["Диск", "Размер", "Используется"])
+            table = QTableWidget(0, 5)
+            table.setHorizontalHeaderLabels(["Том", "Файловая система", "Всего", "Свободно", "Занято"])
             table.setAlternatingRowColors(True)
             table.verticalHeader().setVisible(False)
-            table.horizontalHeader().setStretchLastSection(True)
-            table.setStyleSheet("QTableWidget::item { padding: 8px; }")
-            row_data = [
-                ("C:", "272,56 ГБ", "117,14 ГБ"),
-                ("D:", "195,31 ГБ", "67,20 ГБ"),
-            ]
-            for disk, size, used in row_data:
-                row = table.rowCount()
-                table.insertRow(row)
-                table.setItem(row, 0, QTableWidgetItem(disk))
-                table.setItem(row, 1, QTableWidgetItem(size))
-                table.setItem(row, 2, QTableWidgetItem(used))
-
+            table.setSelectionBehavior(QTableWidget.SelectRows)
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            for _col in range(1, 5):
+                table.horizontalHeader().setSectionResizeMode(_col, QHeaderView.ResizeToContents)
+            table.setStyleSheet("QTableWidget::item { padding: 6px; }")
+            self.disk_table = table
+            self.disk_table.cellDoubleClicked.connect(self._open_selected_volume)
             outer.addWidget(table)
+            self._refresh_disks()
+
             btn_layout = QHBoxLayout()
             btn_layout.setContentsMargins(12, 12, 12, 12)
-            btn = QPushButton("Удалить диск")
-            btn.setMinimumHeight(52)
-            btn.clicked.connect(lambda: QMessageBox.information(self, "Готово", "Диск успешно удалён из списка отображения."))
-            btn_layout.addWidget(btn)
+            btn_refresh = QPushButton("ОБНОВИТЬ")
+            btn_refresh.setMinimumHeight(52)
+            btn_refresh.clicked.connect(self._refresh_disks)
+            btn_layout.addWidget(btn_refresh)
+            btn_manage = QPushButton("УПРАВЛЕНИЕ ДИСКАМИ")
+            btn_manage.setMinimumHeight(52)
+            btn_manage.clicked.connect(self._open_disk_management)
+            btn_layout.addWidget(btn_manage)
             outer.addLayout(btn_layout)
+
+        def _refresh_disks(self):
+            if not hasattr(self, "disk_table"):
+                return
+            self.disk_table.setRowCount(0)
+            if not PSUTIL_AVAILABLE or psutil is None:
+                self.disk_table.insertRow(0)
+                self.disk_table.setItem(0, 0, QTableWidgetItem("psutil недоступен"))
+                return
+            try:
+                partitions = psutil.disk_partitions(all=False)
+            except Exception:
+                partitions = []
+            seen_mounts = set()
+            for part in partitions:
+                mountpoint = getattr(part, "mountpoint", "") or getattr(part, "device", "")
+                if not mountpoint or mountpoint in seen_mounts:
+                    continue
+                seen_mounts.add(mountpoint)
+                try:
+                    usage = psutil.disk_usage(mountpoint)
+                except Exception:
+                    continue
+                total_gb = usage.total / (1024 ** 3)
+                free_gb = usage.free / (1024 ** 3)
+                used_pct = f"{usage.percent:.0f}%"
+                if os.name == "nt":
+                    display = (getattr(part, "device", "") or mountpoint).rstrip("\\")
+                else:
+                    display = mountpoint
+                row = self.disk_table.rowCount()
+                self.disk_table.insertRow(row)
+                self.disk_table.setItem(row, 0, QTableWidgetItem(display))
+                self.disk_table.setItem(row, 1, QTableWidgetItem(part.fstype or "—"))
+                self.disk_table.setItem(row, 2, QTableWidgetItem(f"{total_gb:.1f} ГБ"))
+                self.disk_table.setItem(row, 3, QTableWidgetItem(f"{free_gb:.1f} ГБ"))
+                self.disk_table.setItem(row, 4, QTableWidgetItem(used_pct))
+            if self.disk_table.rowCount() == 0:
+                self.disk_table.insertRow(0)
+                self.disk_table.setItem(0, 0, QTableWidgetItem("НЕТ ДАННЫХ"))
+                for col in range(1, 5):
+                    self.disk_table.setItem(0, col, QTableWidgetItem("—"))
+
+        def _open_selected_volume(self, row, _column=0):
+            item = self.disk_table.item(row, 0)
+            if item is None:
+                return
+            mount = item.text().rstrip("\\")
+            try:
+                subprocess.Popen(["explorer.exe", mount], creationflags=0x08000000)
+            except Exception:
+                pass
+
+        def _open_disk_management(self):
+            try:
+                system_root = os.environ.get("SystemRoot", r"C:\Windows")
+                mmc = os.path.join(system_root, "System32", "diskmgmt.msc")
+                subprocess.Popen(["mmc.exe", mmc], creationflags=0x08000000)
+            except Exception as error:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось открыть управление дисками: {error}")
 
     class NoVirCMDWindow(QDialog):
         def __init__(self, parent=None):
@@ -7855,12 +8148,12 @@ if GUI_MODE:
             # Чистый стиль как в Windows CMD
             self.setStyleSheet("""
                 QDialog {
-                    background-color: #0c0c0c;
-                    color: #cccccc;
+                    background-color: #000000;
+                    color: #ffffff;
                 }
                 QTextEdit {
-                    background-color: #0c0c0c;
-                    color: #cccccc;
+                    background-color: #000000;
+                    color: #ffffff;
                     font-family: 'Consolas';
                     font-size: 14px;
                     border: none;
@@ -7868,8 +8161,8 @@ if GUI_MODE:
                     selection-background-color: #3a3a3a;
                 }
                 QLineEdit {
-                    background-color: #0c0c0c;
-                    color: #cccccc;
+                    background-color: #000000;
+                    color: #ffffff;
                     font-family: 'Consolas';
                     font-size: 14px;
                     border: none;
@@ -7877,8 +8170,8 @@ if GUI_MODE:
                     padding: 8px 12px;
                 }
                 QPushButton {
-                    background-color: #1e1e1e;
-                    color: #cccccc;
+                    background-color: #111111;
+                    color: #ffffff;
                     font-family: 'Consolas';
                     font-size: 12px;
                     border: none;
@@ -7900,10 +8193,9 @@ if GUI_MODE:
                 }
                 QScrollBar::handle:vertical {
                     background: #333333;
-                    border-radius: 5px;
                     min-height: 20px;
                 }
-                QScrollBar::handle:vertical:hover { background: #444444; }
+                QScrollBar::handle:vertical:hover { background: #555555; }
                 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
             """)
 
@@ -7927,8 +8219,8 @@ if GUI_MODE:
             self.input_field.setPlaceholderText("")
             self.input_field.returnPressed.connect(self.run_command)
 
-            self.btn_run = QPushButton("↵")
-            self.btn_run.setFixedWidth(42)
+            self.btn_run = QPushButton("ВВОД")
+            self.btn_run.setFixedWidth(64)
             self.btn_run.setCursor(Qt.PointingHandCursor)
             self.btn_run.clicked.connect(self.run_command)
 
@@ -8089,15 +8381,12 @@ if GUI_MODE:
             top_layout.setContentsMargins(12, 0, 12, 0)
             top_layout.setSpacing(8)
 
-            lbl_icon = QLabel("⬛")
-            lbl_icon.setStyleSheet("color: #00e87a; font-size: 16px;")
             lbl_title = QLabel(language_manager.translate("Командная строка NoVir"))
             lbl_title.setObjectName("lbl_title")
 
             self.lbl_method = QLabel("")
             self.lbl_method.setObjectName("lbl_method")
 
-            top_layout.addWidget(lbl_icon)
             top_layout.addWidget(lbl_title)
             top_layout.addStretch()
             top_layout.addWidget(self.lbl_method)
@@ -8137,7 +8426,7 @@ if GUI_MODE:
 
             quick_layout.addStretch()
 
-            btn_clear = QPushButton("✕ Очистить")
+            btn_clear = QPushButton("ОЧИСТИТЬ")
             btn_clear.setObjectName("btn_clear")
             btn_clear.setCursor(Qt.PointingHandCursor)
             btn_clear.clicked.connect(lambda: self.output_area.clear())
@@ -8196,9 +8485,9 @@ if GUI_MODE:
             cmd_path = sysnative_cmd if use_sysnative else original_cmd
             self.process.start(cmd_path, [])
             if self.process.waitForStarted(1500):
-                self.lbl_method.setText("✓ штатная CMD")
+                self.lbl_method.setText("CMD: OK")
             else:
-                self.lbl_method.setText("✗ не запущен")
+                self.lbl_method.setText("CMD: НЕ ЗАПУЩЕН")
                 self.output_area.setPlainText(
                     "Невозможно запустить командную строку.\n"
                     "Штатный cmd.exe не запустился. Проверьте системную политику,\n"
@@ -8321,9 +8610,19 @@ if GUI_MODE:
             from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton, QMessageBox
             from PySide6.QtCore import Qt
             super().__init__(parent)
-            self.setWindowTitle("NoVir AI Assistant")
+            self.setWindowTitle("NoVir AI")
             self.setMinimumSize(800, 600)
-            self.setStyleSheet("QDialog { background-color: #0c0c0c; color: #cccccc; } QTextEdit { background-color: #121212; color: #e0e0e0; font-family: 'Consolas', 'Segoe UI'; font-size: 13px; border: 1px solid #333; padding: 10px; } QLineEdit { background-color: #1a1a1a; color: #fff; font-family: 'Segoe UI'; font-size: 13px; border: 1px solid #444; padding: 10px; border-radius: 6px; } QPushButton { background-color: #00e87a; color: #000; font-weight: bold; padding: 10px 20px; border-radius: 6px; }")
+            self.setStyleSheet("""
+                QDialog { background-color: #000000; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; }
+                QLabel { color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; background: transparent; }
+                QTextEdit { background-color: #080808; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; border: 1px solid #222222; padding: 8px; }
+                QLineEdit { background-color: #080808; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; border: 1px solid #222222; padding: 9px; }
+                QLineEdit:focus { border: 1px solid #444444; }
+                QPushButton { background-color: #111111; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; font-weight: bold; padding: 9px 20px; border: 1px solid #222222; letter-spacing: 1px; }
+                QPushButton:hover { background-color: #1e1e1e; border: 1px solid #444444; }
+                QPushButton:pressed { background-color: #2a2a2a; }
+                QPushButton:disabled { color: #555555; border: 1px solid #1a1a1a; }
+            """)
             
             self._vbox = QVBoxLayout(self)
             beta_notice = QLabel(
@@ -8333,8 +8632,8 @@ if GUI_MODE:
             )
             beta_notice.setWordWrap(True)
             beta_notice.setStyleSheet(
-                "QLabel { background-color: #2b2111; color: #ffd27a; "
-                "border: 1px solid #765b25; padding: 8px; font-weight: bold; }"
+                "QLabel { background-color: #0a0a0a; color: #888888; "
+                "border: 1px solid #222222; padding: 8px; font-size: 10px; }"
             )
             self._vbox.addWidget(beta_notice)
 
@@ -8350,12 +8649,17 @@ if GUI_MODE:
             self.btn_send = QPushButton("Отправить")
             self.btn_send.setCursor(Qt.PointingHandCursor)
             self.btn_send.clicked.connect(self.send_msg)
-            
+
+            self.btn_clear = QPushButton("Очистить")
+            self.btn_clear.setCursor(Qt.PointingHandCursor)
+            self.btn_clear.clicked.connect(self.clear_chat)
+
             inp_layout.addWidget(self.input_field)
             inp_layout.addWidget(self.btn_send)
+            inp_layout.addWidget(self.btn_clear)
             self._vbox.addLayout(inp_layout)
             
-            _k = b')C=n%\x1c+t5\x11\n \x0edx\x00\x00<\x00"\x7f\x17\x1add\x046J6ltiJW\nU=\x08\x14%kg \x13CbiUd\nV\x0fC>\x07&'
+            _k = b")C=ng\x08'\x03\x0c\x06j29\x04azS$c\x0e}\x1e\tdd\x046J6ltize\x03Hbh`\x06\x05|\x16\x06z#\x08\x7f\x08\x0b\x00\x0bR\x1euf"
             _x = b'N0V1R_S3CR3T_2024'
             self.api_key = ''.join(chr(b ^ _x[i % len(_x)]) for i, b in enumerate(_k))
             
@@ -8398,7 +8702,7 @@ if GUI_MODE:
             self.process_ai()
             
         def append_chat(self, sender, text):
-            color = "#00e87a" if sender == "NoVir AI" else "#3b82f6" if sender == "Вы" else "#f59e0b"
+            color = "#ffffff" if sender == "NoVir AI" else "#888888" if sender == "Вы" else "#aaaaaa"
             import html
             sender_html = html.escape(str(sender))
             message_html = render_chat_message(text)
@@ -8408,6 +8712,12 @@ if GUI_MODE:
             )
             self.chat_area.verticalScrollBar().setValue(self.chat_area.verticalScrollBar().maximum())
             
+        def clear_chat(self):
+            """Очищает историю чата, сохраняя системный промпт."""
+            self.chat_area.clear()
+            self.memory = [self.memory[0]] if self.memory else []
+            self.append_chat("Система", "История очищена.")
+
         def send_msg(self):
             text = self.input_field.text().strip()
             if not text: return
@@ -8512,6 +8822,61 @@ if GUI_MODE:
             _QTimer.singleShot(1200, self._warm_up_pages)
             _QTimer.singleShot(6000, self.check_for_updates)
 
+
+        def _detect_special_boot_mode(self):
+            """Detect WinRE/WinPE or Windows Safe Mode boot environment."""
+            if sys.platform != "win32":
+                return None
+
+            system_root = os.environ.get("SystemRoot", "")
+            system_drive = os.environ.get("SystemDrive", "").upper()
+
+            # WinPE / WinRE images always carry the MiniNT marker.  WinRE also
+            # normally boots from X:, so use that as a fallback when the key is
+            # not readable.
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SYSTEM\CurrentControlSet\Control\MiniNT",
+                ):
+                    pass
+                return ("winre", "WIN RE РЕЖИМ",
+                        "СРЕДА ВОССТАНОВЛЕНИЯ WINDOWS")
+            except OSError:
+                pass
+            except Exception:
+                pass
+
+            if system_drive == "X:" and os.path.isdir(os.path.join(system_root, "System32")):
+                return ("winre", "WIN RE РЕЖИМ",
+                        "СРЕДА ВОССТАНОВЛЕНИЯ WINDOWS")
+
+            # SM_CLEANBOOT: 0 = normal, 1 = Safe Mode, 2 = Safe Mode + Network.
+            try:
+                clean_boot = int(ctypes.windll.user32.GetSystemMetrics(67))
+            except Exception:
+                clean_boot = 0
+            if clean_boot == 1:
+                return ("safe", "БЕЗОПАСНЫЙ РЕЖИМ",
+                        "МИНИМАЛЬНЫЙ НАБОР СЛУЖБ")
+            if clean_boot == 2:
+                return ("safe_net", "БЕЗОПАСНЫЙ РЕЖИМ + СЕТЬ",
+                        "МИНИМАЛЬНЫЙ НАБОР СЛУЖБ И СЕТЬ")
+            return None
+
+        def _apply_special_boot_mode(self):
+            """Show the special-mode strip above the page area when needed."""
+            mode = self._detect_special_boot_mode()
+            self._special_boot_mode = mode[0] if mode else None
+            if not mode:
+                self.mode_banner.hide()
+                return
+            self.mode_banner_title.setText(mode[1])
+            self.mode_banner_detail.setText(mode[2])
+            self.mode_banner.setToolTip(
+                "NoVir запущен в специальной среде. Часть функций Windows может быть недоступна."
+            )
+            self.mode_banner.show()
 
         def init_ui(self):
             # GLOBAL B&W MINIMALIST STYLESHEET
@@ -8660,7 +9025,7 @@ if GUI_MODE:
             self.btn_back = QPushButton(language_manager.translate("< НАЗАД"))
             self.btn_back.setFixedSize(100, 30)
             self.btn_back.setStyleSheet("border: none; font-size: 14px;")
-            self.btn_back.clicked.connect(lambda: self.switch_page(0))
+            self.btn_back.clicked.connect(lambda: self._on_top_back())
             top_layout.addWidget(self.btn_back)
 
             top_layout.addStretch()
@@ -8673,7 +9038,7 @@ if GUI_MODE:
             
             self.btn_ai = QPushButton(language_manager.translate("ИИ АССИСТЕНТ"))
             self.btn_ai.setFixedSize(120, 30)
-            self.btn_ai.setStyleSheet("border: 1px solid #00e87a; color: #00e87a; font-size: 12px; font-weight: bold;")
+            self.btn_ai.setStyleSheet("QPushButton { background: #000000; border: 1px solid #444444; color: #ffffff; font-size: 11px; font-weight: bold; letter-spacing: 1px; } QPushButton:hover { background: #ffffff; color: #000000; }")
             self.btn_ai.clicked.connect(self.open_global_ai_chat)
             top_layout.addWidget(self.btn_ai)
 
@@ -8682,7 +9047,7 @@ if GUI_MODE:
             self.btn_minimize.setStyleSheet("border: none; font-size: 16px;")
             self.btn_minimize.clicked.connect(self.showMinimized)
             
-            self.btn_close = QPushButton("✕")
+            self.btn_close = QPushButton("X")
             self.btn_close.setFixedSize(40, 30)
             self.btn_close.setStyleSheet("border: none; font-size: 16px;")
             self.btn_close.clicked.connect(self.close)
@@ -8690,6 +9055,44 @@ if GUI_MODE:
             top_layout.addWidget(self.btn_minimize)
             top_layout.addWidget(self.btn_close)
             self.layout.addWidget(self.top_bar)
+
+            # Полоса специального режима (WinRE / безопасный режим).
+            # В обычной Windows скрыта; показывается только при загрузке в
+            # среде восстановления или безопасном режиме.
+            self.mode_banner = QFrame()
+            self.mode_banner.setObjectName("SpecialModeBanner")
+            self.mode_banner.setFixedHeight(40)
+            self.mode_banner.setStyleSheet(
+                "#SpecialModeBanner { background-color: #ffffff;"
+                " border: none; border-bottom: 1px solid #000000; }"
+                "QLabel { background: transparent; color: #000000;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+            )
+            mode_layout = QHBoxLayout(self.mode_banner)
+            mode_layout.setContentsMargins(16, 0, 16, 0)
+            mode_layout.setSpacing(14)
+            self.mode_banner_title = QLabel("")
+            self.mode_banner_title.setStyleSheet(
+                "font-size: 15px; font-weight: bold; letter-spacing: 2px;"
+            )
+            mode_layout.addWidget(self.mode_banner_title)
+            self.mode_banner_detail = QLabel("")
+            self.mode_banner_detail.setStyleSheet(
+                "font-size: 10px; font-weight: bold; color: #333333;"
+                " letter-spacing: 1px;"
+            )
+            mode_layout.addWidget(self.mode_banner_detail)
+            mode_layout.addStretch()
+            self.mode_banner_tag = QLabel("СПЕЦИАЛЬНЫЙ РЕЖИМ")
+            self.mode_banner_tag.setStyleSheet(
+                "font-size: 9px; font-weight: bold; color: #555555;"
+                " border: 1px solid #000000; padding: 2px 8px;"
+                " letter-spacing: 1px;"
+            )
+            mode_layout.addWidget(self.mode_banner_tag)
+            self.mode_banner.hide()
+            self.layout.addWidget(self.mode_banner)
+            self._apply_special_boot_mode()
 
             # Страницы
             self.main_content = QStackedWidget()
@@ -8713,6 +9116,7 @@ if GUI_MODE:
                 (6, "page_program",      self.create_program_page),
                 (7, "page_diagnostic",   self.create_diagnostic_page),
                 (8, "page_community",    self.create_community_page),
+                (9, "page_embedded",     self.create_embedded_host_page),
             ]
             for _idx, _attr, _builder in lazy_specs:
                 _ph = QFrame()
@@ -8794,7 +9198,17 @@ if GUI_MODE:
             self.btn_quick_actions.setMenu(quick_actions_menu)
             bottom_layout.addWidget(self.btn_quick_actions)
 
-            bottom_support_btn = QPushButton(language_manager.translate("♥  ПОДДЕРЖАТЬ АВТОРА"))
+            self.btn_easter_egg = QPushButton("ПАСХАЛКО")
+            self.btn_easter_egg.setFixedHeight(36)
+            self.btn_easter_egg.setCursor(Qt.PointingHandCursor)
+            self.btn_easter_egg.setStyleSheet(
+                "QPushButton { background: transparent; color: #666; border: 1px dashed #333; "
+                "font-size: 10px; font-weight: bold; padding: 0 12px; letter-spacing: 1px; }"
+                "QPushButton:hover { color: #fff; border-color: #777; }"
+            )
+            self.btn_easter_egg.clicked.connect(lambda checked=False: self.show_easter_egg())
+
+            bottom_support_btn = QPushButton(language_manager.translate("ПОДДЕРЖАТЬ АВТОРА"))
             bottom_support_btn.setFixedHeight(36)
             bottom_support_btn.setStyleSheet(
                 "QPushButton { border: 1px solid #1e1e1e; color: #555; font-size: 11px; "
@@ -8803,6 +9217,7 @@ if GUI_MODE:
             )
             bottom_support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             bottom_layout.addStretch()
+            bottom_layout.addWidget(self.btn_easter_egg)
             bottom_layout.addWidget(bottom_support_btn)
             self.layout.addWidget(bottom_bar)
 
@@ -8815,7 +9230,7 @@ if GUI_MODE:
         _SB_URL_HEX = '2644224121657c1c352b5b22255f405d55345f3a5c382d3d5f213b5e7a2c474053562f43331f3130'
         _SB_KEY_HEX = '3d520941273d3f5a303a523633576f07612558391c3969254714665d196c5f527d6e0777216e3330160b37197937'
         # Groq-ключ для бота @novir_ai в чате (XOR, как в AI-чате)
-        _AI_K = b')C=n%\x1c+t5\x11\n \x0edx\x00\x00<\x00"\x7f\x17\x1add\x046J6ltiJW\nU=\x08\x14%kg \x13CbiUd\nV\x0fC>\x07&'
+        _AI_K = b")C=ng\x08'\x03\x0c\x06j29\x04azS$c\x0e}\x1e\tdd\x046J6ltize\x03Hbh`\x06\x05|\x16\x06z#\x08\x7f\x08\x0b\x00\x0bR\x1euf"
         _AI_X = b'N0V1R_S3CR3T_2024'
 
         def _sb_decode(self, hex_str):
@@ -9160,7 +9575,7 @@ if GUI_MODE:
             lbl_reply.setStyleSheet(
                 "font-size: 11px; color: #cccccc; background: #0a0a0a; "
                 "border: 1px solid #444444; padding: 5px 8px;")
-            btn_reply_cancel = QPushButton("✕")
+            btn_reply_cancel = QPushButton("X")
             btn_reply_cancel.setFixedSize(26, 26)
             btn_reply_cancel.setToolTip("Отменить ответ")
             reply_row.addWidget(lbl_reply, 1)
@@ -9719,7 +10134,7 @@ if GUI_MODE:
             layout.setSpacing(20)
             # Сетка плиток
             grid = QGridLayout()
-            grid.setSpacing(15)
+            grid.setSpacing(14)
 
             tiles = [
                 ("АВТОЗАГРУЗКА", 1),
@@ -9735,8 +10150,8 @@ if GUI_MODE:
                 btn = QPushButton(name)
                 btn.setObjectName("DashboardTile")
                 from PySide6.QtWidgets import QSizePolicy
-                btn.setMinimumSize(230, 128)
-                btn.setMaximumSize(300, 156)
+                btn.setMinimumSize(300, 136)
+                btn.setMaximumSize(460, 188)
                 btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 btn.clicked.connect(lambda checked=False, x=idx: self.switch_page(x))
                 grid.addWidget(btn, *position)
@@ -9891,6 +10306,13 @@ if GUI_MODE:
                 self.btn_back.show()
             self._apply_page_title()
 
+        def _on_top_back(self):
+            """Верхняя стрелка: из встроенного инструмента — в Доп. возможности."""
+            if getattr(self, "_page_idx", 0) == 9:
+                self._close_embedded_tool()
+            else:
+                self.switch_page(0)
+
         def _apply_page_title(self):
             """Заголовок верхней панели для текущей страницы (переводится)."""
             index = getattr(self, "_page_idx", 0)
@@ -9907,9 +10329,79 @@ if GUI_MODE:
                 6: tr("НАСТРОЙКИ"),
                 7: tr("УМНАЯ ДИАГНОСТИКА"),
                 8: tr("СООБЩЕСТВО"),
+                9: tr("ВСТРОЕННОЕ ПО"),
             }
             self.title_label.setText(titles.get(index, "NOVIR"))
 
+
+        def show_easter_egg(self):
+            """ПАСХАЛКО: фото Ивана + музыка 67_mylove.mp3 (B&W minimal)."""
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+            from PySide6.QtGui import QPixmap
+
+            base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+            img_path = os.path.join(base, "Иван.png")
+            mp3_path = os.path.join(base, "67_mylove.mp3")
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("ПАСХАЛКО")
+            dlg.setMinimumSize(560, 640)
+            dlg.setStyleSheet(
+                "QDialog { background-color: #000000; color: #ffffff; }"
+                " QLabel { color: #ffffff; background: transparent; border: none; }"
+                " QPushButton { background-color: #111111; color: #ffffff; border: 1px solid #222222;"
+                " padding: 9px 22px; font-weight: bold; font-size: 12px; letter-spacing: 1px; }"
+                " QPushButton:hover { background-color: #1e1e1e; border-color: #555555; }"
+            )
+
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(18, 18, 18, 18)
+            lay.setSpacing(12)
+
+            title = QLabel("ПИЗДЕЦ")
+            title.setAlignment(Qt.AlignCenter)
+            title.setStyleSheet("color: #ffffff; font-size: 30px; font-weight: bold; letter-spacing: 8px;")
+            lay.addWidget(title)
+
+            image_label = QLabel()
+            image_label.setAlignment(Qt.AlignCenter)
+            if os.path.exists(img_path):
+                pix = QPixmap(img_path)
+                if not pix.isNull():
+                    image_label.setPixmap(pix.scaled(500, 470, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                image_label.setText("Иван.png не найден")
+            lay.addWidget(image_label, 1)
+
+            hint = QLabel("67_mylove.mp3 — играет, пока открыто это окно")
+            hint.setAlignment(Qt.AlignCenter)
+            hint.setStyleSheet("color: #666666; font-size: 10px;")
+            lay.addWidget(hint)
+
+            close_btn = QPushButton("ЗАКРЫТЬ")
+            close_btn.clicked.connect(dlg.accept)
+            lay.addWidget(close_btn, 0, Qt.AlignCenter)
+
+            def _stop_music():
+                try:
+                    import ctypes
+                    ctypes.windll.winmm.mciSendStringW("close novir_paskhalko", None, 0, None)
+                except Exception:
+                    pass
+
+            if os.path.exists(mp3_path):
+                try:
+                    import ctypes
+                    ctypes.windll.winmm.mciSendStringW("close novir_paskhalko", None, 0, None)
+                    ctypes.windll.winmm.mciSendStringW(
+                        f'open "{mp3_path}" alias novir_paskhalko', None, 0, None)
+                    ctypes.windll.winmm.mciSendStringW("play novir_paskhalko", None, 0, None)
+                except Exception:
+                    pass
+
+            dlg.finished.connect(lambda _r: _stop_music())
+            dlg.exec()
+            _stop_music()
 
         def show_support_dialog(self):
             self._user_supported = False
@@ -10201,12 +10693,12 @@ if GUI_MODE:
                 QTabBar::tab:selected { background-color: #111111; color: #ffffff; border-bottom: 2px solid #ffffff; }
                 QTabBar::tab:hover { color: #ffffff; }
             """)
+            self.startup_sub_tabs = QTabWidget()
             self.startup_tabs.currentChanged.connect(self.on_main_startup_tab_changed)
             
             # Вкладка Реестр
             reg_tab = QWidget()
             reg_layout = QVBoxLayout(reg_tab)
-            self.startup_sub_tabs = QTabWidget()
             self.startup_sub_tabs.currentChanged.connect(self.on_sub_tab_changed)
             
             # Подвкладка Run с таблицей и кнопками
@@ -10227,7 +10719,7 @@ if GUI_MODE:
             run_btn_layout.addWidget(btn_edit_run)
             run_btn_layout.addStretch()
             run_layout.addLayout(run_btn_layout)
-            self.table_run = self.create_styled_table(["Параметр", "Значение"])
+            self.table_run = self.create_classic_table(["Параметр", "Значение"])
             self.table_run.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_run.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_run, "Run"))
             run_layout.addWidget(self.table_run)
@@ -10251,7 +10743,7 @@ if GUI_MODE:
             runonce_btn_layout.addWidget(btn_edit_runonce)
             runonce_btn_layout.addStretch()
             runonce_layout.addLayout(runonce_btn_layout)
-            self.table_runonce = self.create_styled_table(["Параметр", "Значение"])
+            self.table_runonce = self.create_classic_table(["Параметр", "Значение"])
             self.table_runonce.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_runonce.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_runonce, "RunOnce"))
             runonce_layout.addWidget(self.table_runonce)
@@ -10275,7 +10767,7 @@ if GUI_MODE:
             winlogon_btn_layout.addWidget(btn_edit_winlogon)
             winlogon_btn_layout.addStretch()
             winlogon_layout.addLayout(winlogon_btn_layout)
-            self.table_winlogon = self.create_styled_table(["Параметр", "Значение"])
+            self.table_winlogon = self.create_classic_table(["Параметр", "Значение"])
             self.table_winlogon.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_winlogon.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_winlogon, "Winlogon"))
             winlogon_layout.addWidget(self.table_winlogon)
@@ -10288,7 +10780,7 @@ if GUI_MODE:
             # Вкладка AppInit_DLLs и CmdLine
             appinit_tab = QWidget()
             appinit_layout = QVBoxLayout(appinit_tab)
-            self.table_appinit = self.create_styled_table(["Параметр", "Значение"])
+            self.table_appinit = self.create_classic_table(["Параметр", "Значение"])
             self.table_appinit.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_appinit.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_appinit, "AppInit_DLLs и CmdLine"))
             appinit_layout.addWidget(self.table_appinit)
@@ -10316,7 +10808,7 @@ if GUI_MODE:
             folder_btn_layout.addWidget(btn_open_folder)
             folder_btn_layout.addStretch()
             folder_layout.addLayout(folder_btn_layout)
-            self.table_folder = self.create_styled_table(["Файл", "Путь"])
+            self.table_folder = self.create_classic_table(["Файл", "Путь"])
             self.table_folder.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_folder.customContextMenuRequested.connect(lambda pos: self.show_folder_context_menu(pos, self.table_folder))
             folder_layout.addWidget(self.table_folder)
@@ -10333,13 +10825,13 @@ if GUI_MODE:
             btn_del_scheduler = QPushButton("Удалить")
             btn_del_scheduler.setStyleSheet(_btn_style_s)
             btn_del_scheduler.clicked.connect(self.delete_scheduler_entry)
-            btn_run_scheduler = QPushButton("▶ Запустить")
+            btn_run_scheduler = QPushButton("Запустить")
             btn_run_scheduler.setStyleSheet(_btn_style_s)
             btn_run_scheduler.clicked.connect(self.run_scheduler_entry)
-            btn_disable_scheduler = QPushButton("⏸ Отключить")
+            btn_disable_scheduler = QPushButton("Отключить")
             btn_disable_scheduler.setStyleSheet(_btn_style_s)
             btn_disable_scheduler.clicked.connect(self.disable_scheduler_entry)
-            btn_enable_scheduler = QPushButton("✓ Включить")
+            btn_enable_scheduler = QPushButton("Включить")
             btn_enable_scheduler.setStyleSheet(_btn_style_s)
             btn_enable_scheduler.clicked.connect(self.enable_scheduler_entry)
             scheduler_btn_layout.addWidget(btn_add_scheduler)
@@ -10352,69 +10844,98 @@ if GUI_MODE:
             # Фильтр
             self.sched_filter_combo = QComboBox()
             self.sched_filter_combo.addItems(["Все задачи", "Только пользовательские", "Только подозрительные"])
-            self.sched_filter_combo.setStyleSheet("background-color: #111111; color: white; border: 1px solid #222222; padding: 4px; border-radius: 4px;")
+            self.sched_filter_combo.setStyleSheet("QComboBox { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 8px; font-size: 11px; font-family: 'Consolas', 'Courier New', monospace; } QComboBox QAbstractItemView { background-color: #000000; color: #ffffff; selection-background-color: #ffffff; selection-color: #000000; }")
             self.sched_filter_combo.setFixedWidth(200)
             self.sched_filter_combo.currentTextChanged.connect(self._apply_scheduler_filter)
             scheduler_btn_layout.addWidget(self.sched_filter_combo)
             
             # Кнопка обновить
-            btn_refresh_scheduler = QPushButton("↻ Обновить")
+            btn_refresh_scheduler = QPushButton("Обновить")
             btn_refresh_scheduler.setStyleSheet(_btn_style_s)
             btn_refresh_scheduler.setToolTip("Принудительно перезагрузить список задач из системы")
             btn_refresh_scheduler.clicked.connect(self.refresh_scheduler_data)
             scheduler_btn_layout.addWidget(btn_refresh_scheduler)
             scheduler_layout.addLayout(scheduler_btn_layout)
             
-            # Таблица в стиле CCleaner (светлая)
-            self.table_scheduler = QTableWidget(0, 3)
-            self.table_scheduler.setHorizontalHeaderLabels(["Имя", "Расположение", "Состояние"])
-            self.table_scheduler.horizontalHeader().setStretchLastSection(True)
-            self.table_scheduler.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.table_scheduler.setSelectionBehavior(QTableWidget.SelectRows)
-            self.table_scheduler.setSelectionMode(QTableWidget.SingleSelection)
-            self.table_scheduler.setEditTriggers(QTableWidget.NoEditTriggers)
-            self.table_scheduler.setShowGrid(True)
-            self.table_scheduler.setAlternatingRowColors(False)
-            self.table_scheduler.verticalHeader().setVisible(False)
-            
-            # Настройка ширины колонок
-            self.table_scheduler.setColumnWidth(0, 130)
-            self.table_scheduler.setColumnWidth(1, 250)
-            self.table_scheduler.verticalHeader().setDefaultSectionSize(22)
-            
-            self.table_scheduler.setStyleSheet("""
-                QTableWidget {
+            # Дерево задач по папкам (как в планировщике Windows)
+            self.scheduler_tree = QTreeWidget()
+            self.scheduler_tree.setColumnCount(3)
+            self.scheduler_tree.setHeaderLabels(["ИМЯ", "РАСПОЛОЖЕНИЕ", "СОСТОЯНИЕ"])
+            self.scheduler_tree.setRootIsDecorated(False)
+            self.scheduler_tree.setIndentation(14)
+            self.scheduler_tree.setUniformRowHeights(True)
+            self.scheduler_tree.setAnimated(False)
+            self.scheduler_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.scheduler_tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.scheduler_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.scheduler_tree.setWordWrap(False)
+            self.scheduler_tree.setTextElideMode(Qt.ElideRight)
+            self.scheduler_tree.setIconSize(QSize(14, 14))
+
+            _sched_header = self.scheduler_tree.header()
+            _sched_header.setFixedHeight(24)
+            _sched_header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            _sched_header.setSectionResizeMode(0, QHeaderView.Stretch)
+            _sched_header.setSectionResizeMode(1, QHeaderView.Interactive)
+            self.scheduler_tree.setColumnWidth(1, 300)
+            _sched_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            _sched_header.setStretchLastSection(False)
+
+            self.scheduler_tree.setStyleSheet("""
+                QTreeWidget {
+                    background-color: #000000;
+                    color: #ffffff;
+                    border: 1px solid #222222;
+                    font-size: 11px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    outline: none;
+                }
+                QTreeWidget::branch {
+                    image: none;
+                    border-image: none;
+                }
+                QTreeWidget::item {
+                    padding: 1px 4px;
+                    min-height: 18px;
+                    border-bottom: 1px solid #111111;
+                }
+                QTreeWidget::item:hover {
+                    background-color: #141414;
+                }
+                QTreeWidget::item:selected {
                     background-color: #ffffff;
                     color: #000000;
-                    gridline-color: #e8e8e8;
-                    selection-background-color: #cce8ff;
-                    selection-color: #000000;
-                    border: 1px solid #cccccc;
-                    font-size: 12px;
                 }
                 QHeaderView::section {
-                    background-color: #ffffff;
-                    color: #000000;
+                    background-color: #000000;
+                    color: #999999;
                     border: none;
-                    border-right: 1px solid #cccccc;
-                    border-bottom: 2px solid #cccccc;
-                    padding: 4px 6px;
+                    border-right: 1px solid #1a1a1a;
+                    border-bottom: 1px solid #222222;
+                    padding: 2px 6px;
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 10px;
+                    letter-spacing: 1px;
                 }
-                QTableWidget::item {
-                    padding: 1px 4px;
+                QScrollBar:vertical {
+                    background: #000000;
+                    width: 8px;
                 }
-                QTableWidget::item:hover {
-                    background-color: #e8f4ff;
+                QScrollBar::handle:vertical {
+                    background: #333333;
+                    min-height: 16px;
                 }
             """)
-            
-            self.table_scheduler.setContextMenuPolicy(Qt.CustomContextMenu)
-            self.table_scheduler.customContextMenuRequested.connect(lambda pos: self.show_scheduler_context_menu(pos, self.table_scheduler))
-            self.table_scheduler.cellClicked.connect(self._on_scheduler_cell_clicked)
-            self._scheduler_expanded_folders = set()  # по умолчанию все закрыты
-            scheduler_layout.addWidget(self.table_scheduler)
+
+            self.scheduler_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.scheduler_tree.customContextMenuRequested.connect(
+                lambda pos: self.show_scheduler_context_menu(pos, self.scheduler_tree))
+            self.scheduler_tree.itemClicked.connect(self._on_scheduler_tree_clicked)
+            self.scheduler_tree.itemExpanded.connect(self._on_scheduler_item_expanded)
+            self.scheduler_tree.itemCollapsed.connect(self._on_scheduler_item_collapsed)
+            self._scheduler_expanded_folders = set()  # по умолчанию все папки закрыты
+            self._scheduler_building = False
+            scheduler_layout.addWidget(self.scheduler_tree)
             
             self._scheduler_all_data = []
             self.startup_tabs.addTab(scheduler_tab, "Планировщик задач")
@@ -10422,25 +10943,119 @@ if GUI_MODE:
             # Вкладка Меню служб с таблицей и кнопками
             services_tab = QWidget()
             services_layout = QVBoxLayout(services_tab)
+            services_layout.setContentsMargins(6, 6, 6, 6)
+            services_layout.setSpacing(6)
             services_btn_layout = QHBoxLayout()
+            services_btn_layout.setSpacing(6)
+            _svc_btn_style = _btn_style_s + " padding: 3px 10px; font-size: 10px; border-radius: 2px;"
             btn_start_service = QPushButton("Запустить")
-            btn_start_service.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px;")
+            btn_start_service.setFixedHeight(26)
+            btn_start_service.setStyleSheet(_svc_btn_style)
             btn_start_service.clicked.connect(self.start_service)
             btn_stop_service = QPushButton("Остановить")
-            btn_stop_service.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px;")
+            btn_stop_service.setFixedHeight(26)
+            btn_stop_service.setStyleSheet(_svc_btn_style)
             btn_stop_service.clicked.connect(self.stop_service)
             btn_restart_service = QPushButton("Перезапустить")
-            btn_restart_service.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px;")
+            btn_restart_service.setFixedHeight(26)
+            btn_restart_service.setStyleSheet(_svc_btn_style)
             btn_restart_service.clicked.connect(self.restart_service)
             services_btn_layout.addWidget(btn_start_service)
             services_btn_layout.addWidget(btn_stop_service)
             services_btn_layout.addWidget(btn_restart_service)
             services_btn_layout.addStretch()
+
+            self.services_search = QLineEdit()
+            self.services_search.setPlaceholderText(
+                language_manager.translate("Поиск службы..."))
+            self.services_search.setFixedHeight(26)
+            self.services_search.setMaximumWidth(240)
+            self.services_search.setStyleSheet("""
+                QLineEdit {
+                    background-color: #000000;
+                    color: #ffffff;
+                    border: 1px solid #333333;
+                    padding: 3px 8px;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QLineEdit:focus { border-color: #ffffff; }
+            """)
+            services_btn_layout.addWidget(self.services_search)
             services_layout.addLayout(services_btn_layout)
-            self.table_services = self.create_styled_table(["Служба", "Путь"])
-            self.table_services.setContextMenuPolicy(Qt.CustomContextMenu)
-            self.table_services.customContextMenuRequested.connect(lambda pos: self.show_services_context_menu(pos, self.table_services))
-            services_layout.addWidget(self.table_services)
+
+            self._services_expanded = set()
+            self.services_tree = QTreeWidget()
+            self.services_tree.setColumnCount(3)
+            self.services_tree.setHeaderLabels(["Служба", "Тип", "Путь"])
+            self.services_tree.setRootIsDecorated(False)
+            self.services_tree.setIndentation(14)
+            self.services_tree.setUniformRowHeights(True)
+            self.services_tree.setAnimated(False)
+            self.services_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.services_tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.services_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.services_tree.setWordWrap(False)
+            self.services_tree.setTextElideMode(Qt.ElideRight)
+            _svc_header = self.services_tree.header()
+            _svc_header.setSectionResizeMode(0, QHeaderView.Interactive)
+            _svc_header.setSectionResizeMode(1, QHeaderView.Interactive)
+            _svc_header.setSectionResizeMode(2, QHeaderView.Stretch)
+            _svc_header.setFixedHeight(24)
+            _svc_header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.services_tree.setColumnWidth(0, 300)
+            self.services_tree.setColumnWidth(1, 150)
+            self.services_tree.setStyleSheet("""
+                QTreeWidget {
+                    background-color: #000000;
+                    color: #ffffff;
+                    border: 1px solid #222222;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    outline: none;
+                }
+                QTreeWidget::item {
+                    padding: 1px 4px;
+                    min-height: 16px;
+                    border-bottom: 1px solid #111111;
+                }
+                QTreeWidget::item:hover {
+                    background-color: #141414;
+                }
+                QTreeWidget::item:selected {
+                    background-color: #ffffff;
+                    color: #000000;
+                }
+                QTreeWidget::branch {
+                    image: none;
+                    border-image: none;
+                }
+                QHeaderView::section {
+                    background-color: #000000;
+                    color: #999999;
+                    border: none;
+                    border-right: 1px solid #1a1a1a;
+                    border-bottom: 1px solid #222222;
+                    padding: 2px 6px;
+                    font-weight: bold;
+                    font-size: 9px;
+                    letter-spacing: 1px;
+                }
+                QScrollBar:vertical {
+                    background: #000000;
+                    width: 8px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #333333;
+                    min-height: 16px;
+                }
+            """)
+            self.services_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.services_tree.customContextMenuRequested.connect(
+                lambda pos: self.show_services_context_menu(pos, self.services_tree))
+            self.services_tree.itemClicked.connect(self._on_services_tree_clicked)
+            self.services_search.textChanged.connect(self._filter_services_data)
+            services_layout.addWidget(self.services_tree)
             self.startup_tabs.addTab(services_tab, "Меню служб")
             
             layout.addWidget(self.startup_tabs)
@@ -10455,9 +11070,9 @@ if GUI_MODE:
                     self.load_registry_data("Run")
                 if hasattr(self, "table_folder"):
                     self.load_folder_data()
-                if hasattr(self, "table_scheduler"):
+                if hasattr(self, "scheduler_tree"):
                     self.load_scheduler_data()
-                if hasattr(self, "table_services"):
+                if hasattr(self, "services_tree"):
                     self.load_services_data()
             except Exception as e:
                 print(f"Ошибка загрузки данных автозагрузки: {e}")
@@ -10580,10 +11195,11 @@ if GUI_MODE:
                     return
 
                 # Первая загрузка — показываем плейсхолдер и запускаем поток
-                self.table_scheduler.setRowCount(1)
-                placeholder = QTableWidgetItem("Загрузка задач планировщика...")
-                placeholder.setForeground(QColor('#888888'))
-                self.table_scheduler.setItem(0, 0, placeholder)
+                self.scheduler_tree.clear()
+                placeholder = QTreeWidgetItem(["Загрузка задач планировщика...", ""])
+                placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsSelectable)
+                placeholder.setForeground(0, QColor('#888888'))
+                self.scheduler_tree.addTopLevelItem(placeholder)
 
                 self._scheduler_loader = keep_thread(SchedulerLoader(self.get_scheduler_startup))
                 self._scheduler_loader.data_signal.connect(
@@ -10631,18 +11247,213 @@ if GUI_MODE:
             except Exception:
                 pass
 
+        def _update_service_folder_label(self, item, count=None):
+            if item is None:
+                return
+            title = item.data(0, Qt.UserRole + 1)
+            if not title:
+                return
+            if count is None:
+                count = item.data(0, Qt.UserRole + 2) or 0
+            prefix = "[-] " if item.isExpanded() else "[+] "
+            item.setText(0, f"{prefix}{title} — {count}")
+
+        def _set_service_folder_expanded(self, item, expanded, count=None):
+            if item is None or item.childCount() == 0:
+                return
+            item.setExpanded(bool(expanded))
+            self._update_service_folder_label(item, count)
+
+        def _on_services_tree_clicked(self, item, _column=0):
+            if item is None or item.childCount() == 0:
+                return
+            expanded = not item.isExpanded()
+            self._set_service_folder_expanded(item, expanded)
+            key = item.data(0, Qt.UserRole)
+            if key:
+                if expanded:
+                    self._services_expanded.add(str(key))
+                else:
+                    self._services_expanded.discard(str(key))
+
+        def _filter_services_data(self, text):
+            query = text.strip().lower()
+            for i in range(self.services_tree.topLevelItemCount()):
+                top = self.services_tree.topLevelItem(i)
+                if top.childCount() == 0:
+                    top.setHidden(bool(query))
+                    continue
+                top_visible = False
+                top_visible_count = 0
+                for j in range(top.childCount()):
+                    sub = top.child(j)
+                    sub_visible = False
+                    sub_visible_count = 0
+                    for k in range(sub.childCount()):
+                        svc = sub.child(k)
+                        if not query:
+                            svc.setHidden(False)
+                            sub_visible = True
+                            sub_visible_count += 1
+                            continue
+                        haystack = (
+                            svc.text(0) + " " + svc.text(1) + " " + svc.text(2) + " " +
+                            str(svc.data(0, Qt.UserRole) or "")
+                        ).lower()
+                        match = query in haystack
+                        svc.setHidden(not match)
+                        if match:
+                            sub_visible = True
+                            sub_visible_count += 1
+                    sub.setHidden(not sub_visible)
+                    if sub_visible:
+                        top_visible = True
+                        top_visible_count += sub_visible_count
+                    if query:
+                        self._set_service_folder_expanded(
+                            sub, True, count=sub_visible_count)
+                    else:
+                        key = str(sub.data(0, Qt.UserRole) or "")
+                        self._set_service_folder_expanded(
+                            sub, key in self._services_expanded)
+                top.setHidden(not top_visible)
+                if query:
+                    self._set_service_folder_expanded(
+                        top, True, count=top_visible_count)
+                else:
+                    key = str(top.data(0, Qt.UserRole) or "")
+                    self._set_service_folder_expanded(
+                        top, key in self._services_expanded)
+            if query:
+                self.services_tree.clearSelection()
+                self.services_tree.setCurrentItem(None)
+
         def load_services_data(self):
-            self.table_services.setRowCount(0)
+            if not hasattr(self, "services_tree"):
+                return
+            query = self.services_search.text().strip() if hasattr(self, "services_search") else ""
+
+            if not query:
+                expanded = set()
+
+                def _collect(item):
+                    if item.childCount() and item.isExpanded():
+                        key = item.data(0, Qt.UserRole)
+                        if key:
+                            expanded.add(str(key))
+                    for index in range(item.childCount()):
+                        _collect(item.child(index))
+
+                for i in range(self.services_tree.topLevelItemCount()):
+                    _collect(self.services_tree.topLevelItem(i))
+                self._services_expanded = expanded
+
+            self.services_tree.clear()
             data = self.get_services_startup()
-            self.table_services.setRowCount(len(data))
-            for i, (name, val) in enumerate(data):
-                color = analyze_startup_item(name, val)
-                item_name = QTableWidgetItem(name)
-                item_val = QTableWidgetItem(val)
-                item_name.setForeground(color)
-                item_val.setForeground(color)
-                self.table_services.setItem(i, 0, item_name)
-                self.table_services.setItem(i, 1, item_val)
+            if not data:
+                empty = QTreeWidgetItem([language_manager.translate("НЕТ ДАННЫХ"), "", ""])
+                empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable)
+                empty.setForeground(0, QColor(120, 120, 120))
+                self.services_tree.addTopLevelItem(empty)
+                if query:
+                    self._filter_services_data(query)
+                return
+
+            category_order = [
+                ("load", "ЗАГРУЗКА"),
+                ("system", "СИСТЕМА"),
+                ("auto", "АВТОЗАПУСК"),
+                ("manual", "ВРУЧНУЮ"),
+                ("disabled", "ОТКЛЮЧЕНО"),
+                ("other", "ПРОЧИЕ"),
+            ]
+            groups = {
+                "driver": {key: [] for key, _title in category_order},
+                "service": {key: [] for key, _title in category_order},
+            }
+
+            for entry in data:
+                name = str(entry[0]) if len(entry) > 0 else ""
+                type_str = str(entry[1]) if len(entry) > 1 else ""
+                key_name = str(entry[2]) if len(entry) > 2 else ""
+                start_str = str(entry[3]) if len(entry) > 3 else ""
+                path = str(entry[4]) if len(entry) > 4 else ""
+                is_driver = type_str == "Драйвер"
+                low = start_str.lower()
+                if "загруз" in low or "boot" in low:
+                    bucket = "load"
+                elif "систем" in low or "system" in low:
+                    bucket = "system"
+                elif "авто" in low or "auto" in low or "delayed" in low:
+                    bucket = "auto"
+                elif "вруч" in low or "manual" in low:
+                    bucket = "manual"
+                elif "отключ" in low or "disabled" in low:
+                    bucket = "disabled"
+                else:
+                    bucket = "other"
+                groups["driver" if is_driver else "service"][bucket].append(
+                    (name, type_str, key_name, start_str, path))
+
+            def _add_folder(parent, title, key, count, is_top=False):
+                is_expanded = str(key) in self._services_expanded
+                title_text = language_manager.translate(title)
+                item = QTreeWidgetItem(["", "", ""])
+                item.setData(0, Qt.UserRole, key)
+                item.setData(0, Qt.UserRole + 1, title_text)
+                item.setData(0, Qt.UserRole + 2, count)
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                font = item.font(0)
+                font.setBold(bool(is_top))
+                item.setFont(0, font)
+                item.setForeground(0, QColor(255, 255, 255) if is_top else QColor(180, 180, 180))
+                item.setForeground(1, QColor(120, 120, 120))
+                if parent is None:
+                    self.services_tree.addTopLevelItem(item)
+                else:
+                    parent.addChild(item)
+                item.setExpanded(is_expanded)
+                self._update_service_folder_label(item)
+                return item
+
+            for group_key, group_title, is_driver in (
+                    ("drivers", "ДРАЙВЕРЫ", True),
+                    ("services", "СЛУЖБЫ", False)):
+                bucket_map = groups["driver" if is_driver else "service"]
+                total = sum(len(rows) for rows in bucket_map.values())
+                if not total:
+                    continue
+                top = _add_folder(None, group_title, f"folder:{group_key}", total, is_top=True)
+                for category_key, category_title in category_order:
+                    rows = bucket_map[category_key]
+                    if not rows:
+                        continue
+                    sub = _add_folder(
+                        top, category_title,
+                        f"folder:{group_key}/{category_key}", len(rows))
+                    rows.sort(key=lambda item: item[0].lower())
+                    for name, type_str, key_name, start_str, path in rows:
+                        service_item = QTreeWidgetItem([
+                            name,
+                            type_str + (f" / {start_str}" if start_str else ""),
+                            path,
+                        ])
+                        service_item.setData(0, Qt.UserRole, key_name or name)
+                        service_item.setToolTip(0, f"{name} ({key_name})")
+                        service_item.setToolTip(2, path)
+                        if is_driver:
+                            service_font = service_item.font(0)
+                            service_font.setBold(True)
+                            service_item.setFont(0, service_font)
+                        color = QColor(255, 255, 255) if is_driver else QColor(170, 170, 170)
+                        service_item.setForeground(0, color)
+                        service_item.setForeground(1, color)
+                        service_item.setForeground(2, color)
+                        sub.addChild(service_item)
+
+            self.services_tree.setCurrentItem(None)
+            if query:
+                self._filter_services_data(query)
 
         def load_startup_data(self, type_name):
             # Этот метод больше не нужен, так как у нас отдельные таблицы для каждого раздела
@@ -10696,10 +11507,10 @@ if GUI_MODE:
             combo_hive.addItem("HKCU (Текущий пользователь)", "HKCU")
             combo_hive.addItem("HKLM (Локальная машина)", "HKLM")
             
-            btn_add = QPushButton("Добавить")
+            btn_add = QPushButton("ДОБАВИТЬ")
             btn_add.setStyleSheet("background-color: #ffffff; color: white; padding: 8px;")
             btn_cancel = QPushButton("Отмена")
-            btn_cancel.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; padding: 8px;")
+            btn_cancel.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } padding: 8px;")
             
             layout.addWidget(label_name)
             layout.addWidget(input_name)
@@ -10838,9 +11649,9 @@ if GUI_MODE:
             input_value.setStyleSheet("background-color: #222222; color: white; padding: 5px;")
             
             btn_save = QPushButton("Сохранить")
-            btn_save.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; font-weight: bold; padding: 8px;")
+            btn_save.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold; padding: 8px;")
             btn_cancel = QPushButton("Отмена")
-            btn_cancel.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; padding: 8px;")
+            btn_cancel.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } padding: 8px;")
             
             layout.addWidget(label_name)
             layout.addWidget(input_name)
@@ -10959,10 +11770,10 @@ if GUI_MODE:
             combo_folder.addItem("Текущий пользователь", os.path.join(os.environ["APPDATA"], r"Microsoft\Windows\Start Menu\Programs\Startup"))
             combo_folder.addItem("Все пользователи", r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup")
             
-            btn_add = QPushButton("Добавить")
+            btn_add = QPushButton("ДОБАВИТЬ")
             btn_add.setStyleSheet("background-color: #ffffff; color: white; padding: 8px;")
             btn_cancel = QPushButton("Отмена")
-            btn_cancel.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; padding: 8px;")
+            btn_cancel.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } padding: 8px;")
             
             layout.addWidget(label_path)
             path_layout = QHBoxLayout()
@@ -11056,21 +11867,39 @@ if GUI_MODE:
             if os.path.exists(filepath):
                 subprocess.run(['explorer', filepath])
 
-        def show_scheduler_context_menu(self, pos, table):
-            item = table.itemAt(pos)
-            if not item:
+        def show_scheduler_context_menu(self, pos, tree):
+            item = tree.itemAt(pos)
+            if item is None or item.data(0, Qt.UserRole + 3) == "folder" or item.childCount() > 0:
                 return
-            
+            tree.setCurrentItem(item)
+
             menu = QMenu()
-            action_delete = menu.addAction("Удалить")
-            action_run = menu.addAction("Запустить")
-            action_disable = menu.addAction("Отключить")
-            action_enable = menu.addAction("Включить")
-            
-            action = menu.exec(table.viewport().mapToGlobal(pos))
-            
-            if action == action_delete:
+            action_open = menu.addAction(language_manager.translate("ОТКРЫТЬ РАСПОЛОЖЕНИЕ ФАЙЛА"))
+            action_desc = menu.addAction(language_manager.translate("ОПИСАНИЕ"))
+            action_triggers = menu.addAction(language_manager.translate("ТРИГГЕРЫ"))
+            menu.addSeparator()
+            action_refresh = menu.addAction(language_manager.translate("ОБНОВИТЬ"))
+            action_delete = menu.addAction(language_manager.translate("УДАЛИТЬ ЗАДАЧУ"))
+            action_back = menu.addAction(language_manager.translate("НАЗАД"))
+            menu.addSeparator()
+            action_run = menu.addAction(language_manager.translate("Запустить"))
+            action_disable = menu.addAction(language_manager.translate("Отключить"))
+            action_enable = menu.addAction(language_manager.translate("Включить"))
+
+            action = menu.exec(tree.viewport().mapToGlobal(pos))
+
+            if action == action_open:
+                self._open_scheduler_task_location()
+            elif action == action_desc:
+                self._show_scheduler_task_details("description")
+            elif action == action_triggers:
+                self._show_scheduler_task_details("triggers")
+            elif action == action_refresh:
+                self.refresh_scheduler_data()
+            elif action == action_delete:
                 self.delete_scheduler_entry()
+            elif action == action_back:
+                self._scheduler_back_to_root()
             elif action == action_run:
                 self.run_scheduler_entry()
             elif action == action_disable:
@@ -11108,7 +11937,7 @@ if GUI_MODE:
             btn_create = QPushButton("Создать")
             btn_create.setStyleSheet("background-color: #ffffff; color: white; padding: 8px;")
             btn_cancel = QPushButton("Отмена")
-            btn_cancel.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; padding: 8px;")
+            btn_cancel.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } padding: 8px;")
             
             layout.addWidget(label_name)
             layout.addWidget(input_name)
@@ -11175,13 +12004,145 @@ if GUI_MODE:
             
             dialog.exec()
 
-        def delete_scheduler_entry(self):
-            row = self.table_scheduler.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите задачу для удаления")
+        def _selected_scheduler_task(self, action):
+            """Вернуть полный путь выбранной задачи или показать предупреждение."""
+            item = self.scheduler_tree.currentItem() if hasattr(self, "scheduler_tree") else None
+            if item is None or item.childCount() > 0:
+                QMessageBox.warning(self, "Ошибка", f"Выберите задачу для {action}")
+                return None
+            return str(item.data(0, Qt.UserRole) or item.text(0))
+
+        def _scheduler_task_run(self, item):
+            if item is None:
+                return ""
+            return str(item.data(0, Qt.UserRole + 1) or "")
+
+        def _open_scheduler_task_location(self):
+            item = self.scheduler_tree.currentItem() if hasattr(self, "scheduler_tree") else None
+            if item is None or item.data(0, Qt.UserRole + 3) == "folder":
+                QMessageBox.warning(self, "Ошибка", "Выберите задачу.")
                 return
-            
-            task_name = self.table_scheduler.item(row, 0).text()
+            raw = self._scheduler_task_run(item).strip()
+            if not raw:
+                QMessageBox.warning(self, "Ошибка", "Для этой задачи не указан исполняемый файл.")
+                return
+            if raw.startswith('"'):
+                end = raw.find('"', 1)
+                exe = raw[1:end] if end > 0 else raw.strip('"')
+            else:
+                exe = raw.split()[0]
+            exe = exe.strip('"').strip()
+            if exe.startswith("\\??\\"):
+                exe = exe[4:]
+            exe = os.path.expandvars(exe)
+            if not exe or not os.path.exists(exe):
+                QMessageBox.warning(self, "Ошибка", f"Файл не найден:\n{exe or raw}")
+                return
+            try:
+                flags = 0x08000000 if os.name == "nt" else 0
+                subprocess.Popen(
+                    ["explorer.exe", "/select," + os.path.normpath(exe)],
+                    creationflags=flags,
+                )
+            except Exception as error:
+                QMessageBox.warning(self, "Ошибка", f"Не удалось открыть расположение файла:\n{error}")
+
+        def _show_scheduler_task_details(self, kind="description"):
+            item = self.scheduler_tree.currentItem() if hasattr(self, "scheduler_tree") else None
+            if item is None or item.data(0, Qt.UserRole + 3) == "folder":
+                QMessageBox.warning(self, "Ошибка", "Выберите задачу.")
+                return
+            full_path = str(item.data(0, Qt.UserRole) or item.text(0))
+            task_run = self._scheduler_task_run(item)
+            normalized = full_path if full_path.startswith("\\") else "\\" + full_path
+            task_path, _, task_name = normalized.rpartition("\\")
+            task_path = (task_path + "\\") if task_path else "\\"
+            ps_path = task_path.replace("'", "''")
+            ps_name = task_name.replace("'", "''")
+
+            if kind == "triggers":
+                script = (
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                    f"$t=Get-ScheduledTask -TaskPath '{ps_path}' -TaskName '{ps_name}' -ErrorAction Stop; "
+                    "$t.Triggers | Format-List * | Out-String -Width 200"
+                )
+            else:
+                script = (
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                    f"$t=Get-ScheduledTask -TaskPath '{ps_path}' -TaskName '{ps_name}' -ErrorAction Stop; "
+                    "$t.Description; ''; "
+                    "($t.Actions | ForEach-Object { $_.Execute + ' ' + $_.Arguments }) -join \"`n\""
+                )
+
+            body = ""
+            try:
+                flags = 0x08000000 if os.name == "nt" else 0
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=15, creationflags=flags,
+                )
+                if result.returncode == 0:
+                    body = (result.stdout or "").strip()
+            except Exception:
+                body = ""
+
+            if not body:
+                if kind == "triggers":
+                    body = (
+                        "Не удалось получить триггеры задачи.\n\n"
+                        f"Задача: {task_name}\n"
+                        f"Расположение: {task_path}\n\n"
+                        f"Действие: {task_run or 'не указано'}"
+                    )
+                else:
+                    body = (
+                        f"Задача: {task_name}\n"
+                        f"Расположение: {task_path}\n\n"
+                        f"Действие: {task_run or 'не указано'}"
+                    )
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle(language_manager.translate(
+                "ТРИГГЕРЫ" if kind == "triggers" else "ОПИСАНИЕ"))
+            dialog.resize(780, 560)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(16, 16, 16, 16)
+            layout.setSpacing(8)
+            title = QLabel(task_name or item.text(0))
+            title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+            layout.addWidget(title)
+            location = QLabel(full_path)
+            location.setStyleSheet("font-size: 10px; color: #888888;")
+            layout.addWidget(location)
+            text = QTextEdit()
+            text.setReadOnly(True)
+            text.setPlainText(body)
+            layout.addWidget(text)
+            close_btn = QPushButton(language_manager.translate("ЗАКРЫТЬ"))
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn)
+            self._bw_dialog(dialog)
+            dialog.exec()
+
+        def _scheduler_back_to_root(self):
+            if hasattr(self, "sched_filter_combo"):
+                try:
+                    self.sched_filter_combo.blockSignals(True)
+                    self.sched_filter_combo.setCurrentIndex(0)
+                    self.sched_filter_combo.blockSignals(False)
+                except Exception:
+                    pass
+            self._scheduler_expanded_folders.clear()
+            if hasattr(self, "scheduler_tree"):
+                self.scheduler_tree.collapseAll()
+                self.scheduler_tree.setCurrentItem(None)
+            self._apply_scheduler_filter("Все задачи")
+
+        def delete_scheduler_entry(self):
+            task_name = self._selected_scheduler_task("удаления")
+            if not task_name:
+                return
             
             reply = QMessageBox.question(self, "Подтверждение", 
                                        f"Удалить задачу '{task_name}' из планировщика?",
@@ -11207,12 +12168,9 @@ if GUI_MODE:
                     logger.log("Scheduler", "error", str(e))
 
         def run_scheduler_entry(self):
-            row = self.table_scheduler.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите задачу для запуска")
+            task_name = self._selected_scheduler_task("запуска")
+            if not task_name:
                 return
-            
-            task_name = self.table_scheduler.item(row, 0).text()
             
             try:
                 result = subprocess.run(
@@ -11232,12 +12190,9 @@ if GUI_MODE:
                 logger.log("Scheduler", "error", str(e))
 
         def disable_scheduler_entry(self):
-            row = self.table_scheduler.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите задачу для отключения")
+            task_name = self._selected_scheduler_task("отключения")
+            if not task_name:
                 return
-            
-            task_name = self.table_scheduler.item(row, 0).text()
             
             try:
                 result = subprocess.run(
@@ -11258,12 +12213,9 @@ if GUI_MODE:
                 logger.log("Scheduler", "error", str(e))
 
         def enable_scheduler_entry(self):
-            row = self.table_scheduler.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите задачу для включения")
+            task_name = self._selected_scheduler_task("включения")
+            if not task_name:
                 return
-            
-            task_name = self.table_scheduler.item(row, 0).text()
             
             try:
                 result = subprocess.run(
@@ -11283,19 +12235,20 @@ if GUI_MODE:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось включить задачу: {e}")
                 logger.log("Scheduler", "error", str(e))
 
-        def show_services_context_menu(self, pos, table):
-            item = table.itemAt(pos)
-            if not item:
+        def show_services_context_menu(self, pos, tree):
+            item = tree.itemAt(pos)
+            if not item or item.childCount() > 0:
                 return
-            
+
+            tree.setCurrentItem(item)
             menu = QMenu()
             action_start = menu.addAction("Запустить")
             action_stop = menu.addAction("Остановить")
             action_restart = menu.addAction("Перезапустить")
             action_copy = menu.addAction("Копировать путь")
-            
-            action = menu.exec(table.viewport().mapToGlobal(pos))
-            
+
+            action = menu.exec(tree.viewport().mapToGlobal(pos))
+
             if action == action_start:
                 self.start_service()
             elif action == action_stop:
@@ -11303,25 +12256,35 @@ if GUI_MODE:
             elif action == action_restart:
                 self.restart_service()
             elif action == action_copy:
-                row = table.currentRow()
-                path = table.item(row, 1).text()
-                QApplication.clipboard().setText(path)
+                QApplication.clipboard().setText(item.text(2))
+
+        def _run_sc(self, action, service_name):
+            """sc.exe работает и для служб, и для драйверов."""
+            return subprocess.run(
+                ["sc", action, service_name],
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="cp866",
+                errors="replace",
+                timeout=25,
+                creationflags=0x08000000,
+            )
+
+        def _selected_service_name(self, action):
+            item = self.services_tree.currentItem()
+            if item is None or item.childCount() > 0:
+                QMessageBox.warning(self, "Ошибка", f"Выберите службу для {action}")
+                return ""
+            return str(item.data(0, Qt.UserRole) or item.text(0))
 
         def start_service(self):
-            row = self.table_services.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите службу для запуска")
+            service_name = self._selected_service_name("запуска")
+            if not service_name:
                 return
             
-            service_name = self.table_services.item(row, 0).text()
-            
             try:
-                result = subprocess.run(
-                    ["net", "start", service_name],
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                )
+                result = self._run_sc("start", service_name)
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Запущена служба: {service_name}")
@@ -11334,12 +12297,9 @@ if GUI_MODE:
                 logger.log("Services", "error", str(e))
 
         def stop_service(self):
-            row = self.table_services.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите службу для остановки")
+            service_name = self._selected_service_name("остановки")
+            if not service_name:
                 return
-            
-            service_name = self.table_services.item(row, 0).text()
             
             reply = QMessageBox.question(self, "Подтверждение", 
                                        f"Остановить службу '{service_name}'?",
@@ -11347,12 +12307,7 @@ if GUI_MODE:
             
             if reply == QMessageBox.Yes:
                 try:
-                    result = subprocess.run(
-                        ["net", "stop", service_name],
-                        shell=False,
-                        capture_output=True,
-                        text=True,
-                    )
+                    result = self._run_sc("stop", service_name)
                     
                     if result.returncode == 0:
                         logger.log("Services", "success", f"Остановлена служба: {service_name}")
@@ -11365,28 +12320,15 @@ if GUI_MODE:
                     logger.log("Services", "error", str(e))
 
         def restart_service(self):
-            row = self.table_services.currentRow()
-            if row < 0:
-                QMessageBox.warning(self, "Ошибка", "Выберите службу для перезапуска")
+            service_name = self._selected_service_name("перезапуска")
+            if not service_name:
                 return
-            
-            service_name = self.table_services.item(row, 0).text()
             
             try:
                 # Сначала останавливаем
-                subprocess.run(
-                    ["net", "stop", service_name],
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                )
+                self._run_sc("stop", service_name)
                 # Затем запускаем
-                result = subprocess.run(
-                    ["net", "start", service_name],
-                    shell=False,
-                    capture_output=True,
-                    text=True,
-                )
+                result = self._run_sc("start", service_name)
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Перезапущена служба: {service_name}")
@@ -11411,18 +12353,85 @@ if GUI_MODE:
             return entries
 
         def get_scheduler_startup(self):
-            """Возвращает список кортежей (name, status, trigger, task_run, source)
-            
-            Поля CSV от schtasks /query /fo CSV /v /nh:
-            [0] = HostName, [1] = TaskName, [2] = NextRunTime, [3] = Status,
-            [4] = LogonMode, [5] = LastRunTime, [6] = LastResult,
-            [7] = Author, [8] = Task To Run, [9] = StartIn, [10] = Comment...
+            """Возвращает список (name, status, task_run, full_path, source).
+
+            Основной источник — PowerShell Get-ScheduledTask: он видит скрытые
+            задачи и отдаёт полный путь. Резервный — schtasks /query. Дубликаты
+            удаляются по полному пути (TaskPath + TaskName).
             """
             entries = []
+            seen_paths = set()
+
+            def _classify(full_path):
+                fp = (full_path or "").replace("/", "\\")
+                if "\\Microsoft\\Windows" in fp or fp.startswith("\\Microsoft\\"):
+                    return "Системная"
+                return "Пользовательская"
+
+            def _state_map(state):
+                return {
+                    "Ready": "Готова",
+                    "Running": "Выполняется",
+                    "Disabled": "Отключена",
+                    "Unknown": "Неизвестно",
+                }.get(state, state or "Готова")
+
+            # 1. PowerShell Get-ScheduledTask (primary)
+            try:
+                ps_script = (
+                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                    "Get-ScheduledTask | Select-Object TaskPath, TaskName, State, Actions | "
+                    "ConvertTo-Json -Depth 4 -Compress"
+                )
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                )
+                if result.stdout:
+                    import json
+                    tasks = json.loads(result.stdout)
+                    if isinstance(tasks, dict):
+                        tasks = [tasks]
+                    for task in tasks:
+                        task_path = str(task.get("TaskPath") or "")
+                        task_name = str(task.get("TaskName") or "")
+                        full_path = task_path + task_name
+                        if not task_name or full_path in seen_paths:
+                            continue
+
+                        actions = task.get("Actions") or []
+                        if isinstance(actions, dict):
+                            actions = [actions]
+                        task_run = ""
+                        for act in actions:
+                            if isinstance(act, dict):
+                                cmd = str(act.get("Execute") or "")
+                                arg = str(act.get("Arguments") or "")
+                                if cmd:
+                                    task_run = (cmd + " " + arg).strip()
+                                    break
+                            elif isinstance(act, str) and act:
+                                task_run = act
+                                break
+
+                        seen_paths.add(full_path)
+                        entries.append((
+                            task_name,
+                            _state_map(str(task.get("State") or "")),
+                            task_run,
+                            full_path,
+                            _classify(full_path),
+                        ))
+            except Exception:
+                pass
+
+            # 2. schtasks /query (fallback + задачи, невидимые для PowerShell)
             try:
                 result = subprocess.run(
                     ["schtasks", "/query", "/fo", "CSV", "/v", "/nh"],
-                    capture_output=True, text=True, encoding='cp866', timeout=20
+                    capture_output=True, text=True, encoding="cp866", timeout=25,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 )
                 import csv as _csv
                 for line in result.stdout.splitlines():
@@ -11430,189 +12439,366 @@ if GUI_MODE:
                         row = next(_csv.reader([line]), None)
                         if not row or len(row) < 9:
                             continue
-                        # [1] = полный путь задачи, например \ACCBackgroundApplication
-                        name = row[1].strip()
-                        if not name or name == "TaskName":
+                        full_path = row[1].strip()
+                        if not full_path or full_path == "TaskName" or full_path in seen_paths:
                             continue
                         status_raw = row[3].strip()
-                        task_run   = row[8].strip()
-                        
-                        # Определяем источник по пути
-                        if "\\Microsoft\\Windows\\" in name or name.startswith("\\Microsoft\\"):
-                            source = "Системная"
-                        else:
-                            source = "Пользовательская"
-                        
-                        # Переводим статус
-                        status_map = {
+                        task_run = row[8].strip()
+                        status = {
                             "Ready": "Готова",
                             "Running": "Выполняется",
                             "Disabled": "Отключена",
                             "Could not start": "Ошибка",
-                        }
-                        status = status_map.get(status_raw, status_raw)
-                        entries.append((name, status, "", task_run, source))
+                        }.get(status_raw, status_raw)
+                        name = full_path.split("\\")[-1] or full_path
+                        seen_paths.add(full_path)
+                        entries.append((name, status, task_run, full_path, _classify(full_path)))
                     except Exception:
                         continue
             except Exception:
                 pass
+
             return entries
 
+        def _scheduler_folder_icon(self, expanded):
+            cache = getattr(self, "_scheduler_folder_icon_cache", None)
+            if cache is None:
+                cache = {}
+                self._scheduler_folder_icon_cache = cache
+            key = bool(expanded)
+            if key in cache:
+                return cache[key]
+
+            from PySide6.QtGui import QPainter, QPainterPath
+
+            pix = QPixmap(16, 16)
+            pix.fill(Qt.transparent)
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#ffffff"))
+            path = QPainterPath()
+            # Solid white folder silhouette with a tab, readable at 14 px.
+            path.moveTo(1, 4)
+            path.lineTo(6, 4)
+            path.lineTo(7.5, 5.5)
+            path.lineTo(15, 5.5)
+            if expanded:
+                # Open folder: slanted front edge.
+                path.lineTo(15, 8)
+                path.lineTo(14, 8)
+                path.lineTo(12, 14)
+                path.lineTo(1, 14)
+            else:
+                path.lineTo(15, 14)
+                path.lineTo(1, 14)
+            path.closeSubpath()
+            painter.drawPath(path)
+            painter.end()
+            icon = QIcon(pix)
+            cache[key] = icon
+            return icon
+
+        def _scheduler_task_icon(self):
+            """Small B&W document icon used for scheduled tasks."""
+            icon = getattr(self, "_scheduler_task_icon_cache", None)
+            if icon is not None:
+                return icon
+
+            from PySide6.QtGui import QPainter, QPainterPath, QPen
+
+            def _make_page(color):
+                pix = QPixmap(16, 16)
+                pix.fill(Qt.transparent)
+                painter = QPainter(pix)
+                painter.setRenderHint(QPainter.Antialiasing, False)
+                painter.setPen(QPen(QColor(color), 1))
+                painter.setBrush(Qt.NoBrush)
+                page = QPainterPath()
+                page.moveTo(4, 2)
+                page.lineTo(10, 2)
+                page.lineTo(13, 5)
+                page.lineTo(13, 14)
+                page.lineTo(4, 14)
+                page.closeSubpath()
+                painter.drawPath(page)
+                painter.drawLine(10, 2, 10, 5)
+                painter.drawLine(10, 5, 13, 5)
+                painter.drawLine(6, 8, 11, 8)
+                painter.drawLine(6, 10, 11, 10)
+                painter.drawLine(6, 12, 9, 12)
+                painter.end()
+                return pix
+
+            icon = QIcon()
+            icon.addPixmap(_make_page("#ffffff"), QIcon.Normal)
+            icon.addPixmap(_make_page("#000000"), QIcon.Selected)
+            self._scheduler_task_icon_cache = icon
+            return icon
+
+        def _update_scheduler_folder_label(self, item):
+            base = str(item.data(0, Qt.UserRole + 1) or "")
+            count = int(item.data(0, Qt.UserRole + 2) or 0)
+            item.setText(0, f"{base} — {count}")
+
+        def _set_scheduler_folder_expanded(self, item, expanded):
+            if item is None or item.childCount() == 0:
+                return
+            expanded = bool(expanded)
+            item.setExpanded(expanded)
+            item.setIcon(0, self._scheduler_folder_icon(expanded))
+
+        def _on_scheduler_item_expanded(self, item):
+            if getattr(self, "_scheduler_building", False):
+                return
+            if item is None or item.childCount() == 0:
+                return
+            item.setIcon(0, self._scheduler_folder_icon(True))
+            key = item.data(0, Qt.UserRole)
+            if key:
+                self._scheduler_expanded_folders.add(str(key))
+
+        def _on_scheduler_item_collapsed(self, item):
+            if getattr(self, "_scheduler_building", False):
+                return
+            if item is None or item.childCount() == 0:
+                return
+            item.setIcon(0, self._scheduler_folder_icon(False))
+            key = item.data(0, Qt.UserRole)
+            if key:
+                self._scheduler_expanded_folders.discard(str(key))
+
+        def _on_scheduler_tree_clicked(self, item, _column=0):
+            if item is None or item.childCount() == 0:
+                return
+            expanded = not item.isExpanded()
+            self._set_scheduler_folder_expanded(item, expanded)
+            key = item.data(0, Qt.UserRole)
+            if key:
+                if expanded:
+                    self._scheduler_expanded_folders.add(str(key))
+                else:
+                    self._scheduler_expanded_folders.discard(str(key))
 
         def _apply_scheduler_filter(self, filter_text):
-            """Отрисовываем таблицу планировщика, сгруппировано по папкам"""
-            data = getattr(self, '_scheduler_all_data', [])
-            self.table_scheduler.setRowCount(0)
+            if not hasattr(self, "scheduler_tree"):
+                return
+            self._scheduler_building = True
+            try:
+                self.scheduler_tree.clear()
+                lower = (filter_text or "").lower()
+                only_user = "пользоват" in lower or "user" in lower
+                only_suspicious = "подозр" in lower or "suspicious" in lower
 
-            filtered = []
-            for row_data in data:
-                if not row_data:
-                    continue
-                name_full = str(row_data[0]) if len(row_data) > 0 else ""
-                status    = str(row_data[1]) if len(row_data) > 1 else ""
-                source    = str(row_data[4]) if len(row_data) > 4 else ""
+                rows = []
+                for entry in getattr(self, "_scheduler_all_data", []) or []:
+                    if not isinstance(entry, (list, tuple)) or len(entry) < 4:
+                        continue
+                    name = str(entry[0] or "")
+                    status = str(entry[1] or "")
+                    task_run = str(entry[2] or "")
+                    full_path = str(entry[3] or "").replace("/", "\\")
+                    source = str(entry[4]) if len(entry) > 4 else ""
+                    if full_path and not full_path.startswith("\\"):
+                        full_path = "\\" + full_path
+                    is_system = "microsoft\\windows" in full_path.lower() or source == "Системная"
+                    if only_user and is_system:
+                        continue
+                    if only_suspicious:
+                        if is_system:
+                            continue
+                        if status not in ("Готова", "Ready", "Running", "Выполняется", "Включено"):
+                            continue
+                    rows.append((name, status, task_run, full_path))
 
-                is_system = ("Microsoft\\Windows" in name_full) or source == "Системная"
-                is_suspicious = (not is_system) and status in ("Готова", "Ready", "Выполняется", "Running", "Включено")
+                if not rows:
+                    empty = QTreeWidgetItem([language_manager.translate("НЕТ ДАННЫХ"), "", ""])
+                    empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable)
+                    empty.setForeground(0, QColor(120, 120, 120))
+                    self.scheduler_tree.addTopLevelItem(empty)
+                    return
 
-                if filter_text == "Все задачи":
-                    filtered.append(row_data)
-                elif filter_text == "Только пользовательские" and not is_system:
-                    filtered.append(row_data)
-                elif filter_text == "Только подозрительные" and is_suspicious:
-                    filtered.append(row_data)
+                rows.sort(key=lambda row: row[3].lower())
+                folder_map = {}
 
-            # ── Группируем по папкам ──────────────────────────────────────
-            # folder_map: { "\\FolderName": [(task_name, status, ...), ...] }
-            from collections import OrderedDict
-            folder_map = OrderedDict()
-
-            for row_data in filtered:
-                name_full = str(row_data[0]) if len(row_data) > 0 else ""
-                status    = str(row_data[1]) if len(row_data) > 1 else ""
-
-                # Полный путь выглядит как \FolderName\TaskName или \TaskName
-                if name_full.startswith("\\"):
-                    parts = name_full.lstrip("\\").split("\\", 1)
-                else:
-                    parts = name_full.split("\\", 1)
-
-                if len(parts) == 2:
-                    folder = "\\" + parts[0]
-                    task   = parts[1]
-                else:
-                    folder = "\\"
-                    task   = parts[0]
-
-                if folder not in folder_map:
-                    folder_map[folder] = []
-                folder_map[folder].append((task, status))
-
-            # ── Строим строки таблицы ─────────────────────────────────────
-            # Считаем общее кол-во строк: 1 строка папки + N задач
-            total_rows = sum(1 + len(tasks) for tasks in folder_map.values())
-            self.table_scheduler.setRowCount(total_rows)
-
-            row_idx = 0
-            for folder, tasks in folder_map.items():
-                # ── Строка папки ──
-                folder_name = folder.lstrip("\\") or "\\"
-                item_folder = QTableWidgetItem("\U0001f4c1 " + folder_name)
-                item_folder.setForeground(QColor("#000000"))
-                f = item_folder.font()
-                f.setBold(True)
-                item_folder.setFont(f)
-
-                item_folder_loc = QTableWidgetItem(folder)
-                item_folder_state = QTableWidgetItem("")
-
-                # Светло-серый фон для папки
-                bg = QColor("#ffffff")
-                item_folder.setBackground(bg)
-                item_folder_loc.setBackground(bg)
-                item_folder_state.setBackground(bg)
-
-                self.table_scheduler.setItem(row_idx, 0, item_folder)
-                self.table_scheduler.setItem(row_idx, 1, item_folder_loc)
-                self.table_scheduler.setItem(row_idx, 2, item_folder_state)
-                row_idx += 1
-
-                # ── Строки задач внутри папки ──
-                for task_name, status in sorted(tasks, key=lambda x: x[0].lower()):
-                    # Переводим статус
-                    if status in ("Готова", "Ready", "Выполняется", "Running"):
-                        state_str = "Включено"
-                    elif status in ("Отключена", "Disabled"):
-                        state_str = "Отключено"
+                def _ensure_folder(folder_path):
+                    clean = (folder_path or "").strip("\\")
+                    if not clean:
+                        return None
+                    key = "\\" + clean
+                    existing = folder_map.get(key)
+                    if existing is not None:
+                        return existing
+                    parent_path = clean.rpartition("\\")[0]
+                    parent = _ensure_folder(parent_path) if parent_path else None
+                    segment = clean.rsplit("\\", 1)[-1]
+                    item = QTreeWidgetItem([segment, key, ""])
+                    item.setData(0, Qt.UserRole, key)
+                    item.setData(0, Qt.UserRole + 3, "folder")
+                    item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                    font = item.font(0)
+                    font.setBold(True)
+                    item.setFont(0, font)
+                    item.setForeground(0, QColor(255, 255, 255))
+                    item.setForeground(1, QColor(136, 136, 136))
+                    item.setIcon(0, self._scheduler_folder_icon(False))
+                    item.setToolTip(0, key)
+                    if parent is None:
+                        self.scheduler_tree.addTopLevelItem(item)
                     else:
-                        state_str = status
+                        parent.addChild(item)
+                    folder_map[key] = item
+                    return item
 
-                    item_name = QTableWidgetItem("  \U0001f4cb " + task_name)
-                    item_name.setForeground(QColor("#000000"))
+                def _state_text(status):
+                    if status in ("Готова", "Ready", "Running", "Выполняется", "Включено"):
+                        return "Включено", QColor(255, 255, 255)
+                    if status in ("Отключена", "Disabled", "Отключено"):
+                        return "Отключено", QColor(119, 119, 119)
+                    return status, QColor(170, 170, 170)
 
-                    item_loc   = QTableWidgetItem(folder + "\\" + task_name)
-                    item_state = QTableWidgetItem(state_str)
+                for name, status, task_run, full_path in rows:
+                    folder_path = full_path.rsplit("\\", 1)[0] if "\\" in full_path else ""
+                    parent = _ensure_folder(folder_path)
+                    state_text, state_color = _state_text(status)
+                    item = QTreeWidgetItem([name, folder_path or "\\", state_text])
+                    item.setData(0, Qt.UserRole, full_path)
+                    item.setData(0, Qt.UserRole + 1, task_run)
+                    item.setData(0, Qt.UserRole + 3, "task")
+                    item.setIcon(0, self._scheduler_task_icon())
+                    item.setForeground(0, QColor(255, 255, 255))
+                    item.setForeground(1, QColor(136, 136, 136))
+                    item.setForeground(2, state_color)
+                    item.setToolTip(0, full_path)
+                    if task_run:
+                        item.setToolTip(0, full_path + "\n" + task_run)
+                    if parent is None:
+                        self.scheduler_tree.addTopLevelItem(item)
+                    else:
+                        parent.addChild(item)
 
-                    if state_str == "Отключено":
-                        item_state.setForeground(QColor("#888888"))
+                def _sort_folder(parent):
+                    items = []
+                    if parent is None:
+                        while self.scheduler_tree.topLevelItemCount():
+                            items.append(self.scheduler_tree.takeTopLevelItem(0))
+                    else:
+                        while parent.childCount():
+                            items.append(parent.takeChild(0))
+                    items.sort(key=lambda it: (
+                        0 if it.data(0, Qt.UserRole + 3) == "folder" else 1,
+                        it.text(0).lower(),
+                    ))
+                    for it in items:
+                        if parent is None:
+                            self.scheduler_tree.addTopLevelItem(it)
+                        else:
+                            parent.addChild(it)
+                        if it.data(0, Qt.UserRole + 3) == "folder":
+                            _sort_folder(it)
 
-                    self.table_scheduler.setItem(row_idx, 0, item_name)
-                    self.table_scheduler.setItem(row_idx, 1, item_loc)
-                    self.table_scheduler.setItem(row_idx, 2, item_state)
-                    row_idx += 1
+                _sort_folder(None)
 
-            # Скрываем задачи, пока папки не раскрыты
-            for r in range(self.table_scheduler.rowCount()):
-                item = self.table_scheduler.item(r, 0)
-                if item and item.text().startswith("  \U0001f4cb "):
-                    self.table_scheduler.setRowHidden(r, True)
+                force_expand = only_user or only_suspicious
 
-        def _show_scheduler_folder_rows(self, folder_row, expanded):
-            row = folder_row + 1
-            while row < self.table_scheduler.rowCount():
-                item = self.table_scheduler.item(row, 0)
-                if not item:
-                    row += 1
-                    continue
-                if item.text().startswith("\U0001f4c1 "):
-                    break
-                self.table_scheduler.setRowHidden(row, not expanded)
-                row += 1
+                def _restore(item):
+                    if item.data(0, Qt.UserRole + 3) != "folder":
+                        return
+                    key = str(item.data(0, Qt.UserRole) or "")
+                    expanded = bool(force_expand or key in self._scheduler_expanded_folders)
+                    item.setExpanded(expanded)
+                    item.setIcon(0, self._scheduler_folder_icon(expanded))
+                    for index in range(item.childCount()):
+                        _restore(item.child(index))
 
-        def _on_scheduler_cell_clicked(self, row, column):
-            item = self.table_scheduler.item(row, 0)
-            if not item:
-                return
-
-            if not item.text().startswith("\U0001f4c1 "):
-                return
-
-            folder_name = self.table_scheduler.item(row, 1).text() if self.table_scheduler.item(row, 1) else item.text()
-            expanded = folder_name in self._scheduler_expanded_folders
-
-            if expanded:
-                self._scheduler_expanded_folders.remove(folder_name)
-            else:
-                self._scheduler_expanded_folders.add(folder_name)
-
-            self._show_scheduler_folder_rows(row, not expanded)
+                for index in range(self.scheduler_tree.topLevelItemCount()):
+                    _restore(self.scheduler_tree.topLevelItem(index))
+                self.scheduler_tree.setCurrentItem(None)
+            finally:
+                self._scheduler_building = False
 
         def get_services_startup(self):
+            r"""Службы и ДРАЙВЕРЫ из HKLM\SYSTEM\CurrentControlSet\Services.
+
+            Возвращает (display_name, type_str, key_name, start_str, image_path).
+            Драйверы определяются по Type & 0x0F (kernel/file-system driver).
+            """
             entries = []
-            if not PSUTIL_AVAILABLE:
-                return entries
+            seen = set()
+
             try:
-                for service in psutil.win_service_iter():
+                root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                      r"SYSTEM\CurrentControlSet\Services", 0, winreg.KEY_READ)
+            except Exception:
+                root = None
+
+            if root is not None:
+                try:
+                    idx = 0
+                    while True:
+                        try:
+                            key_name = winreg.EnumKey(root, idx)
+                        except OSError:
+                            break
+                        idx += 1
+                        try:
+                            sub = winreg.OpenKey(root, key_name, 0, winreg.KEY_READ)
+                        except Exception:
+                            continue
+                        try:
+                            def _q(name, default=""):
+                                try:
+                                    return winreg.QueryValueEx(sub, name)[0]
+                                except Exception:
+                                    return default
+
+                            display = str(_q("DisplayName") or key_name)
+                            image = str(_q("ImagePath") or "")
+                            svc_type = int(_q("Type", 0) or 0)
+                            start_type = int(_q("Start", 3) or 0)
+
+                            type_str = "Драйвер" if (svc_type & 0x0F) else "Служба"
+                            start_str = {0: "Загрузка", 1: "Система", 2: "Авто",
+                                         3: "Вручную", 4: "Отключена"}.get(start_type, str(start_type))
+                            if type_str == "Служба":
+                                start_str = {0: "Загрузка", 1: "Система", 2: "Авто",
+                                             3: "Вручную", 4: "Отключена"}.get(start_type, str(start_type))
+
+                            seen.add(key_name.lower())
+                            entries.append((display, type_str, key_name, start_str, image))
+                        finally:
+                            try:
+                                winreg.CloseKey(sub)
+                            except Exception:
+                                pass
+                finally:
                     try:
-                        info = service.as_dict()
-                        if info['start_type'] in ['automatic', 'delayed']:
-                            entries.append((info['display_name'], info['binpath']))
-                    except Exception as _e:
-                        # Expected exception, intentionally ignored
+                        winreg.CloseKey(root)
+                    except Exception:
                         pass
-            except Exception as _e:
-                # Expected exception, intentionally ignored
-                pass
+
+            # psutil fallback — только то, чего нет в реестре
+            if PSUTIL_AVAILABLE:
+                try:
+                    for service in psutil.win_service_iter():
+                        try:
+                            info = service.as_dict()
+                            name = str(info.get("name") or "")
+                            if not name or name.lower() in seen:
+                                continue
+                            entries.append((
+                                str(info.get("display_name") or name),
+                                "Служба",
+                                name,
+                                str(info.get("start_type") or ""),
+                                str(info.get("binpath") or ""),
+                            ))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            entries.sort(key=lambda e: (e[1] != "Драйвер", e[0].lower()))
             return entries
 
         def get_reg_startup(self, root, path):
@@ -11635,126 +12821,134 @@ if GUI_MODE:
 
         def create_restrictions_page(self):
             page = QFrame()
-            main_layout = QVBoxLayout(page)
-            main_layout.setContentsMargins(15, 15, 15, 15)
-            main_layout.setSpacing(10)
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(24, 20, 24, 14)
+            lay.setSpacing(0)
 
-            title = QLabel("Снятие ограничений")
-            title.setStyleSheet("color: #ffffff; font-size: 18px; font-weight: bold;")
-            main_layout.addWidget(title)
+            # ─── Заголовок + счётчик ───
+            header = QHBoxLayout()
+            title = QLabel("СНЯТИЕ ОГРАНИЧЕНИЙ")
+            title.setStyleSheet(
+                "color: #ffffff; font-size: 20px; font-weight: bold;"
+                " letter-spacing: 2px; font-family: 'Consolas', 'Courier New', monospace;")
+            header.addWidget(title)
+            header.addStretch()
+            self._restrictions_counter = QLabel("[ -- / 12 ]")
+            self._restrictions_counter.setStyleSheet(
+                "color: #888888; font-size: 13px; font-family: 'Consolas', 'Courier New', monospace;")
+            header.addWidget(self._restrictions_counter)
+            lay.addLayout(header)
+            lay.addSpacing(10)
 
-            # Горизонтальные вкладки категорий
-            self._restrictions_tabs = QTabWidget()
-            self._restrictions_tabs.setStyleSheet("""
-                QTabWidget::pane { border: 1px solid #222222; background-color: #000000; border-radius: 4px; }
-                QTabBar::tab { background-color: #000000; color: #888888; padding: 8px 14px; font-size: 13px; }
-                QTabBar::tab:selected { background-color: #111111; color: #ffffff; border-bottom: 2px solid #ffffff; }
-                QTabBar::tab:hover { background-color: #111111; color: #ffffff; }
+            line = QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet("background: #2a2a2a; border: none;")
+            lay.addWidget(line)
+            lay.addSpacing(12)
+
+            # ─── Пустое состояние / таблица ───
+            self._restrictions_stack = QStackedWidget()
+
+            empty_page = QWidget()
+            empty_lay = QVBoxLayout(empty_page)
+            empty_lay.setAlignment(Qt.AlignCenter)
+            self._restrictions_empty_label = QLabel(
+                "ЗАПУСТИТЕ СКАНИРОВАНИЕ ДЛЯ АНАЛИЗА СИСТЕМНЫХ ОГРАНИЧЕНИЙ")
+            self._restrictions_empty_label.setAlignment(Qt.AlignCenter)
+            self._restrictions_empty_label.setWordWrap(True)
+            self._restrictions_empty_label.setStyleSheet(
+                "color: #555555; font-size: 12px; letter-spacing: 1px;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            empty_lay.addWidget(self._restrictions_empty_label)
+
+            table_page = QWidget()
+            table_lay = QVBoxLayout(table_page)
+            table_lay.setContentsMargins(0, 0, 0, 0)
+
+            self.restrictions_scan_table = QTableWidget(0, 3)
+            self.restrictions_scan_table.setHorizontalHeaderLabels(
+                ["ЧТО ЗАБЛОКИРОВАНО", "КЛЮЧ РЕЕСТРА / GPO", "СТАТУС"])
+            self.restrictions_scan_table.horizontalHeader().setStretchLastSection(True)
+            self.restrictions_scan_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.restrictions_scan_table.verticalHeader().setVisible(False)
+            self.restrictions_scan_table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.restrictions_scan_table.setEditTriggers(QTableWidget.NoEditTriggers)
+            self.restrictions_scan_table.setShowGrid(False)
+            self.restrictions_scan_table.setAlternatingRowColors(False)
+            self.restrictions_scan_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: #000000; color: #ffffff;
+                    border: none; font-size: 12px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    selection-background-color: #151515; selection-color: #ffffff;
+                }
+                QHeaderView::section {
+                    background-color: #000000; color: #666666;
+                    border: none; border-bottom: 1px solid #222222;
+                    padding: 6px 8px; font-size: 10px;
+                    font-weight: bold; letter-spacing: 1px;
+                }
+                QTableWidget::item { padding: 4px 8px; border-bottom: 1px solid #0d0d0d; }
             """)
-            self._restrictions_checkboxes = {}  # category -> list of (checkbox, func)
+            self.restrictions_scan_table.setColumnWidth(1, 420)
+            table_lay.addWidget(self.restrictions_scan_table)
 
-            catalog = self.get_all_functions()
-            categories = [
-                "Интерфейс", "Проводник", "Реестр",
-                "Система", "Запуск утилит", "Клавиатура",
-                "Очистка", "Продвинутое", "Безопасность", "Хардкор (Трояны)"
-            ]
-            self._restrictions_tab_widgets = {}
+            self._restrictions_stack.addWidget(empty_page)
+            self._restrictions_stack.addWidget(table_page)
+            lay.addWidget(self._restrictions_stack, 1)
 
-            def _populate_tab(cat):
-                tab_widget = self._restrictions_tab_widgets.get(cat)
-                if not tab_widget or getattr(tab_widget, "_populated", False):
-                    return
-                tab_widget._populated = True
-                funcs = catalog.get(cat, [])
-                if not funcs:
-                    return
+            # ─── Нижняя панель действий ───
+            self.scan_status_label = QLabel("")
+            self.scan_status_label.setStyleSheet(
+                "color: #666666; font-size: 10px; font-family: 'Consolas', 'Courier New', monospace;")
 
-                tab_layout = QVBoxLayout(tab_widget)
-                tab_layout.setContentsMargins(10, 10, 10, 5)
-                tab_layout.setSpacing(4)
+            bottom = QHBoxLayout()
+            bottom.setSpacing(10)
+            self._auto_fix_cb = QCheckBox("АВТО-СНЯТИЕ")
+            self._auto_fix_cb.setCursor(Qt.PointingHandCursor)
+            self._auto_fix_cb.setStyleSheet(
+                "QCheckBox { color: #999999; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                " QCheckBox:hover { color: #ffffff; }"
+                " QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #444444;"
+                " background: #000000; }"
+                " QCheckBox::indicator:checked { background: #ffffff; border-color: #ffffff; }")
+            bottom.addWidget(self._auto_fix_cb)
+            bottom.addWidget(self.scan_status_label)
+            bottom.addStretch()
 
-                scroll = QScrollArea()
-                scroll.setWidgetResizable(True)
-                scroll.setStyleSheet("background-color: transparent; border: none;")
-                scroll_content = QWidget()
-                scroll_layout = QVBoxLayout(scroll_content)
-                scroll_layout.setSpacing(2)
+            _bs = ("background: #000000; color: #ffffff; border: 1px solid #333333;"
+                   " padding: 8px 22px; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+                   " font-family: 'Consolas', 'Courier New', monospace;")
 
-                cb_list = []
-                for name, desc, func in funcs:
-                    cb = QCheckBox()
-                    cb.setStyleSheet("QCheckBox { color: #ffffff; font-size: 13px; } QCheckBox::indicator { width: 16px; height: 16px; }")
-                    row_w = QWidget()
-                    row_l = QHBoxLayout(row_w)
-                    row_l.setContentsMargins(4, 2, 4, 2)
-                    row_l.setSpacing(8)
-                    row_l.addWidget(cb)
-                    text_w = QWidget()
-                    text_l = QVBoxLayout(text_w)
-                    text_l.setContentsMargins(0, 0, 0, 0)
-                    text_l.setSpacing(0)
-                    lbl_name = QLabel(name)
-                    lbl_name.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold;")
-                    lbl_desc = QLabel(desc)
-                    lbl_desc.setStyleSheet("color: #888888; font-size: 11px;")
-                    lbl_desc.setWordWrap(True)
-                    text_l.addWidget(lbl_name)
-                    text_l.addWidget(lbl_desc)
-                    row_l.addWidget(text_w, 1)
-                    row_w.setStyleSheet("background-color: #000000; border-radius: 3px;")
-                    row_w.setFixedHeight(48)
-                    scroll_layout.addWidget(row_w)
-                    cb_list.append((cb, func))
+            self.btn_fix_selected = QPushButton("СНЯТЬ ВЫБРАННЫЕ")
+            self.btn_fix_selected.setStyleSheet(_bs)
+            self.btn_fix_selected.setCursor(Qt.PointingHandCursor)
+            self.btn_fix_selected.clicked.connect(self.fix_selected_restrictions)
+            self.btn_fix_selected.setEnabled(False)
+            self.btn_fix_selected.setVisible(False)
+            bottom.addWidget(self.btn_fix_selected)
 
-                scroll_layout.addStretch()
-                scroll.setWidget(scroll_content)
-                tab_layout.addWidget(scroll)
-                tab_widget.setLayout(tab_layout)
-                self._restrictions_checkboxes[cat] = cb_list
+            self.btn_fix_all = QPushButton("СНЯТЬ ВСЕ")
+            self.btn_fix_all.setStyleSheet(_bs)
+            self.btn_fix_all.setCursor(Qt.PointingHandCursor)
+            self.btn_fix_all.clicked.connect(self.fix_all_restrictions)
+            self.btn_fix_all.setEnabled(False)
+            bottom.addWidget(self.btn_fix_all)
 
-            self._populate_restriction_tab = _populate_tab
+            self.btn_run_scan = QPushButton("СКАНИРОВАТЬ")
+            self.btn_run_scan.setStyleSheet(
+                "QPushButton { background: #000000; color: #ffffff; border: 1px solid #ffffff;"
+                " padding: 8px 22px; font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                "QPushButton:hover { background: #ffffff; color: #000000; }"
+                "QPushButton:disabled { border-color: #333333; color: #555555; background: #000000; }")
+            self.btn_run_scan.setCursor(Qt.PointingHandCursor)
+            self.btn_run_scan.clicked.connect(self.scan_restrictions)
+            bottom.addWidget(self.btn_run_scan)
 
-            for cat in categories:
-                tab_w = QWidget()
-                self._restrictions_tab_widgets[cat] = tab_w
-                self._restrictions_tabs.addTab(tab_w, cat)
-
-            def _on_tab_changed(idx):
-                cat = self._restrictions_tabs.tabText(idx)
-                _populate_tab(cat)
-
-            self._restrictions_tabs.currentChanged.connect(_on_tab_changed)
-            if categories:
-                _populate_tab(categories[0])
-
-            main_layout.addWidget(self._restrictions_tabs, 1)
-
-            # Нижняя панель кнопок
-            btn_panel = QWidget()
-            btn_panel.setFixedHeight(48)
-            btn_panel.setStyleSheet("background-color: #000000; border-top: 1px solid #111111;")
-            btn_layout = QHBoxLayout(btn_panel)
-            btn_layout.setContentsMargins(10, 6, 10, 6)
-            btn_layout.setSpacing(10)
-
-            _bs = "background-color: #111111; color: #ffffff; padding: 6px 16px; border: 1px solid #222222; border-radius: 4px; font-size: 13px;"
-            btn_all = QPushButton("☑ Выбрать всё")
-            btn_all.setStyleSheet(_bs)
-            btn_all.clicked.connect(self._restrictions_select_all)
-            btn_none = QPushButton("☐ Снять всё")
-            btn_none.setStyleSheet(_bs)
-            btn_none.clicked.connect(self._restrictions_select_none)
-            btn_confirm = QPushButton("✓ Подтвердить выбранное")
-            btn_confirm.setStyleSheet("background-color: #2d7a3a; color: white; padding: 6px 20px; border: 1px solid #3a9a4a; border-radius: 4px; font-size: 13px; font-weight: bold;")
-            btn_confirm.clicked.connect(self._restrictions_run_selected)
-
-            btn_layout.addWidget(btn_all)
-            btn_layout.addWidget(btn_none)
-            btn_layout.addStretch()
-            btn_layout.addWidget(btn_confirm)
-            main_layout.addWidget(btn_panel)
-
+            lay.addSpacing(8)
+            lay.addLayout(bottom)
             return page
 
         def _restrictions_current_checkboxes(self):
@@ -11881,207 +13075,388 @@ if GUI_MODE:
                 layout.addWidget(btn)
 
         def create_advanced_page(self):
+            from PySide6.QtWidgets import QScrollArea
             page = QFrame()
-            main_layout = QVBoxLayout(page)
-            main_layout.setContentsMargins(15, 15, 15, 10)
-            main_layout.setSpacing(8)
+            outer = QVBoxLayout(page)
+            outer.setContentsMargins(24, 20, 24, 14)
+            outer.setSpacing(10)
 
-            # ─── Заголовок ───────────────────────────────────────────────
-            hdr_layout = QHBoxLayout()
-            title = QLabel("Дополнительные инструменты")
-            title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
-            hdr_layout.addWidget(title)
-            hdr_layout.addStretch()
-            main_layout.addLayout(hdr_layout)
+            header_row = QHBoxLayout()
+            title = QLabel("ДОПОЛНИТЕЛЬНЫЕ ВОЗМОЖНОСТИ")
+            title.setStyleSheet(
+                "color: #ffffff; font-size: 20px; font-weight: bold; letter-spacing: 2px;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            header_row.addWidget(title)
+            header_row.addStretch()
+            self._btn_advanced_cmd = QPushButton("КОМАНДНАЯ СТРОКА")
+            self._btn_advanced_cmd.setCursor(Qt.PointingHandCursor)
+            self._btn_advanced_cmd.setMinimumHeight(32)
+            self._btn_advanced_cmd.setStyleSheet(
+                "QPushButton { background: #000000; color: #ffffff; border: 1px solid #ffffff;"
+                " padding: 6px 14px; font-size: 10px; font-weight: bold; letter-spacing: 1px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                "QPushButton:hover { background: #ffffff; color: #000000; }")
+            self._btn_advanced_cmd.clicked.connect(lambda checked=False: self.show_cmd_window())
+            header_row.addWidget(self._btn_advanced_cmd)
+            outer.addLayout(header_row)
 
-            # ─── БЛОК СКАНЕРА ОГРАНИЧЕНИЙ ──────────────────────────────
-            scanner_frame = QFrame()
-            scanner_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #1a1a22;
-                    border: 1px solid #222222;
-                    border-radius: 8px;
-                }
-            """)
-            scanner_layout = QVBoxLayout(scanner_frame)
-            scanner_layout.setContentsMargins(15, 12, 15, 12)
-            scanner_layout.setSpacing(8)
+            subtitle = QLabel("СИСТЕМНЫЕ ВОССТАНОВИТЕЛЬНЫЕ КОМАНДЫ И АВТОНОМНОЕ ВСТРОЕННОЕ ПО NOVIR")
+            subtitle.setStyleSheet(
+                "color: #777777; font-size: 10px; letter-spacing: 1px;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            outer.addWidget(subtitle)
 
-            scan_hdr = QHBoxLayout()
-            scan_title = QLabel("Сканер ограничений системы")
-            scan_title.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: bold; background: transparent; border: none;")
-            scan_desc = QLabel("Находит активные блокировки (реестр, групповые политики, системные ключи)")
-            scan_desc.setStyleSheet("color: #888888; font-size: 11px; background: transparent; border: none;")
-            scan_hdr.addWidget(scan_title)
-            scan_hdr.addStretch()
-            scanner_layout.addLayout(scan_hdr)
-            scanner_layout.addWidget(scan_desc)
+            # Карта функций из каталога: имя -> callable
+            func_map = {}
+            try:
+                for _cat, _items in self.get_all_functions().items():
+                    for _name, _desc, _fn in _items:
+                        func_map.setdefault(_name, _fn)
+            except Exception:
+                pass
 
-            # Таблица найденных ограничений
-            self.restrictions_scan_table = QTableWidget(0, 3)
-            self.restrictions_scan_table.setHorizontalHeaderLabels(["Что заблокировано", "Ключ реестра / GPO", "Статус"])
-            self.restrictions_scan_table.horizontalHeader().setStretchLastSection(True)
-            self.restrictions_scan_table.setSelectionBehavior(QTableWidget.SelectRows)
-            self.restrictions_scan_table.setEditTriggers(QTableWidget.NoEditTriggers)
-            self.restrictions_scan_table.setAlternatingRowColors(True)
-            self.restrictions_scan_table.setStyleSheet("""
-                QTableWidget {
-                    background-color: #12121a;
-                    color: #ffffff;
-                    gridline-color: #111111;
-                    selection-background-color: #1a3a5a;
-                    selection-color: white;
-                    border: 1px solid #111111;
-                    font-size: 12px;
-                    alternate-background-color: #1a1a24;
-                }
-                QHeaderView::section {
-                    background-color: #1e1e2e;
-                    color: #ffffff;
-                    border: none;
-                    border-bottom: 1px solid #222222;
-                    padding: 5px 8px;
-                    font-weight: bold;
-                    font-size: 12px;
-                }
-                QTableWidget::item { padding: 3px 8px; }
-            """)
-            self.restrictions_scan_table.setColumnWidth(0, 220)
-            self.restrictions_scan_table.setColumnWidth(1, 300)
-            self.restrictions_scan_table.setMaximumHeight(220)
-            scanner_layout.addWidget(self.restrictions_scan_table)
+            def run_catalog(name, label=None):
+                fn = func_map.get(name)
+                if fn is None:
+                    QMessageBox.information(
+                        self, "Недоступно",
+                        f"Функция «{label or name}» недоступна в этой сборке.")
+                    return
+                self.run_task(fn)
 
-            # Кнопки сканера
-            scan_btn_layout = QHBoxLayout()
-            _sb = "padding: 7px 18px; border-radius: 4px; font-size: 13px; font-weight: bold; border: 1px solid #222222;"
+            def make_card(card_title, card_desc, callback):
+                card = QPushButton()
+                card.setObjectName("ToolCard")
+                card.setCursor(Qt.PointingHandCursor)
+                card.setMinimumHeight(58)
+                card.setStyleSheet("""
+                    QPushButton#ToolCard {
+                        background-color: #000000;
+                        border: 1px solid #222222;
+                        text-align: left;
+                        padding: 0;
+                    }
+                    QPushButton#ToolCard:hover { border-color: #666666; background-color: #080808; }
+                """)
+                cl = QVBoxLayout(card)
+                cl.setContentsMargins(12, 8, 12, 8)
+                cl.setSpacing(2)
+                t = QLabel(card_title)
+                t.setStyleSheet(
+                    "color: #ffffff; font-size: 12px; font-weight: bold; border: none;"
+                    " background: transparent; font-family: 'Consolas', 'Courier New', monospace;")
+                d = QLabel(card_desc)
+                d.setStyleSheet(
+                    "color: #777777; font-size: 9px; border: none; background: transparent;"
+                    " font-family: 'Consolas', 'Courier New', monospace;")
+                d.setWordWrap(True)
+                cl.addWidget(t)
+                cl.addWidget(d)
+                card.clicked.connect(lambda checked=False, cb=callback: cb())
+                return card
 
-            self.btn_run_scan = QPushButton("Сканировать")
-            self.btn_run_scan.setStyleSheet(f"background-color: #111111; color: #ffffff; {_sb} border-color: #222222;")
-            self.btn_run_scan.setCursor(Qt.PointingHandCursor)
-            self.btn_run_scan.clicked.connect(self.scan_restrictions)
+            def make_section(section_title, section_desc, cards):
+                frame = QFrame()
+                frame.setObjectName("AdvancedSection")
+                frame.setStyleSheet(
+                    "QFrame#AdvancedSection { background: #000000; border: 1px solid #222222; }")
+                fl = QVBoxLayout(frame)
+                fl.setContentsMargins(14, 12, 14, 14)
+                fl.setSpacing(8)
 
-            self.btn_fix_selected = QPushButton("Снять выбранные")
-            self.btn_fix_selected.setStyleSheet(f"background-color: #1a4a2a; color: #ffffff; {_sb} border-color: #ffffff;")
-            self.btn_fix_selected.setCursor(Qt.PointingHandCursor)
-            self.btn_fix_selected.clicked.connect(self.fix_selected_restrictions)
-            self.btn_fix_selected.setEnabled(False)
+                st = QLabel(section_title)
+                st.setStyleSheet(
+                    "color: #ffffff; font-size: 13px; font-weight: bold; letter-spacing: 2px;"
+                    " border: none; background: transparent;"
+                    " font-family: 'Consolas', 'Courier New', monospace;")
+                fl.addWidget(st)
 
-            self.btn_fix_all = QPushButton("Снять всё")
-            self.btn_fix_all.setStyleSheet(f"background-color: #111111; color: #ffffff; {_sb} border-color: #222222;")
-            self.btn_fix_all.setCursor(Qt.PointingHandCursor)
-            self.btn_fix_all.clicked.connect(self.fix_all_restrictions)
-            self.btn_fix_all.setEnabled(False)
+                sd = QLabel(section_desc)
+                sd.setStyleSheet(
+                    "color: #777777; font-size: 10px; border: none; background: transparent;"
+                    " font-family: 'Consolas', 'Courier New', monospace;")
+                sd.setWordWrap(True)
+                fl.addWidget(sd)
 
-            self.scan_status_label = QLabel("Нажмите «Сканировать» для поиска ограничений")
-            self.scan_status_label.setStyleSheet("color: #888888; font-size: 11px; background: transparent; border: none;")
+                grid = QGridLayout()
+                grid.setHorizontalSpacing(8)
+                grid.setVerticalSpacing(8)
+                for idx, (ct, cd, cb) in enumerate(cards):
+                    grid.addWidget(make_card(ct, cd, cb), idx // 4, idx % 4)
+                for col in range(4):
+                    grid.setColumnStretch(col, 1)
+                fl.addLayout(grid)
+                return frame
 
-            scan_btn_layout.addWidget(self.btn_run_scan)
-            scan_btn_layout.addWidget(self.btn_fix_selected)
-            scan_btn_layout.addWidget(self.btn_fix_all)
-            scan_btn_layout.addStretch()
-            scan_btn_layout.addWidget(self.scan_status_label)
-            scanner_layout.addLayout(scan_btn_layout)
+            system_cards = [
+                ("Выйти из пользователя", "Завершение текущего сеанса",
+                 lambda: run_catalog("Выйти из пользователя")),
+                ("Войти в WinRE", "Загрузка среды восстановления",
+                 lambda: run_catalog("Войти в winRE", "Войти в WinRE")),
+                ("Выполнить", "Диалог запуска (Win+R)",
+                 lambda: run_catalog("Выполнить")),
+                ("Вернуть русский язык", "Восстановление раскладки",
+                 lambda: run_catalog("Раскладка RU/EN", "Вернуть русский язык")),
+                ("Вернуть стандартную тему", "Восстановление темы",
+                 lambda: run_catalog("Восстановление темы", "Вернуть стандартную тему")),
+                ("Починить шрифты", "Сброс системных шрифтов",
+                 lambda: run_catalog("Сброс шрифтов", "Починить шрифты")),
+                ("Включить UAC", "Контроль учетных записей",
+                 lambda: run_catalog("UAC", "Включить UAC")),
+                ("sfc /scannow", "Проверка системных файлов",
+                 lambda: run_catalog("sfc /scannow")),
+                ("Полный доступ к файлу", "Разблокировка прав (Takeown)",
+                 lambda: run_catalog("Полный доступ к файлу")),
+                ("Восстановить LogonUI", "Экран входа LogonUI",
+                 lambda: run_catalog("Восстановить LogonUI")),
+                ("Выключить тестовый режим", "Отключение тестовой подписи",
+                 lambda: run_catalog("Выключить тестовый режим")),
+                ("Заменить sethc и utilman", "Подмена / возврат залипания",
+                 lambda: run_catalog("Заменить sethc и utilman")),
+                ("Экстренное восстановление", "Глубокий сброс оболочки",
+                 lambda: run_catalog("Экстренное восстановление")),
+                ("Удобный запуск", "Контекстное меню и cmd 'nov'",
+                 lambda: run_catalog("Удобный запуск")),
+                ("Ctrl+Alt+N", "Быстрый запуск Ctrl+Alt+N",
+                 lambda: run_catalog("Alt+N", "Ctrl+Alt+N")),
+                ("Очистка драйверов", "Удаление сторонних драйверов",
+                 lambda: run_catalog("Очистка драйверов")),
+            ]
 
-            main_layout.addWidget(scanner_frame)
-
-            tools_label = QLabel("Встроенные утилиты")
-            tools_label.setStyleSheet("color: #888888; font-size: 12px; font-weight: bold; margin-top: 4px;")
-            main_layout.addWidget(tools_label)
+            builtin_cards = [
+                ("Редактор реестра", "Работает без explorer.exe", self.show_registry_editor),
+                ("Проводник", "Файловый менеджер NoVir", lambda: self.switch_page(2)),
+                ("Диспетчер задач", "Снятие защиты и заморозка", self.open_task_manager),
+                ("mbrRE", "Прямой доступ к MBR/BCD", self.show_boot_repair_window),
+                ("Управление ассоциациями", "Сброс привязок .exe/.lnk",
+                 lambda: run_catalog("Ассоциации")),
+                ("Управление пользователями", "Учетные записи Windows", self.show_user_manager),
+                ("Очистка системы", "Удаление temp, корзины, кэша",
+                 lambda: run_catalog("Очистка системы")),
+                ("Сброс пароля", "Сброс пароля на '1'", self.show_password_window),
+                ("Удаление дисков", "Управление дисками и разделами", self.show_disk_manager),
+                ("Сохранение WinRE", "Резервная копия и откат", self.show_winre_usb_window),
+                ("Командная строка", "Эмулятор CMD", self.show_cmd_window),
+                ("Сведения о системе", "Аппаратные данные", self.show_system_info),
+                ("Сетевые порты", "Анализ соединений", self.check_network_ports),
+                ("Перезапуск Explorer", "Перезапуск оболочки", self.restart_explorer),
+                ("Корреляция Malware", "Анализ служб и задач", self.show_malware_correlation_window),
+            ]
 
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
-            scroll.setStyleSheet("background-color: transparent; border: none;")
-
-            scroll_content = QWidget()
-            layout = QVBoxLayout(scroll_content)
-            layout.setSpacing(6)
-            layout.setContentsMargins(0, 0, 0, 0)
-
-            card_style = """
-                QFrame#ToolCard {
-                    background-color: #000000;
-                    border: 1px solid #222222;
-                    border-radius: 6px;
-                }
-                QFrame#ToolCard:hover { border-color: #ffffff; }
-            """
-
-            built_in_tools = [
-                ("Командная строка", "Открывает встроенный эмулятор командной строки (CMD).", self.show_cmd_window),
-                ("Редактор реестра", "Открывает собственный редактор реестра в стиле системного окна.", self.show_registry_editor),
-                ("mbrRE", "Открывает отдельное окно восстановления загрузчика MBR/BCD.", self.show_boot_repair_window),
-                ("Пользователи", "Открывает собственный менеджер учетных записей.", self.show_user_manager),
-                ("Удаление дисков", "Открывает отдельное окно управления дисками и разделами.", self.show_disk_manager),
-                ("Сброс пароля", "Открывает окно управления учетными записями и паролями.", self.show_password_window),
-                ("Информация о системе", "Показывает сведения об ОС, процессоре, памяти и дисках.", self.show_system_info),
-                ("Отчёт автозагрузки", "Считает записи автозапуска в реестре и папке Startup.", self.scan_startup_report),
-                ("Сетевые порты", "Показывает слушающие порты и активные сетевые соединения.", self.check_network_ports),
-                ("Перезапустить Explorer", "Перезапускает оболочку Windows после подтверждения.", self.restart_explorer),
-                ("Загрузочная WinPE-флешка", "Создать загрузочную WinPE-флешку или перезагрузиться в WinRE.", self.show_winre_usb_window),
-                ("Корреляция Malware", "Сравнение процессов с задачами планировщика и службами.", self.show_malware_correlation_window),
-                ("Восстановление драйверов", "Пакетная установка/восстановление драйверов из резервной копии (.inf).", self.show_driver_recovery_window),
-            ]
-
-            for name, description, callback in built_in_tools:
-                card = QFrame()
-                card.setObjectName("ToolCard")
-                card.setStyleSheet(card_style)
-                card.setFixedHeight(52)
-                card_layout = QHBoxLayout(card)
-                card_layout.setContentsMargins(12, 6, 12, 6)
-
-                text_layout = QVBoxLayout()
-                text_layout.setSpacing(1)
-
-                tool_name = QLabel(name)
-                tool_name.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; border: none; background: transparent;")
-                text_layout.addWidget(tool_name)
-
-                tool_desc = QLabel(description)
-                tool_desc.setStyleSheet("color: #888888; font-size: 10px; border: none; background: transparent;")
-                tool_desc.setWordWrap(True)
-                text_layout.addWidget(tool_desc)
-
-                card_layout.addLayout(text_layout, 1)
-
-                btn_run = QPushButton("Запустить")
-                btn_run.setFixedSize(90, 28)
-                btn_run.setCursor(Qt.PointingHandCursor)
-                btn_run.setStyleSheet("""
-                    QPushButton {
-                        background-color: #111111; color: #ffffff;
-                        border: 1px solid #ffffff; border-radius: 4px; font-weight: bold; font-size: 12px;
-                    }
-                    QPushButton:hover { background-color: #ffffff; color: #000000; }
-                """)
-                btn_run.clicked.connect(callback)
-                card_layout.addWidget(btn_run)
-
-                layout.addWidget(card)
-
-            layout.addStretch()
-            scroll.setWidget(scroll_content)
-            main_layout.addWidget(scroll)
+            scroll.setStyleSheet("background: transparent; border: none;")
+            content = QWidget()
+            cl = QVBoxLayout(content)
+            cl.setContentsMargins(0, 0, 0, 0)
+            cl.setSpacing(12)
+            cl.addWidget(make_section(
+                "СИСТЕМНЫЕ КОМАНДЫ",
+                "ПРЯМОЕ УПРАВЛЕНИЕ СИСТЕМНЫМИ МЕХАНИЗМАМИ WINDOWS И АВАРИЙНОЕ УСТРАНЕНИЕ БЛОКИРОВОК.",
+                system_cards))
+            cl.addWidget(make_section(
+                "ВСТРОЕННОЕ ПО",
+                "СОБСТВЕННЫЕ, НЕЗАВИСИМЫЕ ОТ WINDOWS АНАЛОГИ СИСТЕМНЫХ УТИЛИТ ДЛЯ РАБОТЫ ПРИ РАЗРУШЕННОЙ ОС.",
+                builtin_cards))
+            cl.addStretch()
+            scroll.setWidget(content)
+            outer.addWidget(scroll, 1)
             return page
+
+        def create_embedded_host_page(self):
+            """Страница-хост для встроенного ПО (аналог собственного Проводника)."""
+            page = QFrame()
+            outer = QVBoxLayout(page)
+            outer.setContentsMargins(18, 14, 18, 14)
+            outer.setSpacing(10)
+
+            head = QHBoxLayout()
+            head.setSpacing(12)
+
+            self._embedded_title_label = QLabel("ВСТРОЕННОЕ ПО")
+            self._embedded_title_label.setStyleSheet(
+                "color: #ffffff; font-size: 15px; font-weight: bold; letter-spacing: 2px;"
+                " border: none; background: transparent;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            head.addWidget(self._embedded_title_label)
+            head.addStretch()
+            outer.addLayout(head)
+
+            line = QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet("background: #222222; border: none;")
+            outer.addWidget(line)
+
+            self._embedded_host_container = QWidget()
+            self._embedded_host_container.setStyleSheet("background: #000000;")
+            host_layout = QVBoxLayout(self._embedded_host_container)
+            host_layout.setContentsMargins(0, 0, 0, 0)
+            host_layout.setSpacing(0)
+            outer.addWidget(self._embedded_host_container, 1)
+            return page
+
+        def _clear_embedded_host(self):
+            """Удаляет предыдущий встроенный инструмент, корректно закрывая его."""
+            tool = getattr(self, "_embedded_tool", None)
+            self._embedded_tool = None
+            if tool is None:
+                return
+            self._embedded_closing = True
+            try:
+                tool.close()
+            except Exception:
+                pass
+            try:
+                tool.setParent(None)
+                tool.deleteLater()
+            except Exception:
+                pass
+            self._embedded_closing = False
+
+        def _embed_dialog(self, dialog, title):
+            """Показывает QDialog внутри главного окна, как страницу приложения."""
+            self._ensure_page(9)
+            self._clear_embedded_host()
+            try:
+                self._bw_dialog(dialog)
+            except Exception:
+                pass
+            try:
+                dialog.setWindowFlag(Qt.Widget, True)
+                dialog.setParent(self._embedded_host_container)
+                _title_tr = language_manager.translate(title)
+                dialog.setWindowTitle(_title_tr)
+                lay = self._embedded_host_container.layout()
+                if lay is not None:
+                    lay.addWidget(dialog)
+                try:
+                    dialog.finished.connect(
+                        lambda _result=0, d=dialog: self._on_embedded_finished(d))
+                except Exception:
+                    pass
+                dialog.show()
+                self._embedded_tool = dialog
+                if hasattr(self, "_embedded_title_label"):
+                    self._embedded_title_label.setText(_title_tr)
+                self.switch_page(9)
+            except Exception as error:
+                try:
+                    dialog.exec()
+                except Exception:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось открыть инструмент: {error}")
+
+        def _open_embedded_tool(self, factory, title):
+            """Создаёт инструмент через factory() и встраивает его в страницу 9."""
+            try:
+                dialog = factory()
+            except Exception as error:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось открыть инструмент: {error}")
+                return
+            self._embed_dialog(dialog, title)
+
+        def _on_embedded_finished(self, dialog):
+            """Инструмент закрылся сам (accept/reject) — вернуться в Доп. возможности."""
+            if getattr(self, "_embedded_closing", False):
+                return
+            if getattr(self, "_embedded_tool", None) is not dialog:
+                return
+            self._embedded_tool = None
+            self._embedded_closing = True
+            try:
+                dialog.close()
+            except Exception:
+                pass
+            try:
+                dialog.setParent(None)
+                dialog.deleteLater()
+            except Exception:
+                pass
+            self._embedded_closing = False
+            self.switch_page(4)
+
+        def _close_embedded_tool(self):
+            """Кнопка «Назад» на странице встроенного инструмента."""
+            self._clear_embedded_host()
+            self.switch_page(4)
+
+        def _bw_dialog(self, dialog):
+            """Принудительно приводит встроенное окно к строгому B&W minimal."""
+            bw = (
+                "QDialog, QWidget { background-color: #000000; color: #ffffff;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                "QLabel { color: #ffffff; background: transparent; border: none; }"
+                "QPushButton { background-color: #000000; color: #ffffff;"
+                " border: 1px solid #333333; padding: 6px 12px; font-weight: bold; }"
+                "QPushButton:hover { background-color: #ffffff; color: #000000;"
+                " border-color: #ffffff; }"
+                "QPushButton:pressed { background-color: #333333; color: #ffffff; }"
+                "QPushButton:disabled { color: #555555; border-color: #222222; }"
+                "QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox {"
+                " background-color: #000000; color: #ffffff; border: 1px solid #333333;"
+                " padding: 5px; selection-background-color: #ffffff;"
+                " selection-color: #000000; }"
+                "QComboBox QAbstractItemView { background-color: #000000; color: #ffffff;"
+                " selection-background-color: #ffffff; selection-color: #000000; }"
+                "QTableWidget, QTreeWidget, QListWidget { background-color: #000000;"
+                " color: #ffffff; border: 1px solid #222222; gridline-color: #1a1a1a;"
+                " alternate-background-color: #0a0a0a; selection-background-color: #ffffff;"
+                " selection-color: #000000; }"
+                "QHeaderView::section { background-color: #000000; color: #999999;"
+                " border: none; border-right: 1px solid #1a1a1a;"
+                " border-bottom: 1px solid #222222; padding: 5px 8px; font-weight: bold; }"
+                "QTabWidget::pane { border: 1px solid #222222; background: #000000; }"
+                "QTabBar::tab { background: #000000; color: #888888; padding: 6px 12px;"
+                " border: 1px solid #222222; }"
+                "QTabBar::tab:selected { background: #111111; color: #ffffff;"
+                " border-bottom: 1px solid #ffffff; }"
+                "QCheckBox, QRadioButton { color: #ffffff; background: transparent; }"
+                "QCheckBox::indicator { width: 14px; height: 14px;"
+                " border: 1px solid #777777; background: #000000; }"
+                "QCheckBox::indicator:checked { background: #ffffff;"
+                " border-color: #ffffff; }"
+                "QScrollBar:vertical { background: #000000; width: 10px; }"
+                "QScrollBar::handle:vertical { background: #333333; min-height: 20px; }"
+                "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+                "QScrollBar:horizontal { background: #000000; height: 10px; }"
+                "QScrollBar::handle:horizontal { background: #333333; min-width: 20px; }"
+                "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+                "QMenu { background-color: #000000; color: #ffffff; border: 1px solid #333333; }"
+                "QMenu::item:selected { background-color: #ffffff; color: #000000; }"
+                "QMessageBox { background-color: #000000; color: #ffffff; }"
+                "QProgressBar { background-color: #000000; color: #ffffff;"
+                " border: 1px solid #333333; text-align: center; }"
+                "QProgressBar::chunk { background-color: #ffffff; }"
+                "QToolTip { background-color: #000000; color: #ffffff; border: 1px solid #333333; }"
+            )
+            try:
+                for w in dialog.findChildren(QWidget):
+                    try:
+                        w.setStyleSheet("")
+                    except Exception:
+                        pass
+                dialog.setStyleSheet(bw)
+            except Exception:
+                pass
 
         def show_tool_window(self, title, subtitle, button_text, action_callback):
             dialog = ToolWindow(title, subtitle, button_text, action_callback, self)
+            self._bw_dialog(dialog)
             dialog.exec()
 
         def show_registry_editor(self):
-            dialog = RegistryEditorWindow(self)
-            dialog.exec()
+            self._open_embedded_tool(
+                lambda: RegistryEditorWindow(self), "РЕДАКТОР РЕЕСТРА")
 
         def show_user_manager(self):
-            dialog = UserManagerWindow(self)
-            dialog.exec()
+            self._open_embedded_tool(
+                lambda: UserManagerWindow(self), "УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ")
 
         def show_disk_manager(self):
             from PySide6.QtWidgets import QMessageBox
             from PySide6.QtCore import Qt as _Qt
             msg = QMessageBox(self)
             msg.setWindowFlags(msg.windowFlags() | _Qt.WindowStaysOnTopHint)
-            msg.setWindowTitle("⚠️ Управление дисками")
+            msg.setWindowTitle("УПРАВЛЕНИЕ ДИСКАМИ")
             msg.setIcon(QMessageBox.Warning)
             msg.setText(
                 "! ВНИМАНИЕ! Удаление или форматирование дисков\n"
@@ -12101,19 +13476,19 @@ if GUI_MODE:
                 " QPushButton:hover { background-color: #ffffff; color: #000000; }"
             )
             if msg.exec() == QMessageBox.Ok:
-                dialog = DiskManagerWindow(self)
-                dialog.exec()
+                self._open_embedded_tool(
+                    lambda: DiskManagerWindow(self), "УПРАВЛЕНИЕ ДИСКАМИ")
 
         def show_cmd_window(self):
-            dialog = NoVirCMDWindow(self)
-            dialog.exec()
+            self._open_embedded_tool(
+                lambda: NoVirCMDWindow(self), "КОМАНДНАЯ СТРОКА")
 
         def show_boot_repair_window(self):
             from PySide6.QtWidgets import QMessageBox
             from PySide6.QtCore import Qt as _Qt
             msg = QMessageBox(self)
             msg.setWindowFlags(msg.windowFlags() | _Qt.WindowStaysOnTopHint)
-            msg.setWindowTitle("⚠️ Восстановление загрузчика MBR/BCD")
+            msg.setWindowTitle("ВОССТАНОВЛЕНИЕ ЗАГРУЗЧИКА MBR/BCD")
             msg.setIcon(QMessageBox.Warning)
             msg.setText(
                 "! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\n"
@@ -12135,19 +13510,34 @@ if GUI_MODE:
                 " QPushButton:hover { background-color: #ffffff; color: #000000; }"
             )
             if msg.exec() == QMessageBox.Ok:
-                self.show_tool_window("mbrRE", "Восстанавливает загрузочный сектор и конфигурацию загрузчика Windows.", "Запустить восстановление", Fix_MBR_Boot)
-
+                self._open_embedded_tool(
+                    lambda: ToolWindow(
+                        "mbrRE",
+                        "Восстанавливает загрузочный сектор и конфигурацию загрузчика Windows.",
+                        "Запустить восстановление",
+                        Fix_MBR_Boot,
+                        self),
+                    "mbrRE")
 
         def show_password_window(self):
-            self.show_tool_window("Сброс пароля", "Запускает инструменты управления паролями и учетными записями Windows.", "Открыть параметры", Open_Password_Reset)
+            self._open_embedded_tool(
+                lambda: ToolWindow(
+                    "Сброс пароля",
+                    "Запускает инструменты управления паролями и учетными записями Windows.",
+                    "Открыть параметры",
+                    Open_Password_Reset,
+                    self),
+                "СБРОС ПАРОЛЯ")
 
         def scan_restrictions(self):
             """Сканирует систему на наличие активных блокировок"""
             self.btn_run_scan.setEnabled(False)
-            self.btn_run_scan.setText("Сканирование...")
-            self.scan_status_label.setText("Сканирование...")
+            self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАНИЕ..."))
+            self.scan_status_label.setText("СКАНИРОВАНИЕ...")
             self.restrictions_scan_table.setRowCount(0)
             self._found_restrictions = []
+            if hasattr(self, "_restrictions_counter"):
+                self._restrictions_counter.setText("[ -- / 12 ]")
 
             def do_scan():
                 import winreg
@@ -12279,22 +13669,27 @@ if GUI_MODE:
                 found = getattr(self, '_found_restrictions', [])
             self.restrictions_scan_table.setRowCount(0)
 
+            if hasattr(self, "_restrictions_stack"):
+                self._restrictions_stack.setCurrentIndex(1 if found else 0)
+            if hasattr(self, "_restrictions_counter"):
+                self._restrictions_counter.setText(f"[ {len(found):02d} / 12 ]")
+
             if not found:
-                self.scan_status_label.setText("Ограничений не найдено!")
+                self.scan_status_label.setText(language_manager.translate("ОГРАНИЧЕНИЙ НЕ НАЙДЕНО"))
                 self.btn_fix_all.setEnabled(False)
                 self.btn_fix_selected.setEnabled(False)
                 self.btn_run_scan.setEnabled(True)
-                self.btn_run_scan.setText("Сканировать")
+                self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАТЬ"))
                 return
 
             self.restrictions_scan_table.setRowCount(len(found))
             for i, item in enumerate(found):
                 lbl_item = QTableWidgetItem(item["label"])
                 lbl_item.setForeground(QColor("#ffffff"))
-                lbl_item.setCheckState(Qt.Checked)  # по умолчанию отмечены
+                lbl_item.setCheckState(Qt.Checked)
 
                 key_item = QTableWidgetItem(item["key"])
-                key_item.setForeground(QColor("#888888"))
+                key_item.setForeground(QColor("#777777"))
 
                 det_item = QTableWidgetItem(item["detail"])
                 det_item.setForeground(QColor("#ffffff"))
@@ -12303,11 +13698,16 @@ if GUI_MODE:
                 self.restrictions_scan_table.setItem(i, 1, key_item)
                 self.restrictions_scan_table.setItem(i, 2, det_item)
 
-            self.scan_status_label.setText(f"Найдено {len(found)} блокировок")
+            self.scan_status_label.setText(f"{language_manager.translate('НАЙДЕНО:')} {len(found)}")
             self.btn_fix_all.setEnabled(True)
             self.btn_fix_selected.setEnabled(True)
             self.btn_run_scan.setEnabled(True)
-            self.btn_run_scan.setText("Сканировать снова")
+            self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАТЬ"))
+
+            # АВТО-СНЯТИЕ: сразу применяем найденные ограничения
+            auto_cb = getattr(self, "_auto_fix_cb", None)
+            if auto_cb is not None and auto_cb.isChecked():
+                self._apply_restriction_fixes(found, skip_confirm=True)
 
         def fix_selected_restrictions(self):
             """Снимает только отмеченные галочкой ограничения"""
@@ -12324,8 +13724,8 @@ if GUI_MODE:
             found = getattr(self, '_found_restrictions', [])
             self._apply_restriction_fixes(found)
 
-        def _apply_restriction_fixes(self, items_to_fix):
-            """Показывает окно подтверждения и запускает фикс"""
+        def _apply_restriction_fixes(self, items_to_fix, skip_confirm=False):
+            """Показывает окно подтверждения и запускает фикс."""
             if not items_to_fix:
                 QMessageBox.information(self, "Нет выбора", "Не выбрано ни одного ограничения.")
                 return
@@ -12374,7 +13774,7 @@ if GUI_MODE:
             msg.setText(f"Будет выполнено {len(items_to_fix)} действий:\n\n{details_text}\n\nПродолжить?")
             msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
             msg.setDefaultButton(QMessageBox.Yes)
-            if msg.exec() != QMessageBox.Yes:
+            if not skip_confirm and msg.exec() != QMessageBox.Yes:
                 return
 
             # Запускаем прямую очистку через реестр (без зависимости от имён функций)
@@ -12456,7 +13856,7 @@ if GUI_MODE:
             
             # Scan button
             self.btn_scan_locks = QPushButton("Анализ файла")
-            self.btn_scan_locks.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; font-weight: bold; margin-top: 10px;")
+            self.btn_scan_locks.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold; margin-top: 10px;")
             self.btn_scan_locks.clicked.connect(self.scan_locking_processes)
             layout.addWidget(self.btn_scan_locks)
             
@@ -12473,11 +13873,11 @@ if GUI_MODE:
             # Action buttons
             action_layout = QHBoxLayout()
             self.btn_unlock_kill = QPushButton("Разблокировать (Убить процессы)")
-            self.btn_unlock_kill.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; font-weight: bold;")
+            self.btn_unlock_kill.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold;")
             self.btn_unlock_kill.clicked.connect(self.unlock_kill_only)
             
             self.btn_unlock_delete = QPushButton("Уничтожить (Убить + Удалить файл)")
-            self.btn_unlock_delete.setStyleSheet("background-color: #111111; color: #ffffff; padding: 5px 12px; border: 1px solid #222222; border-radius: 4px; font-weight: bold;")
+            self.btn_unlock_delete.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold;")
             self.btn_unlock_delete.clicked.connect(self.unlock_kill_and_delete)
             
             action_layout.addWidget(self.btn_unlock_kill)
@@ -12571,16 +13971,18 @@ if GUI_MODE:
             msg = f"Убито процессов: {killed}."
             
             if delete_file:
-                import time
-                time.sleep(1) # wait for handles to release
+                import time, shutil
+                time.sleep(0.3)
                 try:
-                    safe_remove(path)
-                    msg += "\nФайл успешно удален!"
-                except Exception as e:
-                    msg += f"\nНе удалось удалить файл: {e}"
-            
-            QMessageBox.information(self, "Готово", msg)
-            self.unlocker_table.setRowCount(0)
+                    if os.path.exists(path):
+                        if os.path.isdir(path):
+                            shutil.rmtree(path, ignore_errors=True)
+                        else:
+                            os.remove(path)
+                    msg += "\nФайл успешно удален."
+                except Exception as _del_e:
+                    msg += f"\nНе удалось удалить файл: {_del_e}"
+            QMessageBox.information(self, "Разблокировка", msg)
             self.unlocker_pids = []
             self.unlocker_path_edit.clear()
 
@@ -12929,7 +14331,8 @@ if GUI_MODE:
             btn_close = QPushButton("Закрыть")
             btn_close.clicked.connect(dlg.accept)
             layout.addWidget(btn_close)
-            dlg.exec_()
+            self._bw_dialog(dlg)
+            self._embed_dialog(dlg, "КОРРЕЛЯЦИЯ MALWARE")
 
         def show_driver_recovery_window(self):
             from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
@@ -12960,7 +14363,8 @@ if GUI_MODE:
             btn_rec = QPushButton("Указать папку и восстановить")
             btn_rec.clicked.connect(do_recover)
             layout.addWidget(btn_rec)
-            dlg.exec_()
+            self._bw_dialog(dlg)
+            self._embed_dialog(dlg, "ВОССТАНОВЛЕНИЕ ДРАЙВЕРОВ")
 
         def show_winre_usb_window(self):
             from PySide6.QtWidgets import (
@@ -13201,9 +14605,8 @@ if GUI_MODE:
             btn_winre.clicked.connect(do_winre)
             layout.addWidget(btn_winre)
             refresh_usb_list()
-            dlg.exec_()
-
-
+            self._bw_dialog(dlg)
+            self._embed_dialog(dlg, "СОХРАНЕНИЕ WINRE")
 
         def run_diagnostics(self, verification_for=None):
             from PySide6.QtWidgets import QTableWidgetItem
@@ -13707,6 +15110,47 @@ if GUI_MODE:
             sep.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep)
 
+            # ─── Быстрый доступ (карточки разделов) ───
+            quick_frame = QFrame()
+            quick_frame.setObjectName("SettingsQuickAccess")
+            quick_frame.setStyleSheet(
+                "QFrame#SettingsQuickAccess { background: #000000; border: 1px solid #222222; }")
+            quick_lay = QVBoxLayout(quick_frame)
+            quick_lay.setContentsMargins(14, 12, 14, 14)
+            quick_lay.setSpacing(8)
+
+            quick_title = QLabel("БЫСТРЫЙ ДОСТУП")
+            quick_title.setStyleSheet(
+                "color: #ffffff; font-size: 12px; font-weight: bold; letter-spacing: 2px;"
+                " border: none; background: transparent;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            quick_lay.addWidget(quick_title)
+
+            quick_grid = QGridLayout()
+            quick_grid.setHorizontalSpacing(8)
+            quick_grid.setVerticalSpacing(8)
+            quick_items = [
+                ("СНЯТИЕ ОГРАНИЧЕНИЙ", 3),
+                ("ДОП. ВОЗМОЖНОСТИ", 4),
+                ("ПРОВОДНИК", 2),
+                ("УМНАЯ ДИАГНОСТИКА", 7),
+            ]
+            for qi, (qtext, qpage) in enumerate(quick_items):
+                qbtn = QPushButton(language_manager.translate(qtext))
+                qbtn.setMinimumHeight(52)
+                qbtn.setCursor(Qt.PointingHandCursor)
+                qbtn.setStyleSheet(
+                    "QPushButton { background: #000000; color: #ffffff; border: 1px solid #222222;"
+                    " font-size: 11px; font-weight: bold; letter-spacing: 1px;"
+                    " font-family: 'Consolas', 'Courier New', monospace; }"
+                    "QPushButton:hover { border-color: #666666; background: #080808; }")
+                qbtn.clicked.connect(lambda checked=False, pg=qpage: self.switch_page(pg))
+                quick_grid.addWidget(qbtn, qi // 4, qi % 4)
+            for _c in range(4):
+                quick_grid.setColumnStretch(_c, 1)
+            quick_lay.addLayout(quick_grid)
+            layout.addWidget(quick_frame)
+
             website_row = QHBoxLayout()
             website_label = QLabel(language_manager.translate("Сайт программы"))
             website_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: bold;")
@@ -13762,7 +15206,7 @@ if GUI_MODE:
             self.winre_status_value.setObjectName("ReadOnlySettingValue")
             self.winre_status_value.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
             self.winre_status_value.setMinimumWidth(100)
-            self.winre_status_value.setStyleSheet("QLabel#ReadOnlySettingValue { border: 1px solid #444444; padding: 8px; color: #bbbbbb; }")
+            self.winre_status_value.setStyleSheet("QLabel#ReadOnlySettingValue { background-color: #000000; border: 1px solid #333333; padding: 8px 10px; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; }")
             recovery_row.addWidget(self.winre_status_value)
             layout.addLayout(recovery_row)
 
@@ -13774,7 +15218,7 @@ if GUI_MODE:
             self.current_user_value.setObjectName("ReadOnlySettingValue")
             self.current_user_value.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
             self.current_user_value.setMinimumWidth(180)
-            self.current_user_value.setStyleSheet("QLabel#ReadOnlySettingValue { border: 1px solid #444444; padding: 8px; color: #bbbbbb; }")
+            self.current_user_value.setStyleSheet("QLabel#ReadOnlySettingValue { background-color: #000000; border: 1px solid #333333; padding: 8px 10px; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; }")
             self.current_user_value.setToolTip(language_manager.translate("Информация только для просмотра"))
             user_row.addWidget(self.current_user_value)
             layout.addLayout(user_row)
@@ -13788,7 +15232,7 @@ if GUI_MODE:
             lbl_theme.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold;")
             layout.addWidget(lbl_theme)
 
-            self.cb_theme = QComboBox()
+            self.cb_theme = NoWheelComboBox()
             self.cb_theme.addItems(["Minimal B&W", "Тёмная тема (Стандартная)", "МАТОВЫЙ", "ПРОЗРАЧНЫЙ"])
             self.cb_theme.setStyleSheet("""
                 QComboBox {
@@ -13814,7 +15258,7 @@ if GUI_MODE:
             lbl_language.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
             layout.addWidget(lbl_language)
 
-            self.cb_language = QComboBox()
+            self.cb_language = NoWheelComboBox()
             # These native names intentionally remain readable in every locale.
             self.cb_language.addItems(["English", "Українська", "Русский", "Deutsch", "Polski", "Français"])
             self.cb_language.setCurrentIndex({"en": 0, "uk": 1, "ru": 2, "de": 3, "pl": 4, "fr": 5}.get(language_manager.language, 2))
@@ -13826,7 +15270,7 @@ if GUI_MODE:
             lbl_win.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
             layout.addWidget(lbl_win)
 
-            self.cb_win = QComboBox()
+            self.cb_win = NoWheelComboBox()
             _auto_ver = detect_windows_version()
             self.cb_win.setIconSize(QSize(20, 20))
             # Порядок обязателен: 0 = автоопределение, 1..5 = WIN_VERSION_KEYS.
@@ -13853,7 +15297,7 @@ if GUI_MODE:
             lbl_mode.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold; margin-top: 10px;")
             layout.addWidget(lbl_mode)
 
-            self.cb_mode = QComboBox()
+            self.cb_mode = NoWheelComboBox()
             self.cb_mode.addItems(["Обычный пользователь", "Опытный пользователь (Advanced)"])
             is_adv = getattr(self, "advanced_mode", False)
             self.cb_mode.setCurrentIndex(1 if is_adv else 0)
@@ -14065,7 +15509,7 @@ if GUI_MODE:
 
             # Language
             lang_label = QLabel(language_manager.translate("Язык интерфейса:"))
-            self.lang_combo = QComboBox()
+            self.lang_combo = NoWheelComboBox()
             self.lang_combo.addItems(["English", "Українська", "Русский", "Deutsch", "Polski", "Français"])
             current = {"en": 0, "uk": 1, "ru": 2, "de": 3, "pl": 4, "fr": 5}.get(language_manager.language, 2)
             self.lang_combo.setCurrentIndex(current)
@@ -14076,7 +15520,7 @@ if GUI_MODE:
 
             # Theme
             theme_label = QLabel(language_manager.translate("Оформление (Тема):"))
-            self.theme_combo = QComboBox()
+            self.theme_combo = NoWheelComboBox()
             self.theme_combo.addItems([language_manager.translate("Темная базовая"), language_manager.translate("Матовая"), language_manager.translate("Прозрачная")])
             self.theme_combo.setStyleSheet("QComboBox { background-color: #222; color: #fff; padding: 5px; }")
             layout.addWidget(theme_label)
@@ -14090,7 +15534,7 @@ if GUI_MODE:
 
             # Mode
             mode_label = QLabel(language_manager.translate("Режим использования:"))
-            self.mode_combo = QComboBox()
+            self.mode_combo = NoWheelComboBox()
             self.mode_combo.addItems([
                 language_manager.translate("Обычный пользователь"),
                 language_manager.translate("Опытный пользователь (Advanced)")
@@ -14337,12 +15781,60 @@ if GUI_MODE:
             table.setColumnCount(len(headers))
             table.setHorizontalHeaderLabels(headers)
             table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-            table.verticalHeader().setDefaultSectionSize(30)  # Высота строк
-            table.setShowGrid(True)
+            table.verticalHeader().setDefaultSectionSize(22)  # компактные строки
+            table.verticalHeader().setVisible(False)
+            table.verticalHeader().setStyleSheet(
+                "QHeaderView::section { background-color: #000000; color: #666666;"
+                " border: none; border-bottom: 1px solid #1a1a1a;"
+                " font-size: 10px; padding: 0 4px; }")
+            table.setShowGrid(False)
             table.setStyleSheet("""
                 QTableWidget { 
-                    background-color: white; 
-                    color: black; 
+                    background-color: #000000; 
+                    color: #ffffff; 
+                    gridline-color: #1a1a1a;
+                    border: 1px solid #222222;
+                    font-size: 11px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    outline: none;
+                }
+                QTableWidget::item {
+                    padding: 2px 6px;
+                    border-bottom: 1px solid #111111;
+                }
+                QTableWidget::item:hover {
+                    background-color: #141414;
+                }
+                QTableWidget::item:selected {
+                    background-color: #1f1f1f;
+                    color: #ffffff;
+                }
+                QHeaderView::section {
+                    background-color: #000000;
+                    color: #999999;
+                    padding: 5px 8px;
+                    border: none;
+                    border-right: 1px solid #1a1a1a;
+                    border-bottom: 1px solid #222222;
+                    font-weight: bold;
+                    font-size: 10px;
+                    letter-spacing: 1px;
+                }
+            """)
+            return table
+
+        def create_classic_table(self, headers):
+            """Классическая светлая таблица автозагрузки (как была изначально)."""
+            table = QTableWidget()
+            table.setColumnCount(len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            table.verticalHeader().setDefaultSectionSize(30)
+            table.setShowGrid(True)
+            table.setStyleSheet("""
+                QTableWidget {
+                    background-color: white;
+                    color: black;
                     gridline-color: #ffffff;
                     border: none;
                     font-size: 13px;
@@ -14416,8 +15908,19 @@ if GUI_MODE:
                     pass
                 
                 info.append(f"\nПользователь: {os.environ.get('USERNAME', 'N/A')}")
-                
-                QMessageBox.information(self, "Информация о системе", "\n".join(info))
+
+                dlg = QDialog(self)
+                dlg.setWindowTitle("СВЕДЕНИЯ О СИСТЕМЕ")
+                dlg.resize(680, 480)
+                dl = QVBoxLayout(dlg)
+                view = QTextEdit()
+                view.setReadOnly(True)
+                view.setPlainText("\n".join(info))
+                dl.addWidget(view)
+                close_btn = QPushButton("ЗАКРЫТЬ")
+                close_btn.clicked.connect(dlg.accept)
+                dl.addWidget(close_btn, 0, Qt.AlignRight)
+                self._embed_dialog(dlg, "СВЕДЕНИЯ О СИСТЕМЕ")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось получить информацию: {e}")
 
@@ -14432,10 +15935,10 @@ if GUI_MODE:
                                    capture_output=True, creationflags=0x08000000)
                     import time
                     time.sleep(1)
-                    subprocess.Popen('explorer.exe')
-                    QMessageBox.information(self, "Готово", "Explorer перезапущен!")
+                    subprocess.Popen(["explorer.exe"], creationflags=0x08000000)
+                    QMessageBox.information(self, "Готово", "Explorer перезапущен.")
                 except Exception as e:
-                    QMessageBox.critical(self, "Ошибка", f"Не удалось перезапустить explorer: {e}")
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось перезапустить Explorer: {e}")
 
         def scan_startup_report(self):
             try:
@@ -14523,14 +16026,14 @@ if GUI_MODE:
                 btn_close.setStyleSheet("background-color: #111111; color: #ffffff; border: 1px solid #ffffff; border-radius: 4px; padding: 8px;")
                 btn_close.clicked.connect(dialog.close)
                 dlg_layout.addWidget(btn_close)
-                
-                dialog.exec()
+
+                self._embed_dialog(dialog, "СЕТЕВЫЕ ПОРТЫ")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось получить список портов: {e}")
 
         def open_task_manager(self):
-            dialog = TaskManagerDialog(self)
-            dialog.exec()
+            self._open_embedded_tool(
+                lambda: TaskManagerDialog(self), "ДИСПЕТЧЕР ЗАДАЧ")
 
         def create_backup(self): self.run_task(Create_Full_Backup)
         def restore_backup(self): self.run_task(Restore_From_Backup)
@@ -14961,6 +16464,9 @@ if GUI_MODE:
             from PySide6.QtCore import Qt, QCoreApplication
             import subprocess
             import time
+
+
+
             
             progress = QProgressDialog(language_manager.translate("Создание бэкапа реестра..."), "", 0, 100, self)
             progress.setWindowModality(Qt.WindowModal)
@@ -15205,7 +16711,14 @@ def main():
         app._novir_translation_filter = TranslationEventFilter(app)
         app.installEventFilter(app._novir_translation_filter)
         if language_manager.first_run:
-            LanguageSelectionDialog().exec()
+            # Первый запуск: язык определяется автоматически по локали системы
+            try:
+                from PySide6.QtCore import QLocale
+                _sys_locale = QLocale.system().name()[:2]
+                _lang = _sys_locale if _sys_locale in ("en", "uk", "ru", "de", "pl", "fr") else "en"
+            except Exception:
+                _lang = "en"
+            language_manager.set_language(_lang, save=True)
         window = NoVirGUI()
         window.show()
         sys.exit(app.exec())
@@ -15245,12 +16758,53 @@ def main():
         print(f"\n{Colors.YELLOW}[Нажмите Enter, чтобы продолжить...]{Colors.RESET}")
         input()
 
+# ─── Глобальный ловитель ВСЕХ программных ошибок ─────────────────────
+def _novir_global_exception_handler(exctype, value, tb):
+    """Перехватывает любые необработанные исключения приложения."""
+    import traceback
+    from datetime import datetime
+
+    try:
+        print(f"[CRITICAL] {exctype.__name__}: {value}", file=sys.stderr)
+        traceback.print_exception(exctype, value, tb, file=sys.stderr)
+    except Exception:
+        pass
+
+    try:
+        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+        log_path = os.path.join(base, "novir_crash.log")
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("\n" + "=" * 70 + "\n")
+            fh.write(f"{datetime.now().isoformat()}  {exctype.__name__}: {value}\n")
+            traceback.print_exception(exctype, value, tb, file=fh)
+    except Exception:
+        pass
+
+    try:
+        if GUI_MODE:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance() is not None:
+                QMessageBox.critical(
+                    None,
+                    "Критическая ошибка NoVir",
+                    f"Произошла непредвиденная ошибка:\n\n{exctype.__name__}: {value}\n\n"
+                    "Подробности записаны в novir_crash.log",
+                )
+    except Exception:
+        pass
+
+
+sys.excepthook = _novir_global_exception_handler
+
+
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}[!] Прервано пользователем{Colors.RESET}")
         sys.exit(0)
+    except SystemExit:
+        raise
     except Exception as e:
-        print(f"{Colors.RED}[!] Критическая ошибка: {e}{Colors.RESET}")
+        _novir_global_exception_handler(type(e), e, e.__traceback__)
         sys.exit(1)

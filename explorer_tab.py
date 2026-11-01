@@ -1,12 +1,72 @@
 import os
+import sys
 import shutil
 import string
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
-                             QPushButton, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QMessageBox, QMenu, QAbstractItemView, QStyle,
-                             QFileIconProvider)
-from PySide6.QtCore import QFile, QFileInfo, Qt, QSize
-from PySide6.QtGui import QIcon
+
+# Регистрация каталогов DLL для PySide6 и Shiboken6 (WinRE / WinPE / PyInstaller)
+if getattr(sys, 'frozen', False):
+    _basedir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    for _subdir in ('', 'PySide6', 'shiboken6'):
+        _p = os.path.join(_basedir, _subdir) if _subdir else _basedir
+        if os.path.isdir(_p):
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    os.add_dll_directory(_p)
+                except Exception:
+                    pass
+            os.environ['PATH'] = _p + os.pathsep + os.environ.get('PATH', '')
+else:
+    try:
+        import PySide6
+        _pyside_dir = os.path.dirname(PySide6.__file__)
+        if hasattr(os, 'add_dll_directory') and os.path.isdir(_pyside_dir):
+            os.add_dll_directory(_pyside_dir)
+        os.environ['PATH'] = _pyside_dir + os.pathsep + os.environ.get('PATH', '')
+    except Exception:
+        pass
+
+# Безопасный импорт PySide6
+try:
+    from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
+                                 QPushButton, QTableWidget, QTableWidgetItem, 
+                                 QHeaderView, QMessageBox, QMenu, QAbstractItemView, QStyle,
+                                 QFileIconProvider)
+    from PySide6.QtCore import QFile, QFileInfo, Qt, QSize
+    from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+    PYSIDE_AVAILABLE = True
+except Exception as _pyside_err:
+    PYSIDE_AVAILABLE = False
+    class QWidget: pass
+    class QVBoxLayout: pass
+    class QHBoxLayout: pass
+    class QLineEdit: pass
+    class QPushButton: pass
+    class QTableWidget: pass
+    class QTableWidgetItem: pass
+    class QHeaderView: pass
+    class QMessageBox: pass
+    class QMenu: pass
+    class QAbstractItemView: pass
+    class QStyle: pass
+    class QFileIconProvider: pass
+    class QFile: pass
+    class QFileInfo: pass
+    class Qt:
+        CustomContextMenu = None
+        AlignCenter = None
+        AlignLeft = None
+        AlignVCenter = None
+        ElideRight = None
+        NoEditTriggers = None
+        SelectRows = None
+        Key_F5 = None
+        Key_Back = None
+        Key_Delete = None
+    class QSize: pass
+    class QIcon: pass
+    class QKeySequence: pass
+    class QShortcut: pass
+
 
 try:
     import novir_native
@@ -285,7 +345,7 @@ class ExplorerTab(QWidget):
         self.file_table.verticalHeader().setVisible(False)
         self.file_table.setShowGrid(False)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.file_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.file_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.file_table.setAlternatingRowColors(True)
         self.file_table.verticalHeader().setDefaultSectionSize(30)
@@ -314,6 +374,9 @@ class ExplorerTab(QWidget):
         self.file_table.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.file_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_table.customContextMenuRequested.connect(self.show_context_menu)
+        self._delete_shortcut = QShortcut(QKeySequence("Delete"), self.file_table)
+        self._delete_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        self._delete_shortcut.activated.connect(self._delete_selected_rows)
 
         
         # Search bar
@@ -540,124 +603,325 @@ class ExplorerTab(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, tr("Ошибка"), str(e))
 
+    def _selected_paths(self):
+        """Return unique paths for all selected rows in the current view."""
+        try:
+            selection = self.file_table.selectionModel()
+            if selection is None:
+                return []
+            rows = sorted({index.row() for index in selection.selectedRows()})
+        except Exception:
+            rows = []
+        paths = []
+        for row in rows:
+            name_item = self.file_table.item(row, 0)
+            if not name_item:
+                continue
+            if self.current_path == self.ROOT_PATH:
+                path = name_item.text()
+            else:
+                path = name_item.data(Qt.UserRole) or os.path.join(
+                    self.current_path, name_item.text())
+            if path and path not in paths:
+                paths.append(path)
+        return paths
+
+    def _notify(self, title, message="", error=False):
+        """Use the main-window toast when available, otherwise fall back to a dialog."""
+        window = self.window()
+        if window is not None and window is not self and hasattr(window, "show_toast"):
+            try:
+                window.show_toast(title, message, "error" if error else "success")
+                return
+            except Exception:
+                pass
+        if error:
+            QMessageBox.critical(self, title, message)
+        elif message:
+            QMessageBox.information(self, title, message)
+
+    def _open_selected_paths(self, paths):
+        if not paths:
+            return
+        if len(paths) == 1:
+            path = paths[0]
+            if self.current_path == self.ROOT_PATH:
+                self.current_path = path
+                self.refresh_files()
+                return
+            if os.path.isdir(path) and not os.path.islink(path):
+                self.current_path = path
+                self.refresh_files()
+                return
+            try:
+                os.startfile(path)
+            except Exception as error:
+                QMessageBox.warning(self, tr("Ошибка"), str(error))
+            return
+        errors = []
+        for path in paths:
+            try:
+                os.startfile(path)
+            except Exception as error:
+                errors.append(f"{os.path.basename(path.rstrip(chr(92) + '/')) or path}: {error}")
+        if errors:
+            QMessageBox.warning(self, tr("Ошибка"), "\n".join(errors[:12]))
+
+    def _rename_selected_path(self, path):
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(
+            self, tr("Переименование"), tr("Новое имя:"),
+            QLineEdit.Normal, os.path.basename(path))
+        if not ok or not new_name or new_name == os.path.basename(path):
+            return
+        new_path = os.path.join(os.path.dirname(path), new_name)
+        if os.path.exists(new_path):
+            QMessageBox.warning(self, tr("Ошибка"), f"{tr('Уже существует:')} {new_path}")
+            return
+        try:
+            os.rename(path, new_path)
+            self.refresh_files()
+            self._notify(tr("ГОТОВО"), f"{tr('Переименовано:')} {new_name}")
+        except Exception as error:
+            QMessageBox.warning(self, tr("Ошибка"), f"{tr('Не удалось переименовать:')} {error}")
+
+    def _copy_selected_paths(self, paths):
+        from PySide6.QtWidgets import QFileDialog
+        if not paths:
+            return
+        dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
+        if not dest_dir:
+            return
+        copied = 0
+        errors = []
+        for path in paths:
+            name = os.path.basename(path.rstrip("\\/")) or path
+            target = os.path.join(dest_dir, name)
+            try:
+                if os.path.exists(target):
+                    raise FileExistsError(tr("Уже существует"))
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.copytree(path, target)
+                else:
+                    shutil.copy2(path, target)
+                copied += 1
+            except Exception as error:
+                errors.append(f"{name}: {error}")
+        self.refresh_files()
+        if errors:
+            QMessageBox.warning(
+                self, tr("Копирование"),
+                f"{tr('Скопировано объектов:')} {copied}\n" + "\n".join(errors[:12]))
+        else:
+            self._notify(tr("Копирование"), f"{tr('Скопировано объектов:')} {copied}")
+
+    def _move_selected_paths(self, paths):
+        from PySide6.QtWidgets import QFileDialog
+        if not paths:
+            return
+        dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
+        if not dest_dir:
+            return
+        moved = 0
+        errors = []
+        for path in paths:
+            name = os.path.basename(path.rstrip("\\/")) or path
+            target = os.path.join(dest_dir, name)
+            try:
+                if os.path.exists(target):
+                    raise FileExistsError(tr("Уже существует"))
+                shutil.move(path, target)
+                moved += 1
+            except Exception as error:
+                errors.append(f"{name}: {error}")
+        self.refresh_files()
+        if errors:
+            QMessageBox.warning(
+                self, tr("Перемещение"),
+                f"{tr('Перемещено объектов:')} {moved}\n" + "\n".join(errors[:12]))
+        else:
+            self._notify(tr("Перемещение"), f"{tr('Перемещено объектов:')} {moved}")
+
+    def _unlock_selected_paths(self, paths):
+        if not novir_native or not hasattr(novir_native, "unlock_file"):
+            QMessageBox.warning(self, tr("Ошибка"), tr("Модуль novir_native недоступен."))
+            return
+        unlocked = 0
+        failed = []
+        for path in paths:
+            try:
+                if novir_native.unlock_file(path):
+                    unlocked += 1
+                else:
+                    failed.append(os.path.basename(path.rstrip("\\/")) or path)
+            except Exception as error:
+                failed.append(f"{os.path.basename(path.rstrip(chr(92) + '/')) or path}: {error}")
+        if failed:
+            QMessageBox.warning(
+                self, tr("Разблокировка"),
+                f"{tr('Разблокировано:')} {unlocked}\n" + "\n".join(failed[:12]))
+        else:
+            self._notify(tr("Разблокировка"), f"{tr('Разблокировано:')} {unlocked}")
+
+    def _own_selected_paths(self, paths):
+        if not novir_native or not hasattr(novir_native, "take_ownership"):
+            QMessageBox.warning(self, tr("Ошибка"), tr("Модуль novir_native недоступен."))
+            return
+        owned = 0
+        failed = []
+        for path in paths:
+            try:
+                if novir_native.take_ownership(path):
+                    owned += 1
+                else:
+                    failed.append(os.path.basename(path.rstrip("\\/")) or path)
+            except Exception as error:
+                failed.append(f"{os.path.basename(path.rstrip(chr(92) + '/')) or path}: {error}")
+        if failed:
+            QMessageBox.warning(
+                self, tr("Владелец"),
+                f"{tr('Права получены:')} {owned}\n" + "\n".join(failed[:12]))
+        else:
+            self._notify(tr("Владелец"), f"{tr('Права получены:')} {owned}")
+
     def show_context_menu(self, pos):
         item = self.file_table.itemAt(pos)
-        if not item: return
-        
+        if not item:
+            return
+
         row = item.row()
+        selected_rows = set()
+        try:
+            selected_rows = {index.row() for index in self.file_table.selectionModel().selectedRows()}
+        except Exception:
+            pass
+        if row not in selected_rows:
+            self.file_table.clearSelection()
+            self.file_table.selectRow(row)
+
+        paths = self._selected_paths()
+        if not paths:
+            return
+        multiple = len(paths) > 1
+        suffix = f" ({len(paths)})" if multiple else ""
         name_item = self.file_table.item(row, 0)
-        
-        if self.current_path == self.ROOT_PATH:
-            path = name_item.text()
-        else:
-            path = name_item.data(Qt.UserRole)
-            
+
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { background-color: #000000; color: white; border: 1px solid #333333; } QMenu::item:selected { background-color: #4a4a5a; }")
-        
-        action_open = menu.addAction(tr("Открыть"))
+
+        action_open = menu.addAction(tr("Открыть") + suffix)
         menu.addSeparator()
-        
+
         if self.current_path != self.ROOT_PATH:
             action_rename = menu.addAction(tr("Переименовать"))
-            action_copy_file = menu.addAction(tr("Копировать файл"))
-            action_move_file = menu.addAction(tr("Переместить файл"))
-            action_copy_path = menu.addAction(tr("Копировать путь"))
+            action_rename.setEnabled(not multiple)
+            action_copy_file = menu.addAction(tr("Копировать файл") + suffix)
+            action_move_file = menu.addAction(tr("Переместить файл") + suffix)
+            action_copy_path = menu.addAction(tr("Копировать путь") + suffix)
             menu.addSeparator()
-            action_unlock = menu.addAction(tr("Разблокировать (Unlocker)"))
-            action_own = menu.addAction(tr("Стать владельцем (Take Ownership)"))
-            action_del = menu.addAction(tr("Удалить безвозвратно (Force Delete)"))
-            
+            action_unlock = menu.addAction(tr("Разблокировать (Unlocker)") + suffix)
+            action_own = menu.addAction(tr("Стать владельцем (Take Ownership)") + suffix)
+            action_del = menu.addAction(tr("Удалить безвозвратно (Force Delete)") + suffix)
+
             action = menu.exec(self.file_table.viewport().mapToGlobal(pos))
-            
+
             if action == action_open:
-                self.on_item_double_clicked(name_item)
+                self._open_selected_paths(paths)
             elif action == action_copy_file:
-                import shutil
-                from PySide6.QtWidgets import QInputDialog, QFileDialog
-                dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
-                if dest_dir:
-                    try:
-                        shutil.copy2(path, dest_dir)
-                        self.refresh_files()
-                    except Exception as e:
-                        QMessageBox.warning(self, tr("Ошибка"), str(e))
+                self._copy_selected_paths(paths)
             elif action == action_move_file:
-                import shutil
-                from PySide6.QtWidgets import QFileDialog
-                dest_dir = QFileDialog.getExistingDirectory(self, tr("Выберите папку назначения"))
-                if dest_dir:
-                    try:
-                        shutil.move(path, dest_dir)
-                        self.refresh_files()
-                    except Exception as e:
-                        QMessageBox.warning(self, tr("Ошибка"), str(e))
-            elif action == action_rename:
-                from PySide6.QtWidgets import QInputDialog
-                new_name, ok = QInputDialog.getText(self, tr("Переименование"), tr("Новое имя:"), QLineEdit.Normal, os.path.basename(path))
-                if ok and new_name:
-                    new_path = os.path.join(os.path.dirname(path), new_name)
-                    try:
-                        os.rename(path, new_path)
-                        self.refresh_files()
-                    except Exception as e:
-                        QMessageBox.warning(self, tr("Ошибка"), f"{tr('Не удалось переименовать:')} {e}")
+                self._move_selected_paths(paths)
+            elif action == action_rename and not multiple:
+                self._rename_selected_path(paths[0])
             elif action == action_copy_path:
                 from PySide6.QtWidgets import QApplication
-                QApplication.clipboard().setText(path)
+                QApplication.clipboard().setText("\n".join(paths))
             elif action == action_unlock:
-                if novir_native and hasattr(novir_native, 'unlock_file'):
-                    res = novir_native.unlock_file(path)
-                    QMessageBox.information(self, tr("Разблокировка"), tr("Файл разблокирован!") if res else tr("Не удалось разблокировать или файл не заблокирован."))
-                else:
-                    QMessageBox.warning(self, tr("Ошибка"), tr("Модуль novir_native недоступен."))
+                self._unlock_selected_paths(paths)
             elif action == action_own:
-                if novir_native and hasattr(novir_native, 'take_ownership'):
-                    res = novir_native.take_ownership(path)
-                    QMessageBox.information(self, tr("Владелец"), tr("Права получены!") if res else tr("Не удалось получить права."))
-                else:
-                    QMessageBox.warning(self, tr("Ошибка"), tr("Модуль novir_native недоступен."))
+                self._own_selected_paths(paths)
             elif action == action_del:
-                self.force_delete_selected_path(path)
+                self.force_delete_selected_paths(paths)
         else:
             action = menu.exec(self.file_table.viewport().mapToGlobal(pos))
             if action == action_open:
-                self.on_item_double_clicked(name_item)
+                self._open_selected_paths(paths)
+
+    def _delete_selected_rows(self):
+        if self.current_path == self.ROOT_PATH:
+            return
+        paths = self._selected_paths()
+        if paths:
+            self.force_delete_selected_paths(paths)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:
-            row = self.file_table.currentRow()
-            if row >= 0:
-                item = self.file_table.item(row, 0)
-                if item and self.current_path != self.ROOT_PATH:
-                    path = item.data(Qt.UserRole)
-                    if path:
-                        self.force_delete_selected_path(path)
-                        return
+            self._delete_selected_rows()
+            return
         super().keyPressEvent(event)
 
-    def force_delete_selected_path(self, path):
-        """Удаляет файл или папку, даже если они заняты процессом (кроме системных папок)"""
-        if is_protected_system_folder(path):
-            QMessageBox.warning(
-                self,
-                tr("Защита системы"),
-                tr("Данный объект является защищённой системной папкой или критическим файлом Windows. Удаление заблокировано во избежание краха системы.")
-            )
+    def force_delete_selected_paths(self, paths):
+        """Delete every selected object with one confirmation and one result summary."""
+        paths = [path for path in dict.fromkeys(paths) if path]
+        if not paths:
             return
 
+        allowed = []
+        protected = []
+        for path in paths:
+            if is_protected_system_folder(path):
+                protected.append(path)
+            else:
+                allowed.append(path)
+
+        if not allowed:
+            shown = "\n".join(paths[:12])
+            QMessageBox.warning(
+                self, tr("Защита системы"),
+                tr("Данный объект является защищённой системной папкой или критическим файлом Windows. Удаление заблокировано во избежание краха системы.")
+                + ("\n\n" + shown if shown else ""))
+            return
+
+        if len(allowed) == 1:
+            prompt = tr("Удалить безвозвратно (включая разблокировку и закрытие удерживающих процессов)?")
+            details = allowed[0]
+        else:
+            names = []
+            for path in allowed[:12]:
+                names.append("- " + (os.path.basename(path.rstrip("\\/")) or path))
+            if len(allowed) > 12:
+                names.append(f"- ... +{len(allowed) - 12}")
+            prompt = f"{tr('Удалить безвозвратно?')} {len(allowed)}"
+            details = "\n".join(names)
+        if protected:
+            details += "\n\n" + f"{tr('Защищённые системные объекты пропущены:')} {len(protected)}"
+
         reply = QMessageBox.question(
-            self,
-            tr("Принудительное удаление"),
-            f"{tr('Удалить безвозвратно (включая разблокировку и закрытие удерживающих процессов)?')}\n\n{path}",
-            QMessageBox.Yes | QMessageBox.No
-        )
+            self, tr("Принудительное удаление"),
+            f"{prompt}\n\n{details}",
+            QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
 
-        ok, msg = force_delete_file_or_dir(path)
-        if ok:
-            self.refresh_files()
-            QMessageBox.information(self, tr("Готово"), msg)
-        else:
-            QMessageBox.critical(self, tr("Ошибка"), msg)
+        success = 0
+        failed = []
+        for path in allowed:
+            try:
+                ok, message = force_delete_file_or_dir(path)
+            except Exception as error:
+                ok, message = False, str(error)
+            if ok:
+                success += 1
+            else:
+                failed.append(f"{os.path.basename(path.rstrip(chr(92) + '/')) or path}: {message}")
+
+        self.refresh_files()
+        if failed:
+            QMessageBox.warning(
+                self, tr("Удаление завершено"),
+                f"{tr('Удалено:')} {success}\n{tr('Ошибки:')}\n" + "\n".join(failed[:12]))
+        elif success:
+            self._notify(tr("ГОТОВО"), f"{tr('Удалено объектов:')} {success}")
+
+    def force_delete_selected_path(self, path):
+        self.force_delete_selected_paths([path])

@@ -8,34 +8,140 @@ NoVir - Вирусный Реаниматор
 """
 import os
 import sys
+import time
 
-# Гарантированная регистрация каталогов DLL для PySide6, Shiboken6 и PyInstaller (WinRE / WinPE)
+# Keep a single module instance when this file is the entry point.
+# explorer_tab imports `virus_recovery` lazily for translations; without
+# this alias Python would execute the whole module a second time.
+if __name__ == "__main__":
+    sys.modules.setdefault("virus_recovery", sys.modules[__name__])
+
+# ---- Диагностика запуска (включается NOVIR_BOOT_DEBUG=1) ----------------
+_NOVIR_BOOT_DEBUG = os.environ.get("NOVIR_BOOT_DEBUG") == "1"
+_NOVIR_BOOT_PATH = None
+
+def _novir_boot(stage, detail=""):
+    """Пишем этапы запуска в novir_boot.log, чтобы ловить падения до Qt."""
+    global _NOVIR_BOOT_PATH
+    if not _NOVIR_BOOT_DEBUG:
+        return
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "novir_boot.log"))
+    else:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "novir_boot.log"))
+    candidates.append(os.path.join(os.environ.get("TEMP", "."), "novir_boot.log"))
+    if _NOVIR_BOOT_PATH is None:
+        for candidate in candidates:
+            try:
+                with open(candidate, "a", encoding="utf-8"):
+                    pass
+                _NOVIR_BOOT_PATH = candidate
+                break
+            except Exception:
+                continue
+    if _NOVIR_BOOT_PATH is None:
+        return
+    try:
+        with open(_NOVIR_BOOT_PATH, "a", encoding="utf-8") as fh:
+            fh.write("%s pid=%s %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid(), stage))
+            if detail:
+                fh.write(" | " + str(detail))
+            fh.write("\n")
+    except Exception:
+        pass
+
+_novir_boot("module_start", "frozen=%s meipass=%s exe=%s cwd=%s" % (
+    getattr(sys, "frozen", False), getattr(sys, "_MEIPASS", ""),
+    sys.executable, os.getcwd()))
+
+# Поддержка работы в среде восстановления WinRE / WinPE
+_IS_WINPE = (
+    os.environ.get('SystemDrive', '').upper() == 'X:'
+    or os.path.exists(r'X:\Windows')
+    or os.path.exists(r'X:\windows')
+)
+
+# Гарантированная регистрация каталогов DLL для PySide6, Shiboken6 и PyInstaller (WinRE / WinPE).
+# Важно: handles нужно хранить, иначе Python закроет каталог и он исчезнет из поиска DLL.
+_DLL_DIR_HANDLES = []
 if getattr(sys, 'frozen', False):
     _basedir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-    for _sub in ('', 'PySide6', 'shiboken6'):
-        _target_p = os.path.join(_basedir, _sub) if _sub else _basedir
+    for _sub in ('PySide6', 'shiboken6'):
+        _target_p = os.path.join(_basedir, _sub)
         if os.path.isdir(_target_p):
             if hasattr(os, 'add_dll_directory'):
                 try:
-                    os.add_dll_directory(_target_p)
+                    _DLL_DIR_HANDLES.append(os.add_dll_directory(_target_p))
                 except Exception:
                     pass
-            os.environ['PATH'] = _target_p + os.pathsep + os.environ.get('PATH', '')
+            if _IS_WINPE:
+                os.environ['PATH'] = _target_p + os.pathsep + os.environ.get('PATH', '')
 else:
     try:
         import PySide6
         _pyside_dir = os.path.dirname(PySide6.__file__)
         if hasattr(os, 'add_dll_directory') and os.path.isdir(_pyside_dir):
-            os.add_dll_directory(_pyside_dir)
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(_pyside_dir))
         os.environ['PATH'] = _pyside_dir + os.pathsep + os.environ.get('PATH', '')
     except Exception:
         pass
 
-# Поддержка работы в среде восстановления WinRE / WinPE без GPU-драйверов
-if os.environ.get('SystemDrive', '').upper() == 'X:' or os.path.exists(r'X:\Windows'):
-    os.environ.setdefault('QT_QUICK_BACKEND', 'software')
-    os.environ.setdefault('QSG_RHI_BACKEND', 'software')
-    os.environ.setdefault('QT_OPENGL', 'software')
+if getattr(sys, 'frozen', False):
+    _basedir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    # Явно указываем Qt путь к плагинам (platforms/qwindows.dll), чтобы в WinRE окно запускалось мгновенно
+    _plugin_dir = os.path.join(_basedir, 'PySide6', 'plugins')
+    if not os.path.isdir(_plugin_dir):
+        _plugin_dir = os.path.join(_basedir, 'plugins')
+    if os.path.isdir(_plugin_dir):
+        os.environ['QT_PLUGIN_PATH'] = _plugin_dir
+
+_novir_boot("dll_setup_done", "QT_PLUGIN_PATH=%s PATH=%s" % (
+    os.environ.get("QT_PLUGIN_PATH", ""), os.environ.get("PATH", "")[:500]))
+
+if _IS_WINPE:
+    # Принудительно выставляем software rendering — Qt6Gui.dll требует d3d11/dxgi/d3d12,
+    # которые могут отсутствовать в урезанном WinPE 2019. Не используем setdefault —
+    # жёстко перезаписываем чтобы не было пустых значений из системного окружения WinPE.
+    os.environ['QT_OPENGL'] = 'software'
+    os.environ['QT_RHI_BACKEND'] = 'software'
+    os.environ['QT_QUICK_BACKEND'] = 'software'
+    os.environ['QSG_RHI_BACKEND'] = 'software'
+    os.environ['LIBGL_ALWAYS_SOFTWARE'] = '1'
+    os.environ['QT_ANGLE_PLATFORM'] = 'warp'
+    os.environ['QT_D3D_LEVEL'] = '0'
+    os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
+    os.environ['QT_NO_NATIVE_MENUBAR'] = '1'
+    # WinRE/WinPE has no normal desktop shell. Always use the native Windows
+    # platform plugin explicitly and keep accessibility hooks out of the way.
+    os.environ['QT_QPA_PLATFORM'] = 'windows'
+    os.environ['QT_ACCESSIBILITY'] = '0'
+    # В WinPE порядок каталогов DLL задаёт runtime-хук:
+    # System32 самой WinRE -> System32 установленной Windows -> встроенные
+    # fallback-DLL из winpe_dlls (последними). Здесь ничего не переставляем,
+    # иначе новые DLL с машины сборки снова перекроют совместимые системные.
+    if getattr(sys, 'frozen', False):
+        _mei = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        if not os.environ.get('NOVIR_WINPE_DLL_ORDER'):
+            _winpe_dlls = os.path.join(_mei, 'winpe_dlls')
+            if os.path.isdir(_winpe_dlls):
+                if hasattr(os, 'add_dll_directory'):
+                    try:
+                        _DLL_DIR_HANDLES.append(os.add_dll_directory(_winpe_dlls))
+                    except Exception:
+                        pass
+                _path_parts = [
+                    os.path.normcase(p) for p in
+                    os.environ.get('PATH', '').split(os.pathsep) if p]
+                if os.path.normcase(_winpe_dlls) not in _path_parts:
+                    os.environ['PATH'] = (
+                        os.environ.get('PATH', '') + os.pathsep + _winpe_dlls)
+        _path_parts = [
+            os.path.normcase(p) for p in
+            os.environ.get('PATH', '').split(os.pathsep) if p]
+        if os.path.normcase(_mei) not in _path_parts:
+            os.environ['PATH'] = (
+                os.environ.get('PATH', '') + os.pathsep + _mei)
 
 try:
     import explorer_tab
@@ -90,25 +196,118 @@ except ImportError:
     CPP_CORE_AVAILABLE = False
     print("[INFO] C++ модуль novir_core не найден, используется Python реализация")
 
-GUI_MODE = '--console' not in sys.argv and '-c' not in sys.argv
+# NoVir is a GUI-only application.  The old console interface and the
+# --console/--nogui switches were removed completely.
+GUI_MODE = True
 PYSIDE_AVAILABLE = False
+_novir_boot("before_pyside_import", "GUI_MODE=%s" % GUI_MODE)
 if GUI_MODE:
     try:
+        if _NOVIR_BOOT_DEBUG:
+            from PySide6.QtCore import qInstallMessageHandler
+            def _novir_qt_message_handler(mode, context, message):
+                try:
+                    _novir_boot("qt_msg", "mode=%s %s" % (mode, message))
+                except Exception:
+                    pass
+            qInstallMessageHandler(_novir_qt_message_handler)
+            _novir_boot("qt_message_handler_installed")
         from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                      QHBoxLayout, QPushButton, QLabel, QTextEdit,
                                      QFileDialog, QMenu, QComboBox, QMessageBox,
                                      QDialog, QLineEdit, QTableWidget, QTableWidgetItem,
                                      QHeaderView, QTabWidget, QFrame, QCheckBox,
                                      QTreeWidget, QTreeWidgetItem, QSlider,
-                                     QGridLayout, QStackedWidget, QAbstractItemView, QStyle)
+                                     QGridLayout, QStackedWidget, QAbstractItemView, QStyle, QSplitter)
         from PySide6.QtCore import Qt, QThread, Signal, Slot, QEvent, QObject, QProcess, QPoint
         from PySide6.QtGui import (QClipboard, QCursor, QPixmap, QPainter, QPolygon,
                                    QPen, QBrush, QColor, QFont)
         PYSIDE_AVAILABLE = True
-    except ImportError:
-        print("PySide6 не установлен. Запуск в консольном режиме.")
-        GUI_MODE = False
+        _novir_boot("pyside_import_ok")
+    except Exception as _pyside_err:
+        _novir_boot("pyside_import_failed", repr(_pyside_err))
+        import ctypes
+        error_details = (
+            "Не удалось загрузить графическую библиотеку PySide6.\n\n"
+            f"{_pyside_err}\n\n"
+            f"Тип ошибки: {type(_pyside_err).__name__}\n\n"
+            "NoVir работает только в графическом режиме. Консольная версия удалена.\n"
+            "EXE однофайловый: PySide6/plugins и winpe_dlls уже встроены в него, "
+            "отдельные папки рядом с EXE не нужны."
+        )
+        _diag_lines = []
+        _load_diag = []
+        try:
+            import ctypes as _ct
+            _k32 = _ct.windll.kernel32
+            for _d in ["msvcp140.dll", "vcruntime140.dll", "icuuc.dll", "icu.dll", "Qt6Core.dll", "d3d12.dll", "d3d11.dll", "dxgi.dll", "DWrite.dll", "Qt6Gui.dll", "Qt6Widgets.dll"]:
+                _h = _k32.LoadLibraryW(_d)
+                if not _h:
+                    _load_diag.append(f"{_d}: FAIL {_k32.GetLastError()}")
+                else:
+                    if _d == "d3d12.dll":
+                        _p101 = _k32.GetProcAddress(_h, _ct.c_char_p(101))
+                        _load_diag.append("d3d12: " + ("OK" if _p101 else "NO_ORD101"))
+                    else:
+                        _load_diag.append(f"{_d}: OK")
+        except Exception as _e:
+            _load_diag.append(f"diag_err: {_e}")
+        if _load_diag:
+            _diag_lines.append("Тест прямой загрузки DLL:")
+            _diag_lines.append("  " + ", ".join(_load_diag[:6]))
+            _diag_lines.append("  " + ", ".join(_load_diag[6:]))
+        error_details += "\n\n" + "\n".join(_diag_lines)
 
+        if _IS_WINPE:
+            _order = os.environ.get("NOVIR_WINPE_DLL_ORDER", "")
+            if _order:
+                _diag_lines.append("Порядок поиска DLL:")
+                for _p in _order.split(os.pathsep):
+                    _diag_lines.append("  " + _p)
+            _roots = [os.environ.get("SystemRoot") or r"X:\Windows"]
+            for _letter in "CDEFGHIJ":
+                _roots.append(_letter + r":\Windows")
+            _diag_lines.append("Ключевые DLL:")
+            _mei = getattr(sys, "_MEIPASS", "")
+            for _dll in ("d3d11.dll", "dxgi.dll", "d3d12.dll", "d3d9.dll",
+                         "DWrite.dll", "dwmapi.dll", "UIAutomationCore.dll",
+                         "icuuc.dll", "icu.dll"):
+                _found = ""
+                for _root in _roots:
+                    _cand = os.path.join(_root, "System32", _dll)
+                    if os.path.isfile(_cand):
+                        _found = _cand
+                        break
+                if not _found and _mei:
+                    _cand = os.path.join(_mei, "winpe_dlls", _dll)
+                    if os.path.isfile(_cand):
+                        _found = _cand + " (встроенная)"
+                _diag_lines.append(
+                    "  %s: %s" % (_dll, _found or "НЕ НАЙДЕН"))
+            error_details += "\n\n" + "\n".join(_diag_lines)
+            if os.environ.get("NOVIR_WINPE_ICU_SHIM"):
+                error_details += (
+                    "\n\nICU shim: " +
+                    os.environ.get("NOVIR_WINPE_ICU_SHIM"))
+            error_details += (
+                "\n\nПодробности записаны в X:\\novir_dll_error.log "
+                "и C:\\novir_dll_error.log")
+            _log_text = error_details
+            for _log_path in (
+                os.path.join(
+                    os.environ.get("SystemRoot") or r"X:\Windows",
+                    "novir_dll_error.log"),
+                r"C:\novir_dll_error.log",
+            ):
+                try:
+                    with open(_log_path, "w", encoding="utf-8") as _fh:
+                        _fh.write(_log_text)
+                except Exception:
+                    pass
+        ctypes.windll.user32.MessageBoxW(
+            0, error_details, "Критическая ошибка запуска GUI NoVir",
+            0x10 | 0x10000)
+        raise SystemExit(1)
     if GUI_MODE:
         class NoWheelComboBox(QComboBox):
             """QComboBox, который не меняет выбор колесом мыши — только кликами."""
@@ -132,7 +331,6 @@ ntdll = ctypes.windll.ntdll
 
 # Режим сухого прогона (только показываем, ничего не меняем)
 DRY_RUN = '--dry-run' in sys.argv or '-d' in sys.argv
-SELF_CHECK = '--self-check' in sys.argv or '--check' in sys.argv
 APP_DIR = os.path.dirname(os.path.abspath(
     sys.executable if getattr(sys, "frozen", False) else __file__
 ))
@@ -1773,20 +1971,6 @@ def check_admin_status():
     except Exception:
         return False
 
-def print_header():
-    mode_text = f"{Colors.YELLOW}[РЕЖИМ ТЕСТИРОВАНИЯ - НИЧЕГО НЕ ИЗМЕНЯЕТ]{Colors.RESET}" if DRY_RUN else ""
-    print(f"""
-{Colors.CYAN}╔══════════════════════════════════════════════════════════════════════╗
-║                                                                            ║
-║                    ВИРУСНЫЙ РЕАНИМАТОР v2.0                                ║
-║                    "Восстанавливаем, что не убили"                         ║
-{mode_text:74}║
-╚══════════════════════════════════════════════════════════════════════╝{Colors.RESET}
-""")
-    if DRY_RUN:
-        print(f"{Colors.YELLOW}[SYSTEM]: Включен режим ТЕСТИРОВАНИЯ! Ничего реально не меняется — только показываю что буду делать. Спокойно, всё безопасно!{Colors.RESET}")
-        print_hacker_message("Включен режим ТЕСТИРОВАНИЯ! Ничего реально не меняется — только показываю что буду делать. Спокойно, всё безопасно!")
-
 def print_hacker_message(message):
     print(f"{Colors.YELLOW}[SYSTEM]: {message}{Colors.RESET}")
 
@@ -2092,20 +2276,17 @@ def confirm_high_risk_action(title, details):
     if DRY_RUN:
         return True
     try:
-        if GUI_MODE and PYSIDE_AVAILABLE:
-            from PySide6.QtWidgets import QMessageBox, QApplication
-            parent = QApplication.instance().activeWindow() if QApplication.instance() else None
-            answer = QMessageBox.warning(
-                parent,
-                title,
-                f"{details}\n\nПродолжить?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            return answer == QMessageBox.Yes
-        answer = input(f"[!] {title}: {details}\nПродолжить? Введите YES: ")
-        return answer.strip() == "YES"
-    except (EOFError, OSError):
+        from PySide6.QtWidgets import QMessageBox, QApplication
+        parent = QApplication.instance().activeWindow() if QApplication.instance() else None
+        answer = QMessageBox.warning(
+            parent,
+            title,
+            f"{details}\n\nПродолжить?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+    except Exception:
         return False
 
 def run_command(cmd, as_admin=False):
@@ -3387,16 +3568,6 @@ def _emergency_delete_scheduled_tasks(backup_dir, dry_run):
 
 def Emergency_Recovery():
     """Aggressive autostart and icon recovery with a full backup."""
-    if not GUI_MODE and not DRY_RUN:
-        try:
-            if not confirm_high_risk_action(
-                "Экстремальное восстановление",
-                "Будут удалены все сторонние записи автозагрузки, задачи и кэш иконок.",
-            ):
-                return False
-        except Exception:
-            pass
-
     print_hacker_message("Экстремальное восстановление автозагрузки, задач и иконок.")
     dry_run = bool(DRY_RUN)
     backup_dir = ""
@@ -5559,7 +5730,8 @@ def _wmi_link_and_score(entries):
     for entry in entries:
         if entry["kind"] == "Filter":
             query_lower = entry["query"].lower()
-            if "win32_localtime" in query_lower:
+            name_lower = entry["name"].lower()
+            if "win32_localtime" in query_lower or "msft_scmeventlogevent" in query_lower or "scm event log filter" in name_lower:
                 entry["suspicious"] = False
                 entry["reasons"] = []
                 continue
@@ -5581,6 +5753,10 @@ def _wmi_link_and_score(entries):
 
     bindings = [entry for entry in entries if entry["kind"] == "Binding"]
     for binding in bindings:
+        # Штатный биндинг службы журналов Windows (SCM Event Log) легитимен
+        if "SCM Event Log" in binding.get("name", "") or binding.get("consumer_type") == "NTEventLogEventConsumer":
+            binding["suspicious"] = False
+            continue
         filter_entry = _wmi_find_filter(
             entries, binding["filter_path"], binding["filter_name"]
         )
@@ -5596,6 +5772,8 @@ def _wmi_link_and_score(entries):
     for _ in range(len(bindings) + 1):
         changed = False
         for binding in bindings:
+            if "SCM Event Log" in binding.get("name", "") or binding.get("consumer_type") == "NTEventLogEventConsumer":
+                continue
             filter_entry = _wmi_find_filter(
                 entries, binding["filter_path"], binding["filter_name"]
             )
@@ -5950,16 +6128,6 @@ def WMI_Persistence_Sweep():
         return False
 
     targets = _wmi_expand_removal_targets(entries, suspicious)
-    if not GUI_MODE:
-        details = (
-            f"Будет удалено объектов WMI: {len(targets)}.\n"
-            f"Дамп: {json_path}\n"
-            "Связанные биндинги будут удалены вместе с фильтрами и консьюмерами."
-        )
-        if not confirm_high_risk_action("WMI Event Persistence Sweeper", details):
-            print(f"{Colors.YELLOW}[!] Удаление WMI отменено{Colors.RESET}")
-            return False
-
     result = _wmi_remove_entries(targets)
     if result.get("error"):
         print(f"{Colors.RED}[!] WMI: {result['error']}{Colors.RESET}")
@@ -6707,12 +6875,6 @@ def NTFS_ADS_Sweep():
         return True
 
     targets = list(suspicious)
-    if zones and not GUI_MODE:
-        details = f"Снять метки Zone.Identifier с {len(zones)} потоков?"
-        if confirm_high_risk_action("NTFS ADS / Zone.Identifier", details):
-            targets.extend(zones)
-        else:
-            print(f"{Colors.YELLOW}[!] Очистка Zone.Identifier отменена{Colors.RESET}")
 
     if not targets:
         print(f"{Colors.GREEN}[+] NTFS ADS: подозрительных потоков не найдено{Colors.RESET}")
@@ -6726,16 +6888,6 @@ def NTFS_ADS_Sweep():
         print(f"{Colors.RED}[!] Не удалось сохранить дамп NTFS ADS: {error}{Colors.RESET}")
         logger.log("NTFS_ADS_Sweep", "error", f"dump: {error}")
         return False
-
-    if not GUI_MODE:
-        details = (
-            f"Будет удалено потоков: {len(targets)}.\n"
-            "Основное содержимое файлов не изменяется.\n"
-            f"Дамп: {json_path}"
-        )
-        if not confirm_high_risk_action("NTFS ADS Sweeper", details):
-            print(f"{Colors.YELLOW}[!] Удаление NTFS-потоков отменено{Colors.RESET}")
-            return False
 
     result = _ads_delete_streams(targets)
     if result.get("error"):
@@ -7129,14 +7281,8 @@ def _proc_compare_main_image(api, handle, path):
 
     header_memory = api["read"](handle, base, _PROC_HEADER_READ)
     if header_memory is None:
-        findings.append(
-            {
-                "reason": "Неполное чтение памяти",
-                "details": "Невозможно прочитать PE-заголовок из памяти процесса.",
-                "disk_hash": disk["header_hash"],
-                "memory_hash": None,
-            }
-        )
+        # Недоступность чтения памяти системного процесса — это штатное поведение Windows (PPL/System),
+        # а не признак hollowing или инъекции. Не создаем ложную тревогу.
         return findings
 
     memory_pe = _proc_parse_pe_blob(header_memory)
@@ -7180,14 +7326,7 @@ def _proc_compare_main_image(api, handle, path):
             continue
         memory_bytes = api["read"](handle, virtual_address, raw_size)
         if memory_bytes is None or len(memory_bytes) < raw_size:
-            findings.append(
-                {
-                    "reason": "Неполное чтение памяти",
-                    "details": f"Секция {section['name']}: impossible прочитать {raw_size} байт из памяти.",
-                    "disk_hash": hashlib.sha256(disk_bytes).hexdigest(),
-                    "memory_hash": None,
-                }
-            )
+            # Недоступность чтения отдельной защищенной секции — пропускаем без ложного флага
             continue
         disk_hash = hashlib.sha256(disk_bytes[:raw_size]).hexdigest()
         memory_hash = hashlib.sha256(memory_bytes[:raw_size]).hexdigest()
@@ -8906,14 +9045,6 @@ def open_in_explorer(path):
         return False
     return False
 
-def Final_Log_Report():
-    """Генерация полного отчета"""
-    print_hacker_message("Генерирую полный отчет о проделанной работе.")
-    
-    report_path = logger.save_report()
-    return report_path is not None
-
-
 import winreg
 def import_winreg():
     return winreg
@@ -9618,7 +9749,6 @@ def get_repair_function_catalog():
     }
 
 HIGH_RISK_FUNCTION_NAMES = {
-    "run_full_scan",
     "WMI_Persistence_Sweep",
     "NTFS_ADS_Sweep",
     "Restore_From_Backup",
@@ -9647,203 +9777,6 @@ HIGH_RISK_FUNCTION_NAMES = {
     "LSA_Protection_Enable",
     "UAC_Max_Upgrade",
 }
-
-def run_self_check():
-    """Безопасная проверка окружения, зависимостей и каталога функций."""
-    import importlib.util
-
-    print(f"\n{Colors.CYAN}{'='*70}{Colors.RESET}")
-    print(f"{Colors.CYAN}САМОПРОВЕРКА NoVir{Colors.RESET}")
-    print(f"{Colors.CYAN}{'='*70}{Colors.RESET}\n")
-
-    warnings = []
-
-    def check(name, ok, details="", warning=True):
-        status = "[OK]" if ok else "[WARN]" if warning else "[FAIL]"
-        color = Colors.GREEN if ok else Colors.YELLOW if warning else Colors.RED
-        message = f"{color}{status} {name}{Colors.RESET}"
-        if details:
-            message += f" — {details}"
-        print(message)
-        if not ok:
-            warnings.append(name)
-
-    check("Платформа Windows", sys.platform == "win32", platform.platform(), warning=False)
-    check("Права администратора", bool(ctypes.windll.shell32.IsUserAnAdmin()), "для реальных исправлений нужны админ-права")
-    check("psutil", PSUTIL_AVAILABLE, "нужен для диспетчера задач и анализа процессов")
-    check("colorama", COLORAMA_AVAILABLE, "нужен только для красивого цветного вывода")
-    check("PySide6", PYSIDE_AVAILABLE or importlib.util.find_spec("PySide6") is not None, "нужен для GUI, консольный режим работает без него")
-    check("Папка бэкапов", os.path.isdir(BACKUP_DIR), BACKUP_DIR)
-
-    registered = []
-    catalog = get_repair_function_catalog()
-    for block_name, functions in catalog.items():
-        print(f"\n{Colors.MAGENTA}{block_name}: {len(functions)} функций{Colors.RESET}")
-        for name, description, func in functions:
-            callable_ok = callable(func)
-            registered.append(func.__name__ if callable_ok else str(func))
-            check(f"  {name}", callable_ok, func.__name__ if callable_ok else "не является функцией", warning=False)
-
-    counts = {}
-    for name in registered:
-        counts[name] = counts.get(name, 0) + 1
-    duplicates = sorted(name for name, count in counts.items() if count > 1)
-    if duplicates:
-        print(f"\n{Colors.YELLOW}[WARN] Повторы в каталоге: {', '.join(duplicates)}{Colors.RESET}")
-    else:
-        print(f"\n{Colors.GREEN}[OK] Повторов в каталоге функций нет{Colors.RESET}")
-
-    print(f"{Colors.GREEN}[OK] Всего в каталоге восстановления: {len(registered)} функций{Colors.RESET}")
-    if warnings:
-        logger.log("Self_Check", "warning", f"Предупреждения: {', '.join(warnings)}")
-        print(f"\n{Colors.YELLOW}[!] Самопроверка завершена с предупреждениями: {', '.join(warnings)}{Colors.RESET}")
-    else:
-        logger.log("Self_Check", "success", "Предупреждений нет")
-        print(f"\n{Colors.GREEN}[+] Самопроверка завершена без предупреждений{Colors.RESET}")
-
-    return not warnings
-
-# ═══════════════════════════════════════════════════════════════
-# ГЛАВНОЕ МЕНЮ
-# ═══════════════════════════════════════════════════════════════
-
-def show_menu():
-    print(f"""
-{Colors.CYAN}╔══════════════════════════════════════════════════════════════════════╗
-║                         ВЫБЕРИТЕ БЛОК                                ║
-╠══════════════════════════════════════════════════════════════════════╣
-║  {Colors.WHITE}1. Блок 1: Визуальное восстановление (Интерфейс){Colors.CYAN}                     ║
-║  {Colors.WHITE}2. Блок 2: Реанимация Проводника и Оболочки{Colors.CYAN}                         ║
-║  {Colors.WHITE}3. Блок 3: Реестр и Доступ (HARD){Colors.CYAN}                                   ║
-║  {Colors.WHITE}4. Блок 4: Сеть и Интернет{Colors.CYAN}                                          ║
-║  {Colors.WHITE}5. Блок 5: Очистка и Процессы{Colors.CYAN}                                       ║
-║  {Colors.WHITE}6. Блок 6: Продвинутые исправления{Colors.CYAN}                                  ║
-║  {Colors.WHITE}7. ПОЛНОЕ СКАНИРОВАНИЕ (ВСЕ БЛОКИ){Colors.CYAN}                                  ║
-║  {Colors.WHITE}8. Генерация отчета{Colors.CYAN}                                                  ║
-║  {Colors.WHITE}9. Самопроверка функций и зависимостей{Colors.CYAN}                              ║
-║  {Colors.WHITE}0. Выход{Colors.CYAN}                                                             ║
-╚══════════════════════════════════════════════════════════════════════╝{Colors.RESET}
-""")
-
-
-def run_block_1():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 1: ВИЗУАЛЬНОЕ ВОССТАНОВЛЕНИЕ{Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    Font_Standard_Full()
-    Wallpaper_Force()
-    Visual_Styles_Fix()
-    Icon_Size_Reset()
-    Cursor_Restore()
-    Screen_Rotate_Lock()
-    ClearType_Fix()
-
-def run_block_2():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 2: РЕАНИМАЦИЯ ПРОВОДНИКА И ОБОЛОЧКИ{Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    Shell_Standard()
-    RightClick_Restore()
-    Drive_Visibility()
-    Taskbar_Fix()
-    System_Tray_Show()
-    Desktop_Icons_Revive()
-    HiddenFiles_Show()
-    Shell_Validation()
-    Userinit_Fix()
-
-def run_block_3():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 3: РЕЕСТР И ДОСТУП (HARD){Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    Reg_Write_Enable()
-    TaskMgr_Hard_Unlock()
-    ControlPanel_Unlock()
-    Run_Command_Enable()
-    UAC_Default_Fix()
-    Admin_Shares_Restore()
-    Policies_Nuke()
-    IFEO_Clean()
-    Regedit_CMD_Unlock()
-
-def run_block_4():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 4: СЕТЬ И ИНТЕРНЕТ{Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    Hosts_Clean_Hard()
-    Proxy_Nuke()
-    DNS_Google_Force()
-    Firewall_State_Reset()
-    WinHttp_Proxy_Reset()
-    Network_Discovery_On()
-    Route_Reset()
-    IP_Reset()
-
-def run_block_5():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 5: ОЧИСТКА И ПРОЦЕССЫ{Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    Temp_Deep_Clean()
-    Prefetch_Wipe()
-    RecycleBin_Empty()
-    IconCache_Clear()
-    Startup_Clean()
-    TaskScheduler_Clean()
-    Process_Blacklist_Kill()
-    SafeMode_Registry_Fix()
-    AutoRun_Disable()
-
-def run_block_6():
-    print(f"\n{Colors.MAGENTA}{'='*70}{Colors.RESET}")
-    print(f"{Colors.MAGENTA}БЛОК 6: ПРОДВИНУТЫЕ ИСПРАВЛЕНИЯ{Colors.RESET}")
-    print(f"{Colors.MAGENTA}{'='*70}{Colors.RESET}\n")
-    
-    WMI_Repair()
-    Service_State_Scan()
-    Cert_Store_Clean()
-    WinUpdate_Reset()
-    LNK_File_Fix()
-    Print_Spooler_Fix()
-    Self_Defense_Engine()
-    SafeMode_Full_Repair()
-    TrustedInstaller_Restore()
-    EXE_Assoc()
-    Self_Protect()
-    Admin_Force()
-    MSCONFIG_Unlock()
-    Windows_Defender_Enable()
-    System_Restore_Enable()
-    AutoPlay_Disable()
-    Boot_Sector_Check()
-    Chrome_Extensions_Clean()
-    Startup_Registry_Scan()
-    Event_Viewer_Clean()
-
-def run_full_scan():
-    print(f"\n{Colors.RED}{'='*70}{Colors.RESET}")
-    print(f"{Colors.RED}ПОЛНОЕ СКАНИРОВАНИЕ — ВСЕ БЛОКИ{Colors.RESET}")
-    print(f"{Colors.RED}{'='*70}{Colors.RESET}\n")
-    
-    print_hacker_message("Запускаю полный режим реанимации. Это может занять некоторое время.")
-    
-    # Создаем бэкап перед сканированием
-    print(f"\n{Colors.CYAN}[!] Создаю резервную копию перед изменениями...{Colors.RESET}\n")
-    Create_Full_Backup()
-    
-    run_block_1()
-    run_block_2()
-    run_block_3()
-    run_block_4()
-    run_block_5()
-    run_block_6()
-    
-    print_hacker_message("Всё! Система должна ожить. Генерирую отчет...")
-    Final_Log_Report()
 
 # ═══════════════════════════════════════════════════════════════
 # GUI КЛАССЫ (PYSIDE6)
@@ -10391,6 +10324,35 @@ if GUI_MODE:
             buttons_layout.addStretch()
             layout.addWidget(buttons_frame)
 
+            # Строка поиска по PID или имени
+            search_row = QHBoxLayout()
+            search_row.setSpacing(8)
+            search_label = QLabel("Поиск:")
+            search_label.setStyleSheet("color: #8da0bd; font-size: 11px; min-width: 44px;")
+            self.search_edit = QLineEdit()
+            self.search_edit.setPlaceholderText("PID или имя процесса...")
+            self.search_edit.setMaximumWidth(300)
+            self.search_edit.setStyleSheet(
+                "QLineEdit { background-color: #0a0a0a; color: #ffffff; border: 1px solid #333333;"
+                " border-radius: 6px; padding: 5px 10px; font-size: 11px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                " QLineEdit:focus { border-color: #5577aa; }"
+            )
+            self.search_edit.textChanged.connect(self._filter_processes)
+            clear_btn = QPushButton("✕")
+            clear_btn.setFixedSize(28, 28)
+            clear_btn.setCursor(Qt.PointingHandCursor)
+            clear_btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #666; border: none; font-size: 12px; }"
+                " QPushButton:hover { color: #ffffff; }"
+            )
+            clear_btn.clicked.connect(lambda: self.search_edit.clear())
+            search_row.addWidget(search_label)
+            search_row.addWidget(self.search_edit)
+            search_row.addWidget(clear_btn)
+            search_row.addStretch()
+            layout.addLayout(search_row)
+
             table_frame = QFrame()
             table_frame.setObjectName("ProcessTableFrame")
             table_frame.setStyleSheet("""
@@ -10465,6 +10427,16 @@ if GUI_MODE:
 
             self.refresh_processes()
         
+        def _filter_processes(self, query=""):
+            query = (query or "").strip().lower()
+            for row in range(self.table.rowCount()):
+                pid_item = self.table.item(row, 0)
+                name_item = self.table.item(row, 1)
+                pid_text = (pid_item.text() if pid_item else "").lower()
+                name_text = (name_item.text() if name_item else "").lower()
+                visible = not query or query in pid_text or query in name_text
+                self.table.setRowHidden(row, not visible)
+
         def refresh_processes(self):
             self.table.setUpdatesEnabled(False)
             self.table.setRowCount(0)
@@ -10501,6 +10473,9 @@ if GUI_MODE:
 
             self.table.setUpdatesEnabled(True)
             self.table.viewport().update()
+            # Re-apply search filter after refresh
+            if hasattr(self, "search_edit"):
+                self._filter_processes(self.search_edit.text())
 
             # Запуск асинхронного сканирования через Defender
             processes_to_scan = []
@@ -10599,20 +10574,38 @@ if GUI_MODE:
 
         def make_critical(self):
             pid = self.get_selected_pid()
-            if pid:
-                if set_process_critical(pid, True):
-                    self.append_log(f"[+] Процесс {pid} установлен как КРИТИЧЕСКИЙ (BSoD при завершении)")
-                    QMessageBox.warning(self, "Внимание", f"Процесс {pid} теперь критический. Завершение приведет к синему экрану (BSoD)!")
-                else:
-                    self.append_log(f"[!] Не удалось сделать процесс {pid} критическим")
-                    
+            if not pid:
+                QMessageBox.information(self, "Нет выбора", "Выберите процесс в таблице.")
+                return
+            if set_process_critical(pid, True):
+                msg = f"[+] Процесс {pid} установлен как КРИТИЧЕСКИЙ (BSoD при завершении)"
+                self.append_log(msg)
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(msg)
+                QMessageBox.warning(self, "Внимание", f"Процесс {pid} теперь критический.\nЗавершение приведёт к синему экрану (BSoD)!")
+            else:
+                msg = f"[!] Не удалось сделать процесс {pid} критическим — нужны права администратора и SeDebugPrivilege"
+                self.append_log(msg)
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(msg)
+                QMessageBox.critical(self, "Ошибка", msg)
+
         def make_uncritical(self):
             pid = self.get_selected_pid()
-            if pid:
-                if set_process_critical(pid, False):
-                    self.append_log(f"[+] Процесс {pid} теперь НЕ критический")
-                else:
-                    self.append_log(f"[!] Не удалось снять статус критичности с процесса {pid}")
+            if not pid:
+                QMessageBox.information(self, "Нет выбора", "Выберите процесс в таблице.")
+                return
+            if set_process_critical(pid, False):
+                msg = f"[+] Процесс {pid} теперь НЕ критический"
+                self.append_log(msg)
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(msg)
+            else:
+                msg = f"[!] Не удалось снять статус критичности с процесса {pid}"
+                self.append_log(msg)
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(msg)
+                QMessageBox.critical(self, "Ошибка", msg)
         
 
         def open_in_explorer(self):
@@ -12943,8 +12936,13 @@ if GUI_MODE:
             except Exception:
                 pass
             self.dragPos = None
-            self.setWindowTitle("NoVir - Восстановление системы")
             self._display_profile = self._compute_display_profile()
+            self._winre_ui = bool(self._display_profile.get("winre"))
+            if self._winre_ui:
+                self.setWindowTitle(
+                    "NoVir — WINRE · Среда восстановления Windows")
+            else:
+                self.setWindowTitle("NoVir - Восстановление системы")
             self.setMinimumSize(
                 self._display_profile["min_width"],
                 self._display_profile["min_height"],
@@ -12954,7 +12952,10 @@ if GUI_MODE:
             if self._always_on_top_enabled:
                 window_flags |= Qt.WindowStaysOnTopHint
             self.setWindowFlags(window_flags) # Безрамочное окно
-            self.setAttribute(Qt.WA_TranslucentBackground)
+            # WinRE/WinPE may have no DWM composition.  Translucent windows can
+            # render as invisible or black rectangles there, so use an opaque
+            # black window in the recovery environment.
+            self.setAttribute(Qt.WA_TranslucentBackground, not self._winre_ui)
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
             self._autostart_diff_worker = None
@@ -12979,8 +12980,12 @@ if GUI_MODE:
             self._warm_queue = list(self._lazy_pages.keys())
             from PySide6.QtCore import QTimer as _QTimer
             _QTimer.singleShot(1200, self._warm_up_pages)
-            _QTimer.singleShot(2500, self._startup_autostart_scan)
-            _QTimer.singleShot(6000, self.check_for_updates)
+            if not self._winre_ui:
+                # WinRE has no normal user profile/network: scanning the live
+                # WinPE autostart and checking GitHub only adds noise and
+                # background errors.  Both remain available manually if needed.
+                _QTimer.singleShot(2500, self._startup_autostart_scan)
+                _QTimer.singleShot(6000, self.check_for_updates)
 
 
         def _compute_display_profile(self):
@@ -13047,7 +13052,9 @@ if GUI_MODE:
                 app = QApplication.instance()
                 if app is not None:
                     font = app.font()
-                    font.setFamily("Consolas")
+                    # Consolas is not guaranteed in every WinRE image; Segoe UI
+                    # is the safe system font for the recovery environment.
+                    font.setFamily("Segoe UI" if is_winre else "Consolas")
                     font.setPixelSize(base_px)
                     app.setFont(font)
             except Exception:
@@ -13091,16 +13098,16 @@ if GUI_MODE:
                     r"SYSTEM\CurrentControlSet\Control\MiniNT",
                 ):
                     pass
-                return ("winre", "WIN RE РЕЖИМ",
-                        "СРЕДА ВОССТАНОВЛЕНИЯ WINDOWS")
+                return ("winre", "WINRE · СРЕДА ВОССТАНОВЛЕНИЯ",
+                        "OFFLINE-РЕЖИМ · %s" % (system_root or "X:\\Windows"))
             except OSError:
                 pass
             except Exception:
                 pass
 
             if system_drive == "X:" and os.path.isdir(os.path.join(system_root, "System32")):
-                return ("winre", "WIN RE РЕЖИМ",
-                        "СРЕДА ВОССТАНОВЛЕНИЯ WINDOWS")
+                return ("winre", "WINRE · СРЕДА ВОССТАНОВЛЕНИЯ",
+                        "OFFLINE-РЕЖИМ · %s" % (system_root or "X:\\Windows"))
 
             # SM_CLEANBOOT: 0 = normal, 1 = Safe Mode, 2 = Safe Mode + Network.
             try:
@@ -13125,8 +13132,24 @@ if GUI_MODE:
             self.mode_banner_title.setText(mode[1])
             self.mode_banner_detail.setText(mode[2])
             self.mode_banner.setToolTip(
-                "NoVir запущен в специальной среде. Часть функций Windows может быть недоступна."
+                "NoVir запущен в специальной среде. Сетевые функции, "
+                "автообновление и часть действий оболочки Windows отключены."
             )
+            self.mode_banner_tag.setText(
+                "WINRE MODE" if mode[0] == "winre" else "СПЕЦИАЛЬНЫЙ РЕЖИМ")
+            if mode[0] == "winre":
+                # Make the environment unmistakable in the title bar as well as
+                # in the strip above the page area.
+                self.setWindowTitle("NoVir — WINRE · Среда восстановления Windows")
+                if hasattr(self, "btn_minimize"):
+                    # In WinRE there is no normal taskbar; minimizing can make
+                    # the only NoVir window impossible to restore.
+                    self.btn_minimize.hide()
+                    self.btn_minimize.setToolTip(
+                        "Свернуть окно недоступно в WinRE")
+                if hasattr(self, "btn_close"):
+                    self.btn_close.setToolTip(
+                        "Закрыть NoVir (среда восстановления Windows)")
             self.mode_banner.show()
 
         def init_ui(self):
@@ -13436,6 +13459,12 @@ if GUI_MODE:
             backup_action.triggered.connect(lambda checked=False: self.show_backup_manager())
             community_action = quick_actions_menu.addAction(language_manager.translate("СООБЩЕСТВО"))
             community_action.triggered.connect(lambda checked=False: self.switch_page(8))
+            if self._winre_ui:
+                # WinRE usually has no network stack / user profile.
+                update_action.setEnabled(False)
+                update_action.setText("ОБНОВЛЕНИЕ НЕДОСТУПНО В WINRE")
+                community_action.setEnabled(False)
+                community_action.setText("СООБЩЕСТВО НЕДОСТУПНО В WINRE")
             self._quick_action_refs = {
                 "fix_all": fix_all_action,
                 "audit": audit_action,
@@ -13466,8 +13495,13 @@ if GUI_MODE:
             )
             bottom_support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             bottom_layout.addStretch()
-            bottom_layout.addWidget(self.btn_easter_egg)
-            bottom_layout.addWidget(bottom_support_btn)
+            if not self._winre_ui:
+                bottom_layout.addWidget(self.btn_easter_egg)
+                bottom_layout.addWidget(bottom_support_btn)
+            else:
+                # No online support / entertainment in the recovery environment.
+                self.btn_easter_egg.hide()
+                bottom_support_btn.hide()
             self.layout.addWidget(bottom_bar)
 
             # Нижняя короткая инструкция по горячим клавишам и основным действиям.
@@ -13501,7 +13535,11 @@ if GUI_MODE:
             help_button.setToolTip(language_manager.translate("Справка по горячим клавишам"))
             help_button.clicked.connect(self._show_hotkeys_help)
             instruction_layout.addWidget(help_button)
-            self.layout.addWidget(instruction_bar)
+            if self._winre_ui:
+                # Save vertical space on 800x600/640x480 recovery displays.
+                instruction_bar.hide()
+            else:
+                self.layout.addWidget(instruction_bar)
 
             # Подсказки для основных элементов интерфейса.
             self.btn_back.setToolTip(language_manager.translate("Назад"))
@@ -14427,14 +14465,40 @@ if GUI_MODE:
             _refresh_now()
             return page
 
+        def _winre_reboot_to_windows(self):
+            """Reboot out of WinRE and continue normal Windows startup."""
+            reply = QMessageBox.question(
+                self,
+                "Выход из WinRE",
+                "Перезагрузить компьютер и попробовать загрузить установленную Windows?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            try:
+                wpeutil = os.path.join(
+                    os.environ.get("SystemRoot", r"X:\Windows"),
+                    "System32", "wpeutil.exe")
+                if os.path.isfile(wpeutil):
+                    subprocess.Popen([wpeutil, "reboot"])
+                else:
+                    subprocess.Popen(["shutdown.exe", "/r", "/t", "5"])
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "Выход из WinRE",
+                    f"Не удалось перезагрузить компьютер:\n{error}\n\n"
+                    "Введите в командной строке: wpeutil reboot")
+
         def create_dashboard_page(self):
             page = QFrame()
             layout = QVBoxLayout(page)
             layout.setAlignment(Qt.AlignCenter)
-            layout.setSpacing(20)
+            winre = self._is_winre_mode()
+            layout.setSpacing(8 if winre else 20)
             # Сетка плиток
             grid = QGridLayout()
-            grid.setSpacing(14)
+            grid.setSpacing(8 if winre else 14)
 
             tiles = [
                 ("АВТОЗАГРУЗКА", 1),
@@ -14445,12 +14509,44 @@ if GUI_MODE:
                 ("НАСТРОЙКИ", 6)
             ]
 
+            if winre:
+                # Dedicated WinRE strip: visible right on the dashboard and
+                # useful without explorer.exe or a normal taskbar.
+                winre_bar = QFrame()
+                winre_bar.setObjectName("WinREBar")
+                winre_bar.setFixedHeight(40)
+                winre_bar.setStyleSheet(
+                    "QFrame#WinREBar { background-color: #111111;"
+                    " border: 1px solid #ffffff; }"
+                    "QLabel { color: #ffffff; background: transparent;"
+                    " border: none; font-family: Consolas, 'Courier New', monospace; }"
+                    "QPushButton { background: #000000; color: #ffffff;"
+                    " border: 1px solid #ffffff; padding: 4px 12px;"
+                    " font-size: 10px; font-weight: bold; letter-spacing: 1px; }"
+                    "QPushButton:hover { background: #ffffff; color: #000000; }")
+                wb_lay = QHBoxLayout(winre_bar)
+                wb_lay.setContentsMargins(12, 4, 8, 4)
+                wb_lay.setSpacing(10)
+                wb_title = QLabel("WINRE · OFFLINE-РЕЖИМ")
+                wb_title.setStyleSheet(
+                    "font-size: 12px; font-weight: bold; letter-spacing: 2px;")
+                wb_lay.addWidget(wb_title)
+                wb_lay.addStretch(1)
+                wb_reboot = QPushButton("ПЕРЕЗАГРУЗИТЬСЯ В WINDOWS")
+                wb_reboot.clicked.connect(
+                    lambda checked=False: self._winre_reboot_to_windows())
+                wb_lay.addWidget(wb_reboot)
+                layout.addWidget(winre_bar)
+
             positions = [(i, j) for i in range(2) for j in range(3)]
             for position, (name, idx) in zip(positions, tiles):
                 btn = QPushButton(name)
                 btn.setObjectName("DashboardTile")
                 from PySide6.QtWidgets import QSizePolicy
-                btn.setMinimumSize(300, 136)
+                if winre:
+                    btn.setMinimumSize(180, 88)
+                else:
+                    btn.setMinimumSize(300, 136)
                 btn.setMaximumSize(460, 188)
                 btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 btn.clicked.connect(lambda checked=False, x=idx: self.switch_page(x))
@@ -14539,10 +14635,15 @@ if GUI_MODE:
             tr = language_manager.translate
             ver = win_target()
             auto = _WIN_TARGET["value"] is None
-            self._status_title.setText(tr("Версия винды").upper())
-            self._status_value.setText("WINDOWS %s" % ver)
-            self._status_mode.setText(
-                (tr("Авто") if auto else tr("Вручную")).upper())
+            if self._is_winre_mode():
+                self._status_title.setText("WINRE · OFFLINE-РЕЖИМ")
+                self._status_value.setText("WINDOWS %s" % ver)
+                self._status_mode.setText("WINRE")
+            else:
+                self._status_title.setText(tr("Версия винды").upper())
+                self._status_value.setText("WINDOWS %s" % ver)
+                self._status_mode.setText(
+                    (tr("Авто") if auto else tr("Вручную")).upper())
             # Гладкое масштабирование: QIcon.pixmap даёт «лесенку».
             pm = win_version_icon(ver).pixmap(80, 80)
             pm.setDevicePixelRatio(1.0)
@@ -14595,6 +14696,12 @@ if GUI_MODE:
             _QTimer.singleShot(350, self._warm_up_pages)
 
         def switch_page(self, index):
+            if index == 8 and self._is_winre_mode():
+                self.show_toast(
+                    "WINRE",
+                    "Раздел сообщества недоступен в среде восстановления.",
+                    "warning")
+                return
             # Гарантированно строим нужную страницу до показа.
             self._ensure_page(index)
             self.main_content.setCurrentIndex(index)
@@ -14626,8 +14733,9 @@ if GUI_MODE:
         def _apply_page_title(self):
             """Заголовок верхней панели для текущей страницы (переводится)."""
             index = getattr(self, "_page_idx", 0)
+            winre = bool(getattr(self, "_winre_ui", False))
             if index == 0:
-                self.title_label.setText("NOVIR")
+                self.title_label.setText("NOVIR · WINRE" if winre else "NOVIR")
                 return
             tr = language_manager.translate
             titles = {
@@ -14641,7 +14749,10 @@ if GUI_MODE:
                 8: tr("СООБЩЕСТВО"),
                 9: tr("ВСТРОЕННОЕ ПО"),
             }
-            self.title_label.setText(titles.get(index, "NOVIR"))
+            title = titles.get(index, "NOVIR")
+            if winre:
+                title = "WINRE · " + title
+            self.title_label.setText(title)
 
 
         def show_easter_egg(self):
@@ -16628,6 +16739,10 @@ if GUI_MODE:
             self.table_run.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_run, "Run"))
             self.table_run.cellDoubleClicked.connect(lambda row, _column, _table=self.table_run, _type="Run": self._on_registry_double_click(_table, _type, row))
             run_layout.addWidget(self.table_run)
+            self.chk_block_run = QCheckBox("Заблокировать файл от повторного запуска (IFEO)")
+            self.chk_block_run.setStyleSheet("color: #aaaaaa; font-size: 10px; font-family: 'Consolas', monospace; padding: 4px 2px;")
+            self.chk_block_run.setToolTip("При удалении: заблокирует exe через IFEO — после перезагрузки не прописаться")
+            run_layout.addWidget(self.chk_block_run)
             self.startup_sub_tabs.addTab(run_tab, "Run")
             
             # Подвкладка RunOnce с таблицей и кнопками
@@ -16653,6 +16768,10 @@ if GUI_MODE:
             self.table_runonce.customContextMenuRequested.connect(lambda pos: self.show_table_context_menu(pos, self.table_runonce, "RunOnce"))
             self.table_runonce.cellDoubleClicked.connect(lambda row, _column, _table=self.table_runonce, _type="RunOnce": self._on_registry_double_click(_table, _type, row))
             runonce_layout.addWidget(self.table_runonce)
+            self.chk_block_runonce = QCheckBox("Заблокировать файл от повторного запуска (IFEO)")
+            self.chk_block_runonce.setStyleSheet("color: #aaaaaa; font-size: 10px; font-family: 'Consolas', monospace; padding: 4px 2px;")
+            self.chk_block_runonce.setToolTip("При удалении: заблокирует exe через IFEO — после перезагрузки не прописаться")
+            runonce_layout.addWidget(self.chk_block_runonce)
             self.startup_sub_tabs.addTab(runonce_tab, "RunOnce")
             
             # Подвкладка Winlogon с таблицей и кнопками
@@ -16682,6 +16801,10 @@ if GUI_MODE:
             winlogon_info.setStyleSheet("color: #888888; font-size: 11px; padding: 4px 0px; font-style: italic;")
             winlogon_info.setWordWrap(True)
             winlogon_layout.addWidget(winlogon_info)
+            self.chk_block_winlogon = QCheckBox("Заблокировать файл от повторного запуска (IFEO)")
+            self.chk_block_winlogon.setStyleSheet("color: #aaaaaa; font-size: 10px; font-family: 'Consolas', monospace; padding: 4px 2px;")
+            self.chk_block_winlogon.setToolTip("При удалении: заблокирует exe через IFEO — после перезагрузки не прописаться")
+            winlogon_layout.addWidget(self.chk_block_winlogon)
             self.startup_sub_tabs.addTab(winlogon_tab, "Winlogon")
             
             # Вкладка AppInit_DLLs и CmdLine
@@ -16707,6 +16830,10 @@ if GUI_MODE:
             self.table_folder.setContextMenuPolicy(Qt.CustomContextMenu)
             self.table_folder.customContextMenuRequested.connect(lambda pos: self.show_folder_context_menu(pos, self.table_folder))
             folder_layout.addWidget(self.table_folder)
+            self.chk_block_folder = QCheckBox("Заблокировать файл от повторного запуска (IFEO)")
+            self.chk_block_folder.setStyleSheet("color: #aaaaaa; font-size: 10px; font-family: 'Consolas', monospace; padding: 4px 2px;")
+            self.chk_block_folder.setToolTip("При удалении: заблокирует exe через IFEO — после перезагрузки не прописаться")
+            folder_layout.addWidget(self.chk_block_folder)
             self.startup_tabs.addTab(folder_tab, "Папка автозагрузки")
             
             # Вкладка Планировщик задач с таблицей и кнопками
@@ -17629,6 +17756,60 @@ if GUI_MODE:
             
             dialog.exec()
 
+        def _extract_exe_name(self, val):
+            """Извлекает имя .exe из строки реестра или пути файла (включая .lnk)."""
+            if not val:
+                return None
+            v = val.strip().strip('"').strip("'")
+            try:
+                v = os.path.expandvars(v)
+            except Exception:
+                pass
+            # Если это ярлык .lnk, пытаемся получить реальный целевой exe
+            if v.lower().endswith('.lnk') and os.path.isfile(v):
+                try:
+                    import win32com.client
+                    shell = win32com.client.Dispatch("WScript.Shell")
+                    shortcut = shell.CreateShortCut(v)
+                    if shortcut.Targetpath and shortcut.Targetpath.lower().endswith('.exe'):
+                        return os.path.basename(shortcut.Targetpath)
+                except Exception:
+                    pass
+            # Извлекаем путь к exe с пробелами в пути (например "C:\Program Files\app.exe" --arg)
+            m = re.match(r'([a-zA-Z]:\\[^"]+?\.exe)', v, re.IGNORECASE)
+            if m:
+                return os.path.basename(m.group(1))
+            m = re.match(r'([^\s"]+[^\s]*?\.exe)', v, re.IGNORECASE)
+            if m:
+                return os.path.basename(m.group(1))
+            m = re.match(r'([^\s]+)', v, re.IGNORECASE)
+            if m and m.group(1).lower().endswith('.exe'):
+                return os.path.basename(m.group(1))
+            if v.lower().endswith('.exe'):
+                return os.path.basename(v)
+            return None
+
+        def _apply_ifeo_block(self, exe_name):
+            """Блокирует exe через IFEO: после перезагрузки вирус никогда не сможет запуститься."""
+            if not exe_name:
+                return
+            if not exe_name.lower().endswith('.exe'):
+                exe_name = exe_name + '.exe'
+            paths = [
+                f"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\{exe_name}",
+                f"SOFTWARE\\WOW6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\{exe_name}"
+            ]
+            blocked = False
+            for p in paths:
+                try:
+                    reg_set_value(p, "Debugger", "svchost.exe", hive=winreg.HKEY_LOCAL_MACHINE)
+                    blocked = True
+                except Exception as ex:
+                    self.append_log(f"[IFEO][ERR] {p}: {ex}")
+            if blocked:
+                self.append_log(f"[IFEO] Файл '{exe_name}' заблокирован (Debugger=svchost.exe) — перезагрузка не поможет вирусу!")
+                self.show_toast("ЗАБЛОКИРОВАНО", f"{exe_name} заблокирован от повторного запуска")
+
         def delete_registry_entry(self, reg_type):
             table_name = "appinit" if reg_type == "AppInit_DLLs и CmdLine" else reg_type.lower()
             table = getattr(self, f"table_{table_name}", None)
@@ -17641,6 +17822,7 @@ if GUI_MODE:
                 return
             
             name = table.item(row, 0).text()
+            entry_val = table.item(row, 1).text() if table.item(row, 1) else ""
             reply = QMessageBox.question(self, "Подтверждение", 
                                        f"Удалить запись '{name}' из реестра?",
                                        QMessageBox.Yes | QMessageBox.No)
@@ -17681,6 +17863,15 @@ if GUI_MODE:
                     logger.log(f"Registry_{reg_type}", "success", f"Удалена запись: {name}")
                     self.load_registry_data(reg_type)
                     self.show_toast("ГОТОВО", "Запись удалена из реестра")
+                    # IFEO-блокировка если галочка стоит
+                    _chk_map = {"Run": "chk_block_run", "RunOnce": "chk_block_runonce", "Winlogon": "chk_block_winlogon"}
+                    _chk_attr = _chk_map.get(reg_type)
+                    if _chk_attr:
+                        _chk = getattr(self, _chk_attr, None)
+                        if _chk and _chk.isChecked():
+                            target_exe = self._extract_exe_name(entry_val)
+                            if target_exe:
+                                self._apply_ifeo_block(target_exe)
                 except Exception as e:
                     QMessageBox.critical(self, "Ошибка", f"Не удалось удалить запись: {e}")
                     logger.log(f"Registry_{reg_type}", "error", str(e))
@@ -17909,6 +18100,11 @@ if GUI_MODE:
                         logger.log("Folder_Startup", "success", f"Удален файл: {filename}")
                         self.load_folder_data()
                         self.show_toast("ГОТОВО", "Файл удален из автозагрузки")
+                        # IFEO-блокировка если галочка стоит
+                        if getattr(self, "chk_block_folder", None) and self.chk_block_folder.isChecked():
+                            target_exe = self._extract_exe_name(filepath) or self._extract_exe_name(filename)
+                            if target_exe:
+                                self._apply_ifeo_block(target_exe)
                     else:
                         QMessageBox.warning(self, "Ошибка", "Файл не найден")
                 except Exception as e:
@@ -19415,13 +19611,18 @@ if GUI_MODE:
 
             def show_details():
                 row = table.currentRow()
-                if row < 0 or row >= len(state["entries"]):
+                visible = state.get("_visible_entries", state["entries"])
+                if row < 0 or row >= len(visible):
                     details.clear()
                     return
-                details.setPlainText(entry_details(state["entries"][row]))
+                details.setPlainText(entry_details(visible[row]))
 
             def populate():
-                entries = state["entries"]
+                # Скрываем ERROR-записи которые не являются подозрительными
+                # (доступ запрещён системой — норма для SYSTEM/svchost без SeDebugPrivilege)
+                entries = [e for e in state["entries"]
+                           if e.get("suspicious") or e.get("category", "") not in ("ERROR",)]
+                state["_visible_entries"] = entries
                 table.blockSignals(True)
                 table.setRowCount(0)
                 for index, entry in enumerate(entries):
@@ -20385,6 +20586,10 @@ if GUI_MODE:
                     details.setPlainText(entry_details(entries[0]))
                 else:
                     details.clear()
+                    if state.get("_visible_entries") is not None and len(state["entries"]) > len(entries):
+                        hint_count = len(state["entries"]) - len(entries)
+                        status_extra = f" (скрыто {hint_count} ошибок чтения системных процессов)"
+                        status.setText(status.text() + status_extra)
 
                 if state["error"]:
                     text = tr("Ошибка сканирования памяти:") + " " + state["error"]
@@ -20685,6 +20890,20 @@ if GUI_MODE:
                 ("Перезапуск Explorer", "Перезапуск оболочки", self.restart_explorer),
                 ("Корреляция Malware", "Анализ служб и задач", self.show_malware_correlation_window),
             ]
+
+            if self._is_winre_mode():
+                # These actions depend on a logged-in user session, Explorer or
+                # the normal Win+R shell, none of which exist in WinRE.
+                _winre_hidden_system = {
+                    "Выйти из пользователя", "Войти в WinRE", "Выполнить",
+                    "Ctrl+Alt+N", "Перезапуск Explorer",
+                }
+                system_cards = [
+                    card for card in system_cards
+                    if card[0] not in _winre_hidden_system]
+                builtin_cards = [
+                    card for card in builtin_cards
+                    if card[0] != "Перезапуск Explorer"]
 
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -22139,8 +22358,15 @@ if GUI_MODE:
                         language_manager.translate("Не удалось настроить WinRE. Убедитесь, что программа запущена от имени администратора. ") + str(e),
                     )
 
-            btn_winre = QPushButton(language_manager.translate("Перезагрузка в WinRE"))
-            btn_winre.clicked.connect(do_winre)
+            if self._is_winre_mode():
+                # Already inside WinRE: rebooting "into WinRE" makes no sense.
+                btn_winre = QPushButton("ПЕРЕЗАГРУЗИТЬСЯ В WINDOWS")
+                btn_winre.clicked.connect(
+                    lambda checked=False: self._winre_reboot_to_windows())
+            else:
+                btn_winre = QPushButton(
+                    language_manager.translate("Перезагрузка в WinRE"))
+                btn_winre.clicked.connect(do_winre)
             layout.addWidget(btn_winre)
             refresh_usb_list()
             self._bw_dialog(dlg)
@@ -23636,8 +23862,7 @@ if GUI_MODE:
 
         def show_toast(self, title, message="", kind="success", duration=4200):
             """Показать B&W-уведомление, плавно выезжающее из левого верхнего угла."""
-            if not GUI_MODE or not hasattr(self, "main_container"):
-                print(f"[{title}] {message}")
+            if not hasattr(self, "main_container"):
                 return
             try:
                 toasts = [t for t in getattr(self, "_toasts", []) if t is not None and not t._closing]
@@ -23684,6 +23909,15 @@ if GUI_MODE:
             if function_name == "Process_Hollowing_Scan":
                 self.show_process_memory_inspector()
                 return
+            # These functions must run on the main thread (they open QFileDialog)
+            if function_name in ("File_Full_Access", "Easy_Launcher"):
+                try:
+                    result = func()
+                    if result:
+                        self.show_toast("ГОТОВО", "Операция выполнена.", "success")
+                except Exception as _ex:
+                    self.show_toast("ОШИБКА", str(_ex), "error")
+                return
             if func.__name__ in HIGH_RISK_FUNCTION_NAMES:
                 reply = QMessageBox.question(
                     self,
@@ -23710,6 +23944,13 @@ if GUI_MODE:
 
         def check_for_updates(self, manual=False):
             """Загружает Latest и последний pre-release с GitHub."""
+            if self._is_winre_mode():
+                if manual:
+                    QMessageBox.information(
+                        self, "Обновление",
+                        "В среде WinRE автообновление недоступно.\n"
+                        "Запустите NoVir в обычной Windows, чтобы проверить обновления.")
+                return
             import threading
 
             def _check():
@@ -24317,7 +24558,7 @@ if GUI_MODE:
 
 def _configure_display_scaling():
     """Enable larger logical UI scale on large monitors with 100% Windows scaling."""
-    if sys.platform != "win32":
+    if sys.platform != "win32" or _IS_WINPE:
         return
     if os.environ.get("QT_SCALE_FACTOR") or os.environ.get("QT_SCREEN_SCALE_FACTORS"):
         return
@@ -24346,96 +24587,113 @@ def _configure_display_scaling():
 
 
 def main():
+    _novir_boot("main_start", "APP_DIR=%s" % APP_DIR)
     try:
         os.chdir(APP_DIR)
     except OSError as error:
-        print(f"[WARNING] Не удалось перейти в каталог приложения {APP_DIR}: {error}")
+        _novir_boot("chdir_failed", repr(error))
 
-    if SELF_CHECK:
-        run_self_check()
-        return
-
-    # Проверяем права администратора
+    # NoVir is GUI-only.  There is no console fallback anymore: if Qt cannot
+    # start, the user gets a native Windows message box with diagnostics.
     try:
-        is_admin = check_admin_status()
-        admin_required = not (DRY_RUN and not GUI_MODE)
-        if not is_admin and admin_required:
-            if GUI_MODE:
-                import ctypes
-                script = os.path.abspath(sys.argv[0])
-                params = " ".join(sys.argv[1:])
-                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {params}', None, 1)
-                sys.exit(0)
-            else:
-                print(f"{Colors.RED}[!] ВНИМАНИЕ: Запустите скрипт от имени АДМИНИСТРАТОРА!{Colors.RESET}")
-                print(f"{Colors.YELLOW}[!] Нажмите Enter для выхода...{Colors.RESET}")
-                input()
-                sys.exit(1)
-            print(f"{Colors.YELLOW}[!] DRY-RUN запущен без прав администратора. Реальные изменения выполняться не будут.{Colors.RESET}")
+        # В среде WinRE (диск X:\) процессы всегда запускаются с правами SYSTEM,
+        # а вызов ShellExecuteW("runas") там не поддерживается и вызывает молчаливый выход.
+        is_admin = check_admin_status() or _IS_WINPE
+        if os.environ.get("NOVIR_NO_ELEVATION") == "1":
+            is_admin = True
+        _novir_boot("admin_check", "is_admin=%s is_winpe=%s" % (is_admin, _IS_WINPE))
+        admin_required = not DRY_RUN
+        if not is_admin and admin_required and not _IS_WINPE:
+            import ctypes
+            script = os.path.abspath(sys.argv[0])
+            params = " ".join(sys.argv[1:])
+            try:
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", sys.executable, f'"{script}" {params}', None, 1)
+            except Exception as _elevate_err:
+                _novir_boot("elevation_failed", repr(_elevate_err))
+                ctypes.windll.user32.MessageBoxW(
+                    0,
+                    "Не удалось запросить права администратора.\n"
+                    "Запустите NoVir от имени администратора.",
+                    "NoVir: нужны права администратора",
+                    0x10 | 0x10000)
+            sys.exit(0)
     except Exception as _e:
         # Expected exception, intentionally ignored
         pass
-    
-    if GUI_MODE:
-        try:
-            from PySide6.QtCore import Qt
-            QApplication.setHighDpiScaleFactorRoundingPolicy(
-                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-        except Exception:
-            pass
+
+    _novir_boot("before_qapplication")
+    try:
+        from PySide6.QtCore import Qt
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except Exception:
+        pass
+    if _IS_WINPE:
+        _novir_boot("winre_gui_start", "SystemRoot=%s QT_PLUGIN_PATH=%s" % (
+            os.environ.get("SystemRoot", ""), os.environ.get("QT_PLUGIN_PATH", "")))
+    else:
         _configure_display_scaling()
+
+    try:
         app = QApplication(sys.argv)
-        from PySide6.QtGui import QFont
-        app.setFont(QFont("Segoe UI", 10))
-        app._novir_translation_filter = TranslationEventFilter(app)
-        app.installEventFilter(app._novir_translation_filter)
-        if language_manager.first_run:
-            # Первый запуск: язык определяется автоматически по локали системы
-            try:
-                from PySide6.QtCore import QLocale
-                _sys_locale = QLocale.system().name()[:2]
-                _lang = _sys_locale if _sys_locale in ("en", "uk", "ru", "de", "pl", "fr") else "en"
-            except Exception:
-                _lang = "en"
-            language_manager.set_language(_lang, save=True)
+        _novir_boot("qapplication_ok", "platform=%s" % app.platformName())
+    except Exception as _app_err:
+        _novir_boot("qapplication_failed", repr(_app_err))
+        import ctypes
+        plugin_path = os.path.join(
+            os.environ.get("QT_PLUGIN_PATH", ""), "platforms", "qwindows.dll")
+        details = (
+            "Не удалось инициализировать графическую подсистему Qt.\n\n"
+            f"{_app_err}\n\n"
+            f"Платформа: {os.environ.get('QT_QPA_PLATFORM', 'не задана')}\n"
+            f"QT_PLUGIN_PATH: {os.environ.get('QT_PLUGIN_PATH', 'не задан')}\n"
+            f"qwindows.dll: {plugin_path} ({'найден' if os.path.exists(plugin_path) else 'НЕ НАЙДЕН'})"
+        )
+        if _IS_WINPE:
+            details += (
+                "\n\nWinRE/WinPE: проверьте папки PySide6/plugins/platforms "
+                "и winpe_dlls рядом с EXE.")
+        ctypes.windll.user32.MessageBoxW(
+            0, details, "Ошибка запуска GUI NoVir", 0x10 | 0x10000)
+        raise SystemExit(1)
+
+    from PySide6.QtGui import QFont
+    app.setFont(QFont("Segoe UI", 10))
+    app._novir_translation_filter = TranslationEventFilter(app)
+    app.installEventFilter(app._novir_translation_filter)
+    if language_manager.first_run:
+        # Первый запуск: язык определяется автоматически по локали системы
+        try:
+            from PySide6.QtCore import QLocale
+            _sys_locale = QLocale.system().name()[:2]
+            _lang = _sys_locale if _sys_locale in ("en", "uk", "ru", "de", "pl", "fr") else "en"
+        except Exception:
+            _lang = "en"
+        language_manager.set_language(_lang, save=True)
+
+    try:
+        _novir_boot("before_novirgui")
         window = NoVirGUI()
+        _novir_boot("novirgui_created")
         window.show()
-        sys.exit(app.exec())
-    
-    print_header()
-    
-    while True:
-        show_menu()
-        choice = input(f"{Colors.CYAN}[?] Выберите действие: {Colors.RESET}")
-        
-        if choice == '1':
-            run_block_1()
-        elif choice == '2':
-            run_block_2()
-        elif choice == '3':
-            run_block_3()
-        elif choice == '4':
-            run_block_4()
-        elif choice == '5':
-            run_block_5()
-        elif choice == '6':
-            run_block_6()
-        elif choice == '7':
-            confirm = input(f"{Colors.YELLOW}[?] Вы уверены, что хотите запустить полное сканирования пупселечек? (y/N): {Colors.RESET}")
-            if confirm.lower() == 'y':
-                run_full_scan()
-        elif choice == '8':
-            Final_Log_Report()
-        elif choice == '9':
-            run_self_check()
-        elif choice == '0':
-            print_hacker_message("Пока! Надеюсь, я помог. Если что — я всегда тут!")
-            break
-        else:
-            print(f"{Colors.RED}[!] Неверный выбор{Colors.RESET}")
-        
-        print(f"\n{Colors.YELLOW}[Нажмите Enter, чтобы продолжить...]{Colors.RESET}")
-        input()
+        _novir_boot("window_shown")
+    except Exception as _win_err:
+        _novir_boot("novirgui_failed", repr(_win_err))
+        import ctypes
+        import traceback
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Ошибка создания главного окна NoVir:\n\n"
+            f"{_win_err}\n\n{traceback.format_exc()[-2500:]}",
+            "Ошибка запуска GUI NoVir",
+            0x10 | 0x10000)
+        raise SystemExit(1)
+
+    _novir_boot("before_app_exec")
+    sys.exit(app.exec())
+
 
 # ─── Глобальный ловитель ВСЕХ программных ошибок ─────────────────────
 def _novir_global_exception_handler(exctype, value, tb):
@@ -24449,26 +24707,30 @@ def _novir_global_exception_handler(exctype, value, tb):
     except Exception:
         pass
 
-    try:
-        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
-        log_path = os.path.join(base, "novir_crash.log")
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("\n" + "=" * 70 + "\n")
-            fh.write(f"{datetime.now().isoformat()}  {exctype.__name__}: {value}\n")
-            traceback.print_exception(exctype, value, tb, file=fh)
-    except Exception:
-        pass
+    # Сохраняем крашлог рядом с EXE (на C:\ или X:\), чтобы он не удалялся вместе с _MEIPASS
+    log_targets = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        log_targets.append(os.path.join(exe_dir, "novir_crash.log"))
+    log_targets.append(r"X:\novir_crash.log")
+    log_targets.append(r"C:\novir_crash.log")
+    log_targets.append("novir_crash.log")
 
+    for log_path in log_targets:
+        try:
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write("\n" + "=" * 70 + "\n")
+                fh.write(f"{datetime.now().isoformat()}  {exctype.__name__}: {value}\n")
+                traceback.print_exception(exctype, value, tb, file=fh)
+            break
+        except Exception:
+            continue
+
+    # Гарантированное системное окно через Win32 API — работает даже если Qt/PySide6 вообще не загрузились!
     try:
-        if GUI_MODE:
-            from PySide6.QtWidgets import QApplication, QMessageBox
-            if QApplication.instance() is not None:
-                QMessageBox.critical(
-                    None,
-                    "Критическая ошибка NoVir",
-                    f"Произошла непредвиденная ошибка:\n\n{exctype.__name__}: {value}\n\n"
-                    "Подробности записаны в novir_crash.log",
-                )
+        import ctypes
+        error_msg = f"{exctype.__name__}: {value}\n\nПодробности записаны в novir_crash.log"
+        ctypes.windll.user32.MessageBoxW(0, error_msg, "Ошибка запуска NoVir", 0x10 | 0x10000)
     except Exception:
         pass
 

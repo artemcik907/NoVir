@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-NoVir - Вирусный Реаниматор
-Автор: Недохакер
-Версия: 2.5.6
-Описание: Полный набор инструментов для восстановления системы после вирусной атаки
-"""
 import os
 import sys
 import time
 
-# Keep a single module instance when this file is the entry point.
-# explorer_tab imports `virus_recovery` lazily for translations; without
-# this alias Python would execute the whole module a second time.
 if __name__ == "__main__":
     sys.modules.setdefault("virus_recovery", sys.modules[__name__])
 
-# ---- Диагностика запуска (включается NOVIR_BOOT_DEBUG=1) ----------------
 _NOVIR_BOOT_DEBUG = os.environ.get("NOVIR_BOOT_DEBUG") == "1"
 _NOVIR_BOOT_PATH = None
 
@@ -55,15 +45,12 @@ _novir_boot("module_start", "frozen=%s meipass=%s exe=%s cwd=%s" % (
     getattr(sys, "frozen", False), getattr(sys, "_MEIPASS", ""),
     sys.executable, os.getcwd()))
 
-# Поддержка работы в среде восстановления WinRE / WinPE
 _IS_WINPE = (
     os.environ.get('SystemDrive', '').upper() == 'X:'
     or os.path.exists(r'X:\Windows')
     or os.path.exists(r'X:\windows')
 )
 
-# Гарантированная регистрация каталогов DLL для PySide6, Shiboken6 и PyInstaller (WinRE / WinPE).
-# Важно: handles нужно хранить, иначе Python закроет каталог и он исчезнет из поиска DLL.
 _DLL_DIR_HANDLES = []
 if getattr(sys, 'frozen', False):
     _basedir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
@@ -89,7 +76,6 @@ else:
 
 if getattr(sys, 'frozen', False):
     _basedir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-    # Явно указываем Qt путь к плагинам (platforms/qwindows.dll), чтобы в WinRE окно запускалось мгновенно
     _plugin_dir = os.path.join(_basedir, 'PySide6', 'plugins')
     if not os.path.isdir(_plugin_dir):
         _plugin_dir = os.path.join(_basedir, 'plugins')
@@ -100,9 +86,6 @@ _novir_boot("dll_setup_done", "QT_PLUGIN_PATH=%s PATH=%s" % (
     os.environ.get("QT_PLUGIN_PATH", ""), os.environ.get("PATH", "")[:500]))
 
 if _IS_WINPE:
-    # Принудительно выставляем software rendering — Qt6Gui.dll требует d3d11/dxgi/d3d12,
-    # которые могут отсутствовать в урезанном WinPE 2019. Не используем setdefault —
-    # жёстко перезаписываем чтобы не было пустых значений из системного окружения WinPE.
     os.environ['QT_OPENGL'] = 'software'
     os.environ['QT_RHI_BACKEND'] = 'software'
     os.environ['QT_QUICK_BACKEND'] = 'software'
@@ -112,14 +95,8 @@ if _IS_WINPE:
     os.environ['QT_D3D_LEVEL'] = '0'
     os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
     os.environ['QT_NO_NATIVE_MENUBAR'] = '1'
-    # WinRE/WinPE has no normal desktop shell. Always use the native Windows
-    # platform plugin explicitly and keep accessibility hooks out of the way.
     os.environ['QT_QPA_PLATFORM'] = 'windows'
     os.environ['QT_ACCESSIBILITY'] = '0'
-    # В WinPE порядок каталогов DLL задаёт runtime-хук:
-    # System32 самой WinRE -> System32 установленной Windows -> встроенные
-    # fallback-DLL из winpe_dlls (последними). Здесь ничего не переставляем,
-    # иначе новые DLL с машины сборки снова перекроют совместимые системные.
     if getattr(sys, 'frozen', False):
         _mei = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
         if not os.environ.get('NOVIR_WINPE_DLL_ORDER'):
@@ -161,6 +138,7 @@ import time
 
 
 import json
+import tempfile
 import threading
 import re
 import hashlib
@@ -196,8 +174,7 @@ except ImportError:
     CPP_CORE_AVAILABLE = False
     print("[INFO] C++ модуль novir_core не найден, используется Python реализация")
 
-# NoVir is a GUI-only application.  The old console interface and the
-# --console/--nogui switches were removed completely.
+# консоль вырезана, остался только GUI
 GUI_MODE = True
 PYSIDE_AVAILABLE = False
 _novir_boot("before_pyside_import", "GUI_MODE=%s" % GUI_MODE)
@@ -329,7 +306,6 @@ if sys.platform == 'win32':
 kernel32 = ctypes.windll.kernel32
 ntdll = ctypes.windll.ntdll
 
-# Режим сухого прогона (только показываем, ничего не меняем)
 DRY_RUN = '--dry-run' in sys.argv or '-d' in sys.argv
 APP_DIR = os.path.dirname(os.path.abspath(
     sys.executable if getattr(sys, "frozen", False) else __file__
@@ -348,7 +324,6 @@ BACKUP_MANIFEST = os.path.join(BACKUP_SECURITY_DIR, "backup_manifest.json")
 
 
 def parse_ai_command(command):
-    """Return argv for an allowed read-only diagnostic command, else None."""
     if not isinstance(command, str) or not command.strip():
         return None
     if re.search(r"[\r\n|&<>`]|;|\$\(|%[^%]+%", command):
@@ -363,7 +338,6 @@ def parse_ai_command(command):
         return None
     tokens = [token[1:-1] if len(token) >= 2 and token[0] == token[-1] == '"' else token for token in tokens]
     executable = ntpath.basename(tokens[0]).lower()
-    # Allow both bare commands and full System32 paths
     win = os.environ.get("WINDIR", r"C:\Windows").lower()
     tok0 = tokens[0].lower().replace("/", "\\")
     if tok0 != executable and not tok0.startswith(win):
@@ -421,7 +395,6 @@ def ai_command_is_allowed(command):
 
 
 def render_chat_message(text):
-    """Render a small safe Markdown subset for the Qt rich-text chat view."""
     import html
     import re
 
@@ -509,7 +482,6 @@ def render_chat_message(text):
 
 
 def build_recovery_plan(diagnostic_results):
-    """Group related findings into cautious, explainable recovery hypotheses."""
     findings = [item for item in diagnostic_results if item.get("needs_fix")]
     ids = {item.get("id") for item in findings}
     plan = []
@@ -539,9 +511,9 @@ def build_recovery_plan(diagnostic_results):
             "components": [item.get("id") for item in related],
             "evidence": [item.get("details", "") for item in related if item.get("details")],
             "steps": [
-                "Проверить источник политик и убедиться, что устройство не управляется организацией.",
-                "Не удалять политики автоматически; сверить каждое значение с администратором.",
-                "После согласованного изменения повторить проверки Defender, Task Manager и Windows Update.",
+                "Проверить, не выставлены ли ограничения твикерами или сторонним софтом.",
+                "Не сносить политики вслепую, если это рабочий или корпоративный ПК.",
+                "После сброса заново проверить Защитник и Диспетчер задач.",
             ],
             "risk": "high",
             "automated": False,
@@ -555,7 +527,7 @@ def build_recovery_plan(diagnostic_results):
             "title": f"Требуется отдельная проверка: {item.get('name', component_id)}",
             "components": [component_id],
             "evidence": [item.get("details", "")] if item.get("details") else [],
-            "steps": ["Проверить результат вручную и сохранить соответствующую точку восстановления перед изменениями."],
+            "steps": ["Создать точку восстановления перед внесением изменений."],
             "risk": "high",
             "automated": False,
         })
@@ -563,7 +535,6 @@ def build_recovery_plan(diagnostic_results):
 
 
 def build_incident_report(diagnostic_results, recovery_outcomes=None, generated_at=None):
-    """Create a serializable recovery report from initial and verification scans."""
     recovery_outcomes = recovery_outcomes or {}
     initial_findings = [item for item in diagnostic_results if item.get("needs_fix")]
     verified_fixed = [
@@ -587,28 +558,28 @@ def build_incident_report(diagnostic_results, recovery_outcomes=None, generated_
 
 def format_incident_report_text(report):
     lines = [
-        "NoVir Recovery Report",
+        "Отчёт проверки NoVir",
         f"Scan: {report['generated_at']}",
-        f"Problems found: {report['problems_found']}",
-        f"Problems fixed: {report['problems_fixed']}",
-        f"Requires attention: {report['requires_attention']}",
+        f"Найдено проблем: {report['problems_found']}",
+        f"Исправлено: {report['problems_fixed']}",
+        f"Требует внимания: {report['requires_attention']}",
         "",
-        "Components:",
+        "Компоненты:",
     ]
     if report.get("recovery_point"):
-        lines.insert(5, f"Recovery Point: {report['recovery_point']}")
+        lines.insert(5, f"Точка восстановления: {report['recovery_point']}")
     for item in report["findings"]:
         outcome = report["recovery_outcomes"].get(item.get("id"))
         if outcome == "verified":
-            state = "FIXED (verified)"
+            state = "ИСПРАВЛЕНО"
         elif isinstance(outcome, str) and outcome.startswith("failed:"):
-            state = "FIX FAILED"
+            state = "СБОЙ ИСПРАВЛЕНИЯ"
         elif outcome == "manual_review":
-            state = "MANUAL REVIEW"
+            state = "РУЧНАЯ ПРОВЕРКА"
         elif outcome == "requires_attention":
-            state = "REQUIRES ATTENTION"
+            state = "ТРЕБУЕТ ВНИМАНИЯ"
         else:
-            state = item.get("status", "NOT FIXED")
+            state = item.get("status", "НЕ ИСПРАВЛЕНО")
         recovery_note = f" | Recovery: {outcome}" if outcome and outcome != "verified" else ""
         lines.append(
             f"- {item.get('name', item.get('id', 'Unknown'))}: {state} - "
@@ -618,7 +589,6 @@ def format_incident_report_text(report):
 
 
 def create_recovery_point(root_dir=None, command_runner=None):
-    """Capture recovery artifacts and mark inventory-only scopes honestly."""
     from datetime import datetime
 
     root_dir = root_dir or os.path.join(
@@ -731,7 +701,6 @@ def create_recovery_point(root_dir=None, command_runner=None):
 
 
 def restore_recovery_point(point_dir, command_runner=None):
-    """Restore checksum-verified registry/network artifacts; report manual-only scopes."""
     runner = command_runner or subprocess.run
     if os.path.islink(point_dir) or not os.path.isdir(point_dir):
         raise OSError("Recovery Point path is invalid")
@@ -869,14 +838,12 @@ class Logger:
 
 
 class RollbackManager:
-    """Saves registry values before changing them so they can be restored."""
     def __init__(self):
         self._snapshots = []
         from datetime import datetime
         self.datetime = datetime  # list of (hive, key_path, value_name, old_value, old_type)
 
     def snapshot_value(self, hive, key_path, value_name):
-        """Capture current registry value for rollback."""
         import winreg
         try:
             with winreg.OpenKey(
@@ -885,13 +852,11 @@ class RollbackManager:
                 val, vtype = winreg.QueryValueEx(key, value_name)
             self._snapshots.append((hive, key_path, value_name, val, vtype, 'set'))
         except FileNotFoundError:
-            # Key/value didn't exist — rollback means deleting it
             self._snapshots.append((hive, key_path, value_name, None, None, 'delete'))
         except Exception:
             pass
 
     def rollback(self):
-        """Restore all snapshotted registry values."""
         import winreg
         restored, failed = 0, 0
         for snap in reversed(self._snapshots):
@@ -923,7 +888,6 @@ class RollbackManager:
 
     @property
     def snapshots(self):
-        """Return rollback entries in a UI-friendly representation."""
         return tuple({
             "hive": hive,
             "key_path": key_path,
@@ -939,19 +903,13 @@ rollback_mgr = RollbackManager()
 
 logger = Logger()
 
-# ---------------------------------------------------------------------------
-# Interface language
-# ---------------------------------------------------------------------------
-# Keep the source strings in Russian for backwards compatibility, but translate
-# every Qt widget just before it is shown.  This also covers dialogs created by
-# tools later in the session, rather than only the main window.
+# язык интерфейса
 LANGUAGE_CONFIG_PATH = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")), "NoVir", "settings.json"
 )
 
 
 def load_app_settings():
-    """Load persisted NoVir preferences without assuming the file is valid."""
     try:
         with open(LANGUAGE_CONFIG_PATH, "r", encoding="utf-8") as settings_file:
             data = json.load(settings_file)
@@ -961,7 +919,6 @@ def load_app_settings():
 
 
 def save_app_setting(key, value):
-    """Update one preference while preserving the rest of settings.json."""
     try:
         settings = load_app_settings()
         settings[key] = value
@@ -976,14 +933,10 @@ def save_app_setting(key, value):
 
 
 class LanguageManager:
-    """Persist and translate the language selected by the user."""
 
     LANGUAGES = ("en", "uk", "ru", "de", "pl", "fr")
 
-    # (English, Ukrainian).  The entries below are complete for the visible
-    # navigation, settings, dialogs, controls, tables and status messages.
     TRANSLATIONS = {
-        # Полоса состояния дашборда (версия Windows)
         "Версия винды": ('Windows version', 'Версія Windows', 'Windows-Version', 'Wersja Windows', 'Version de Windows'),
         "Авто": ('Auto', 'Авто', 'Auto', 'Auto', 'Auto'),
         "Вручную": ('Manual', 'Вручну', 'Manuell', 'Ręcznie', 'Manuel'),
@@ -1345,7 +1298,7 @@ class LanguageManager:
         'Задача выполнена.': ('Task completed.', 'Завдання виконано.', 'Die Aufgabe ist erledigt.', 'Zadanie zostało ukończone.', 'La tâche est terminée.'),
         'На GitHub пока нет опубликованных релизов.': ('There are no published GitHub releases yet.', 'На GitHub ще немає опублікованих релізів.', 'Es gibt noch keine veröffentlichten Veröffentlichungen auf GitHub.', 'Nie ma jeszcze żadnych opublikowanych wersji na GitHubie.', 'Il n’y a pas encore de versions publiées sur GitHub.'),
         'Готово! Все безопасные исправления применены.': ('Done! All safe fixes have been applied.', 'Готово! Усі безпечні виправлення застосовано.', 'Bereit! Alle sicheren Korrekturen wurden angewendet.', 'Gotowy! Zastosowano wszystkie bezpieczne poprawki.', 'Prêt! Tous les correctifs sûrs ont été appliqués.'),
-        'Рекомендуется перезагрузить компьютер.': ('Restarting the computer is recommended.', "Рекомендується перезавантажити комп'ютер.", 'Es wird empfohlen, Ihren Computer neu zu starten.', 'Zalecane jest ponowne uruchomienie komputera.', 'Il est recommandé de redémarrer votre ordinateur.'),
+        'Лучше перезагрузить комп.': ('Restarting the computer is recommended.', "Рекомендується перезавантажити комп'ютер.", 'Es wird empfohlen, Ihren Computer neu zu starten.', 'Zalecane jest ponowne uruchomienie komputera.', 'Il est recommandé de redémarrer votre ordinateur.'),
         'ПРОДОЛЖИТЬ  →': ('ПРОДОЛЖИТЬ  →', 'ПРОДОЛЖИТЬ  →', 'WEITER →', 'KONTYNUUJ →', 'CONTINUER →'),
         '! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?': ('! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?', '! ВНИМАНИЕ! Восстановление загрузчика MBR/BCD\nявляется продвинутой системной операцией.\n\nПри неправильном использовании Windows\nможет перестать загружаться.\n\nРекомендуется создать точку восстановления\nперед продолжением. Вы уверены?', '! AUFMERKSAMKEIT! Wiederherstellung des MBR/BCD-Bootloaders\nist eine erweiterte Systemoperation.\n\nBei falscher Verwendung von Windows\nkann den Ladevorgang stoppen.\n\nEs wird empfohlen, einen Wiederherstellungspunkt zu erstellen\nbevor Sie fortfahren. Bist du sicher?', '! UWAGA! Odzyskiwanie bootloadera MBR/BCD\nto zaawansowana operacja systemowa.\n\nPodczas nieprawidłowego korzystania z systemu Windows\nmoże przestać się ładować.\n\nZalecane jest utworzenie punktu przywracania\nprzed kontynuowaniem. Czy jesteś pewien?', "! ATTENTION! Récupération du chargeur de démarrage MBR/BCD\nest une opération système avancée.\n\nEn cas d'utilisation incorrecte de Windows\npeut arrêter le chargement.\n\nIl est recommandé de créer un point de restauration\navant de continuer. Es-tu sûr?"),
         'NoVir - Восстановление системы': ('NoVir - Восстановление системы', 'NoVir - Восстановление системы', 'NoVir – Systemwiederherstellung', 'NoVir – odzyskiwanie systemu', 'NoVir - Récupération du système'),
@@ -1363,12 +1316,11 @@ class LanguageManager:
         'Выбор языка': ('Выбор языка', 'Выбор языка', 'Sprachauswahl', 'Wybór języka', 'Sélection de la langue'),
         '⚠️ Управление дисками': ('⚠️ Управление дисками', '⚠️ Управление дисками', '⚠️ Datenträgerverwaltung', '⚠️ Zarządzanie dyskami', '⚠️ Gestion des disques'),
         '⚠️ Восстановление загрузчика MBR/BCD': ('⚠️ Восстановление загрузчика MBR/BCD', '⚠️ Восстановление загрузчика MBR/BCD', '⚠️ MBR/BCD-Bootloader-Wiederherstellung', '⚠️ Odzyskiwanie bootloadera MBR/BCD', '⚠️ Récupération du chargeur de démarrage MBR/BCD'),
-        # — Меню «ЕЩЁ», заголовки страниц, сообщество —
         'Поддержать автора': ('Support the author', 'Підтримати автора', 'Autor unterstützen', 'Wesprzyj autora', 'Soutenir l’auteur'),
         'Выберите язык интерфейса. Позже вы сможете изменить его в Настройках.': ('Choose the interface language. You can change it later in Settings.', 'Оберіть мову інтерфейсу. Пізніше її можна змінити в Налаштуваннях.', 'Wähle die Sprache der Oberfläche. Du kannst sie später in den Einstellungen ändern.', 'Wybierz język interfejsu. Później zmienisz go w Ustawieniach.', 'Choisissez la langue de l’interface. Vous pourrez la modifier plus tard dans les paramètres.'),
         '✕ Очистить': ('✕ Clear', '✕ Очистити', '✕ Löschen', '✕ Wyczyść', '✕ Effacer'),
         'Введите команду...': ('Enter a command...', 'Введіть команду...', 'Befehl eingeben...', 'Wpisz polecenie...', 'Saisissez une commande...'),
-        'БЕТА-ВЕРСИЯ: ИИ может ошибаться. Не доверяйте ответам без проверки; перед запуском внимательно проверьте каждую команду. Используйте ИИ на свой риск. NoVir не отвечает за последствия выполнения предложенных команд.': ('BETA: The AI can make mistakes. Do not trust answers without checking; carefully review every command before running. Use the AI at your own risk. NoVir is not responsible for the consequences of running suggested commands.', 'БЕТА: ІІ може помилятися. Не довіряйте відповідям без перевірки; уважно перевірте кожну команду перед запуском. Використовуйте ІІ на свій ризик. NoVir не відповідальні за наслідки виконання запропонованих команд.', 'BETA: Die KI kann Fehler machen. Vertraue Antworten nicht ohne Prüfung; prüfe jeden Befehl vor dem Ausführen sorgfältig. Nutze die KI auf eigenes Risiko. NoVir haftet nicht für die Folgen ausgeführter Befehle.', 'BETA: SI może się mylić. Nie ufaj odpowiedziom bez sprawdzenia; dokładnie sprawdź każde polecenie przed uruchomieniem. Korzystaj z SI na własne ryzyko. NoVir nie ponosi odpowiedzialności za skutki uruchomienia sugerowanych poleceń.', 'BÊTA : l’IA peut se tromper. Ne fais pas confiance aux réponses sans vérification ; examine attentivement chaque commande avant exécution. Utilise l’IA à tes risques et périls. NoVir n’est pas responsable des conséquences de l’exécution des commandes proposées.'),
+        'Бот может ошибаться — внимательно проверяй команды перед выполнением в системе.': ('BETA: The AI can make mistakes. Do not trust answers without checking; carefully review every command before running. Use the AI at your own risk. NoVir is not responsible for the consequences of running suggested commands.', 'БЕТА: ІІ може помилятися. Не довіряйте відповідям без перевірки; уважно перевірте кожну команду перед запуском. Використовуйте ІІ на свій ризик. NoVir не відповідальні за наслідки виконання запропонованих команд.', 'BETA: Die KI kann Fehler machen. Vertraue Antworten nicht ohne Prüfung; prüfe jeden Befehl vor dem Ausführen sorgfältig. Nutze die KI auf eigenes Risiko. NoVir haftet nicht für die Folgen ausgeführter Befehle.', 'BETA: SI może się mylić. Nie ufaj odpowiedziom bez sprawdzenia; dokładnie sprawdź każde polecenie przed uruchomieniem. Korzystaj z SI na własne ryzyko. NoVir nie ponosi odpowiedzialności za skutki uruchomienia sugerowanych poleceń.', 'BÊTA : l’IA peut se tromper. Ne fais pas confiance aux réponses sans vérification ; examine attentivement chaque commande avant exécution. Utilise l’IA à tes risques et périls. NoVir n’est pas responsable des conséquences de l’exécution des commandes proposées.'),
         'Напишите ответ или вопрос NoVir AI...': ('Write an answer or question for NoVir AI...', 'Напишіть відповідь або запитання для NoVir AI...', 'Schreibe eine Antwort oder Frage an NoVir AI...', 'Napisz odpowiedź lub pytanie do NoVir AI...', 'Écris une réponse ou une question à NoVir AI...'),
         'Отправить': ('Send', 'Надіслать', 'Senden', 'Wyślij', 'Envoyer'),
         'ИИ АССИСТЕНТ': ('AI ASSISTANT', 'ІІ АСИСТЕНТ', 'KI-ASSISTENT', 'ASYSTENT SI', 'ASSISTANT IA'),
@@ -1731,8 +1683,7 @@ class LanguageManager:
         'ВОССТАНОВЛЕНИЕ ЗАГРУЗЧИКА MBR/BCD': ('MBR/BCD BOOTLOADER RECOVERY', 'ВІДНОВЛЕННЯ ЗАВАНТАЖУВАЧА MBR/BCD', 'MBR/BCD-BOOTLOADER-WIEDERHERSTELLUNG', 'ODZYSKIWANIE BOOTLOADERA MBR/BCD', 'RÉCUPÉRATION DU CHARGEUR MBR/BCD'),
     }
 
-    # A safe fallback prevents untranslated Russian fragments in dynamic status
-    # messages assembled with f-strings.  Full phrases above take priority.
+    # фоллбек чтоб не вылезали куски без перевода
     FALLBACK_WORDS = {
         "en": {'не': 'not', 'Не': 'Not', 'будет': 'will be', 'Будет': 'Will be', 'будут': 'will', 'Будут': 'Will', 'ошибка': 'error', 'Ошибка': 'Error', 'ошибки': 'errors', 'Ошибки': 'Errors', 'ошибок': 'errors', 'Ошибок': 'Errors:', 'ошибок:': 'errors:', 'Ошибок:': 'Errors:', 'ошибками': 'errors', 'Ошибками': 'Errors', 'ошибку': 'error', 'Ошибку': 'Error', 'файл': 'file', 'Файл': 'File:', 'файла': 'file', 'Файла': 'File', 'файлы': 'files', 'Файлы': 'Files', 'файлов': 'files', 'Файлов': 'Files:', 'файлом': 'file', 'Файлом': 'File', 'удалось': 'could', 'Удалось': 'Could', 'не удалось': 'could not', 'Не удалось': 'Could not', 'задач': 'tasks', 'Задач': 'Tasks:', 'задача': 'task', 'Задача': 'Task', 'задачу': 'task', 'Задачу': 'Task', 'задачи': 'tasks', 'Задачи': 'Tasks', 'задаче': 'task', 'Задаче': 'Task', 'через': 'via', 'Через': 'Via', 'восстановление': 'recovery', 'Восстановление': 'Recovery', 'восстановления': 'recovery', 'Восстановления': 'Recovery:', 'восстановлено': 'restored', 'Восстановлено': 'Restored', 'восстановлен': 'restored', 'Восстановлен': 'Restored', 'восстановить': 'restore', 'Восстановить': 'Restore', 'восстанавливает': 'restores', 'Восстанавливает': 'Restores', 'восстанавливаеться': 'restores', 'Восстанавливаеться': 'Restores', 'восстановлены': 'restored', 'Восстановлены': 'Restored', 'восстановления:': 'recovery:', 'Восстановления:': 'Recovery:', 'системы': 'system', 'Системы': 'System', 'система': 'system', 'Система': 'System:', 'систему': 'system', 'Систему': 'System', 'системные': 'system', 'Системные': 'System', 'системный': 'system', 'Системный': 'System', 'системной': 'system', 'Системной': 'System', 'системных': 'system', 'Системных': 'System', 'реестра': 'registry', 'Реестра': 'Registry', 'реестр': 'registry', 'Реестр': 'Registry', 'реестре': 'registry', 'Реестре': 'Registry', 'реестру': 'registry', 'Реестру': 'Registry', 'или': 'or', 'Или': 'Or', 'из': 'from', 'Из': 'From', 'все': 'all', 'Все': 'All', 'всё': 'all', 'Всё': 'All', 'всех': 'all', 'Всех': 'All', 'всю': 'all', 'Всю': 'All', 'запуск': 'launch', 'Запуск': 'Launch', 'запуска': 'launch', 'Запуска': 'Launch', 'запустить': 'launch', 'Запустить': 'Launch:', 'запущен': 'launched', 'Запущен': 'Launched:', 'запущено': 'launched', 'Запущено': 'Launched', 'запускает': 'launches', 'Запускает': 'Launches', 'панель': 'panel', 'Панель': 'Panel:', 'панели': 'panel', 'Панели': 'Panel', 'панель:': 'panel:', 'Панель:': 'Panel:', 'выберите': 'select', 'Выберите': 'Select:', 'удалить': 'delete', 'Удалить': 'Delete:', 'удаление': 'removal', 'Удаление': 'Removal:', 'удалены': 'removed', 'Удалены': 'Removed', 'удален': 'removed', 'Удален': 'Removed', 'удалить:': 'delete:', 'Удалить:': 'Delete:', 'процесс': 'process', 'Процесс': 'Process:', 'процесса': 'process', 'Процесса': 'Process', 'процессы': 'processes', 'Процессы': 'Processes', 'процессов': 'processes', 'Процессов': 'Processes:', 'процессе': 'process', 'Процессе': 'Process', 'только': 'only', 'Только': 'Only', 'что': 'that', 'Что': 'That', 'настройки': 'settings', 'Настройки': 'Settings', 'настройка': 'setting', 'Настройка': 'Setting', 'настройку': 'setting', 'Настройку': 'Setting', 'настроек': 'settings', 'Настроек': 'Settings', 'настроить': 'configure', 'Настроить': 'Configure', 'при': 'at', 'При': 'At', 'бэкап': 'backup', 'Бэкап': 'Backup', 'бэкапы': 'backups', 'Бэкапы': 'Backups', 'бэкапа': 'backup', 'Бэкапа': 'Backup', 'бэкапов': 'backups', 'Бэкапов': 'Backups', 'путь': 'path', 'Путь': 'Path:', 'пути': 'path', 'Пути': 'Path', 'путь:': 'path:', 'Путь:': 'Path:', 'запись': 'entry', 'Запись': 'Entry:', 'записи': 'entries', 'Записи': 'Entries:', 'записей': 'entries', 'Записей': 'Entries', 'запись:': 'entry:', 'Запись:': 'Entry:', 'службу': 'service', 'Службу': 'Service:', 'служба': 'service', 'Служба': 'Service', 'службы': 'service', 'Службы': 'Service', 'служб': 'services', 'Служб': 'Services', 'службе': 'service', 'Службе': 'Service', 'службы:': 'services:', 'Службы:': 'Services:', 'очистка': 'cleanup', 'Очистка': 'Cleanup:', 'очистки': 'cleanup', 'Очистки': 'Cleanup', 'очистить': 'clean', 'Очистить': 'Clean', 'очищает': 'cleans', 'Очищает': 'Cleans', 'очищен': 'cleaned', 'Очищен': 'Cleaned', 'очищено': 'cleaned', 'Очищено': 'Cleaned', 'очистка:': 'cleanup:', 'Очистка:': 'Cleanup:', 'проверка': 'check', 'Проверка': 'Check:', 'проверки': 'check', 'Проверки': 'Check', 'проверяет': 'checks', 'Проверяет': 'Checks', 'проверить': 'check', 'Проверить': 'Check', 'проверяем': 'checking', 'Проверяем': 'Checking', 'проверка:': 'check:', 'Проверка:': 'Check:', 'нет': 'no', 'Нет': 'No:', 'нет:': 'no:', 'Нет:': 'No:', 'режим': 'mode', 'Режим': 'Mode', 'режима': 'mode', 'Режима': 'Mode', 'диспетчер': 'manager', 'Диспетчер': 'Manager:', 'диспетчер:': 'manager:', 'Диспетчер:': 'Manager:', 'если': 'if', 'Если': 'If', 'доступ': 'access', 'Доступ': 'Access:', 'доступа': 'access', 'Доступа': 'Access:', 'доступ:': 'access:', 'Доступ:': 'Access:', 'доступно': 'available', 'Доступно': 'Available', 'доступна': 'available', 'Доступна': 'Available', 'доступен': 'available', 'Доступен': 'Available', 'отключен': 'disabled', 'Отключен': 'Disabled', 'отключено': 'disabled', 'Отключено': 'Disabled', 'отключены': 'disabled', 'Отключены': 'Disabled', 'отключить': 'disable', 'Отключить': 'Disable:', 'отключение': 'disabling', 'Отключение': 'Disabling', 'отключается': 'disables', 'Отключается': 'Disables', 'включен': 'enabled', 'Включен': 'Enabled', 'включено': 'enabled', 'Включено': 'Enabled', 'включены': 'enabled', 'Включены': 'Enabled', 'включить': 'enable', 'Включить': 'Enable:', 'включение': 'enabling', 'Включение': 'Enabling:', 'включает': 'enables', 'Включает': 'Enables', 'включить:': 'enable:', 'Включить:': 'Enable:', 'права': 'permissions', 'Права': 'Permissions:', 'прав': 'permissions', 'Прав': 'Permissions', 'права:': 'permissions:', 'Права:': 'Permissions:', 'свойства': 'properties', 'Свойства': 'Properties:', 'свойств': 'properties', 'Свойств': 'Properties', 'свойства:': 'properties:', 'Свойства:': 'Properties:', 'меню': 'menu', 'Меню': 'Menu:', 'меню:': 'menu:', 'Меню:': 'Menu:', 'управления': 'management', 'Управления': 'Management', 'управление': 'management', 'Управление': 'Management', 'папки': 'folder', 'Папки': 'Folder', 'папка': 'folder', 'Папка': 'Folder:', 'папку': 'folder', 'Папку': 'Folder:', 'папок': 'folders', 'Папок': 'Folders', 'папке': 'folder', 'Папке': 'Folder', 'создать': 'create', 'Создать': 'Create', 'создание': 'creation', 'Создание': 'Creation:', 'создан': 'created', 'Создан': 'Created', 'создано': 'created', 'Создано': 'Created', 'имя': 'name', 'Имя': 'Name:', 'имя:': 'name:', 'Имя:': 'Name:', 'разблокировка': 'unlock', 'Разблокировка': 'Unlock:', 'разблокирует': 'unlocks', 'Разблокирует': 'Unlocks', 'разблокирован': 'unlocked', 'Разблокирован': 'Unlocked', 'разблокированы': 'unlocked', 'Разблокированы': 'Unlocked', 'разблокировка:': 'unlock:', 'Разблокировка:': 'Unlock:', 'блокировки': 'locks', 'Блокировки': 'Locks', 'блокировка': 'lock', 'Блокировка': 'Lock', 'блокировку': 'lock', 'Блокировку': 'Lock', 'блокировок': 'locks', 'Блокировок': 'Locks', 'блокировала': 'blocked', 'Блокировала': 'Blocked', 'брандмауэр': 'firewall', 'Брандмауэр': 'Firewall:', 'брандмауэра': 'firewall', 'Брандмауэра': 'Firewall', 'брандмауэр:': 'firewall:', 'Брандмауэр:': 'Firewall:', 'вирус': 'virus', 'Вирус': 'Virus:', 'вируса': 'virus', 'Вируса': 'Virus', 'вирусы': 'viruses', 'Вирусы': 'Viruses', 'вирусов': 'viruses', 'Вирусов': 'Viruses', 'вирус:': 'virus:', 'Вирус:': 'Virus:', 'подтверждение': 'confirmation', 'Подтверждение': 'Confirmation', 'подтверждения': 'confirmation', 'Подтверждения': 'Confirmation', 'подтвердить': 'confirm', 'Подтвердить': 'Confirm', 'откат': 'rollback', 'Откат': 'Rollback:', 'откатить': 'rollback', 'Откатить': 'Rollback', 'откат:': 'rollback:', 'Откат:': 'Rollback:', 'список': 'list', 'Список': 'List:', 'списка': 'list', 'Списка': 'List', 'список:': 'list:', 'Список:': 'List:', 'политики': 'policies', 'Политики': 'Policies', 'политика': 'policy', 'Политика': 'Policy', 'политик': 'policies', 'Политик': 'Policies', 'добавить': 'add', 'Добавить': 'Add', 'добавлен': 'added', 'Добавлен': 'Added', 'добавлено': 'added', 'Добавлено': 'Added', 'продолжить': 'continue', 'Продолжить': 'Continue', 'включено:': 'enabled:', 'Включено:': 'Enabled:', 'включение:': 'enabling:', 'Включение:': 'Enabling:', 'клавиши': 'keys', 'Клавиши': 'Keys', 'клавиша': 'key', 'Клавиша': 'Key', 'клавиатуре': 'keyboard', 'Клавиатуре': 'Keyboard', 'клавиатура': 'keyboard', 'Клавиатура': 'Keyboard', 'клавиатуры': 'keyboard', 'Клавиатуры': 'Keyboard', 'операция': 'operation', 'Операция': 'Operation', 'операции': 'operation', 'Операции': 'Operation', 'операцию': 'operation', 'Операцию': 'Operation', 'ограничений': 'restrictions', 'Ограничений': 'Restrictions', 'ограничение': 'restriction', 'Ограничение': 'Restriction', 'ограничения': 'restrictions', 'Ограничения': 'Restrictions', 'значение': 'value', 'Значение': 'Value:', 'значения': 'values', 'Значения': 'Values', 'значение:': 'value:', 'Значение:': 'Value:', 'пользователь': 'user', 'Пользователь': 'User', 'пользователя': 'user', 'Пользователя': 'User', 'пользователи': 'users', 'Пользователи': 'Users', 'пользователем': 'user', 'Пользователем': 'User', 'пользователю': 'user', 'Пользователю': 'User', 'подозрительные': 'suspicious', 'Подозрительные': 'Suspicious', 'подозрительных': 'suspicious', 'Подозрительных': 'Suspicious', 'подозрительный': 'suspicious', 'Подозрительный': 'Suspicious', 'найдено': 'found', 'Найдено': 'Found', 'найдено:': 'found:', 'Найдено:': 'Found:', 'найден': 'found', 'Найден': 'Found', 'блок': 'block', 'Блок': 'Block:', 'блок:': 'block:', 'Блок:': 'Block:', 'автозагрузки': 'startup', 'Автозагрузки': 'Startup', 'автозагрузка': 'startup', 'Автозагрузка': 'Startup', 'автозагрузку': 'startup', 'Автозагрузку': 'Startup', 'автозапуск': 'autorun', 'Автозапуск': 'Autorun', 'сброс': 'reset', 'Сброс': 'Reset', 'сброса': 'reset', 'Сброса': 'Reset', 'сбросить': 'reset', 'Сбросить': 'Reset', 'сброшен': 'reset', 'Сброшен': 'Reset', 'сброшено': 'reset', 'Сброшено': 'Reset', 'проводник': 'explorer', 'Проводник': 'Explorer:', 'проводник:': 'explorer:', 'Проводник:': 'Explorer:', 'сканирование': 'scanning', 'Сканирование': 'Scanning:', 'сканировать': 'scan', 'Сканировать': 'Scan', 'сканирование:': 'scanning:', 'Сканирование:': 'Scanning:', 'полный': 'full', 'Полный': 'Full', 'полная': 'full', 'Полная': 'Full', 'полное': 'full', 'Полное': 'Full', 'после': 'after', 'После': 'After', 'перед': 'before', 'Перед': 'Before', 'выполняется': 'running', 'Выполняется': 'Running:', 'выполнено': 'done', 'Выполнено': 'Done', 'выполнено:': 'done:', 'Выполнено:': 'Done:', 'выполнить': 'run', 'Выполнить': 'Run', 'выполнения': 'execution', 'Выполнения': 'Execution', 'готов': 'ready', 'Готов': 'Ready', 'готова': 'ready', 'Готова': 'Ready', 'готово': 'done', 'Готово': 'Done', 'готовы': 'ready', 'Готовы': 'Ready', 'выполняется:': 'running:', 'Выполняется:': 'Running:', 'проблема': 'problem', 'Проблема': 'Problem', 'проблемы': 'problems', 'Проблемы': 'Problems', 'проблем:': 'problems:', 'Проблем': 'Problems:', 'Проблем:': 'Problems:', 'предупреждение': 'warning', 'Предупреждение': 'Warning:', 'предупреждения': 'warning', 'Предупреждения': 'Warning', 'предупреждение:': 'warning:', 'Предупреждение:': 'Warning:', 'успешно': 'successfully', 'Успешно': 'Successfully', 'успешен': 'successful', 'Успешен': 'Successful', 'успешно:': 'successfully:', 'Успешно:': 'Successfully:', 'неизвестно': 'unknown', 'Неизвестно': 'Unknown', 'неизвестный': 'unknown', 'Неизвестный': 'Unknown', 'отключить:': 'disable:', 'Отключить:': 'Disable:', 'перезагрузка': 'reboot', 'Перезагрузка': 'Reboot', 'перезагрузить': 'reboot', 'Перезагрузить': 'Reboot', 'перезагрузки': 'reboot', 'Перезагрузки': 'Reboot', 'перезапустить': 'restart', 'Перезапустить': 'Restart', 'перезапуск': 'restart', 'Перезапуск': 'Restart', 'перезапущен': 'restarted', 'Перезапущен': 'Restarted', 'завершить': 'terminate', 'Завершить': 'Terminate', 'завершение': 'termination', 'Завершение': 'Termination', 'завершен': 'completed', 'Завершен': 'Completed', 'завершено': 'completed', 'Завершено': 'Completed', 'выбор': 'selection', 'Выбор': 'Selection', 'выбора': 'selection', 'Выбора': 'Selection', 'выбрано': 'selected', 'Выбрано': 'Selected', 'выбран': 'selected', 'Выбран': 'Selected', 'выбранный': 'selected', 'Выбранный': 'Selected', 'выбраны': 'selected', 'Выбраны': 'Selected', 'отмена': 'cancel', 'Отмена': 'Cancel', 'отменить': 'cancel', 'Отменить': 'Cancel', 'отменено': 'cancelled', 'Отменено': 'Cancelled', 'закрыть': 'close', 'Закрыть': 'Close', 'закрыт': 'closed', 'Закрыт': 'Closed', 'запустить:': 'launch:', 'Запустить:': 'Launch:', 'остановить': 'stop', 'Остановить': 'Stop', 'остановлен': 'stopped', 'Остановлен': 'Stopped', 'остановлено': 'stopped', 'Остановлено': 'Stopped', 'запущен:': 'launched:', 'Запущен:': 'Launched:', 'файлов:': 'files:', 'Файлов:': 'Files:', 'папку:': 'folder:', 'Папку:': 'Folder:', 'систем:': 'systems:', 'Систем': 'Systems:', 'Систем:': 'Systems:', 'реестра:': 'registry:', 'Реестра:': 'Registry:', 'службу:': 'service:', 'Службу:': 'Service:', 'доступа:': 'access:', 'Доступа:': 'Access:', 'дисков': 'drives', 'Дисков': 'Drives', 'диск': 'drive', 'Диск': 'Drive', 'диски': 'drives', 'Диски': 'Drives', 'диска': 'drive', 'Диска': 'Drive', 'принтер': 'printer', 'Принтер': 'Printer', 'принтера': 'printer', 'Принтера': 'Printer', 'шрифт': 'font', 'Шрифт': 'Font', 'шрифты': 'fonts', 'Шрифты': 'Fonts', 'шрифтов': 'fonts', 'Шрифтов': 'Fonts', 'тема': 'theme', 'Тема': 'Theme', 'темы': 'theme', 'Темы': 'Theme', 'язык': 'language', 'Язык': 'Language', 'языка': 'language', 'Языка': 'Language', 'драйвер': 'driver', 'Драйвер': 'Driver', 'драйвера': 'drivers', 'Драйвера': 'Drivers', 'драйверов': 'drivers', 'Драйверов': 'Drivers', 'обновление': 'update', 'Обновление': 'Update', 'обновления': 'update', 'Обновления': 'Update', 'обновить': 'update', 'Обновить': 'Update', 'обновлено': 'updated', 'Обновлено': 'Updated', 'центр': 'center', 'Центр': 'Center', 'центра': 'center', 'Центра': 'Center', 'безопасность': 'security', 'Безопасность': 'Security', 'безопасности': 'security', 'Безопасности': 'Security', 'безопасный': 'safe', 'Безопасный': 'Safe', 'безопасно': 'safe', 'Безопасно': 'Safe', 'защита': 'protection', 'Защита': 'Protection:', 'защиты': 'protection', 'Защиты': 'Protection', 'защита:': 'protection:', 'Защита:': 'Protection:', 'защитит': 'protect', 'Защитит': 'Protect', 'защищено': 'protected', 'Защищено': 'Protected', 'защищен': 'protected', 'Защищен': 'Protected', 'защищает': 'protects', 'Защищает': 'Protects', 'антивирус': 'antivirus', 'Антивирус': 'Antivirus', 'антивируса': 'antivirus', 'Антивируса': 'Antivirus', 'вредонос': 'malicious', 'Вредонос': 'Malicious', 'вредоносный': 'malicious', 'Вредоносный': 'Malicious', 'вредоносных': 'malicious', 'Вредоносных': 'Malicious', 'угроза': 'threat', 'Угроза': 'Threat', 'угрозы': 'threats', 'Угрозы': 'Threats', 'угроз:': 'threats:', 'Угроз': 'Threats:', 'Угроз:': 'Threats:', 'восстановление системы': 'system restore', 'Восстановление системы': 'System restore', 'восстановлено:': 'restored:', 'Восстановлено:': 'Restored:', 'поддержка': 'support', 'Поддержка': 'Support', 'поддержки': 'support', 'Поддержки': 'Support', 'поддерживает': 'supports', 'Поддерживает': 'Supports', 'инструмент': 'tool', 'Инструмент': 'Tool:', 'инструменты': 'tools', 'Инструменты': 'Tools', 'инструментов': 'tools', 'Инструментов': 'Tools', 'инструмент:': 'tool:', 'Инструмент:': 'Tool:', 'очищены': 'cleaned', 'Очищены': 'Cleaned', 'удаление:': 'removal:', 'Удаление:': 'Removal:', 'имена': 'names', 'Имена': 'Names', 'имен': 'names', 'Имен': 'Names', 'записи:': 'entries:', 'Записи:': 'Entries:', 'события': 'events', 'События': 'Events', 'событие': 'event', 'Событие': 'Event', 'событий': 'events', 'Событий': 'Events', 'журнал': 'log', 'Журнал': 'Log', 'журнала': 'log', 'Журнала': 'Log', 'задач:': 'tasks:', 'Задач:': 'Tasks:', 'процесс:': 'process:', 'Процесс:': 'Process:', 'процессов:': 'processes:', 'Процессов:': 'Processes:', 'отчет': 'report', 'Отчет': 'Report', 'отчёт': 'report', 'Отчёт': 'Report', 'отчета': 'report', 'Отчета': 'Report', 'точка': 'point', 'Точка': 'Point', 'точки': 'point', 'Точки': 'Point', 'точку': 'point', 'Точку': 'Point', 'конец': 'end', 'Конец': 'End', 'завершения': 'completion', 'Завершения': 'Completion', 'восстановлено!': 'restored!', 'Восстановлено!': 'Restored!', 'успешно!': 'successfully!', 'Успешно!': 'Successfully!', 'выполнено!': 'done!', 'Выполнено!': 'Done!', 'готово!': 'done!', 'Готово!': 'Done!', 'отключено!': 'disabled!', 'Отключено!': 'Disabled!', 'включено!': 'enabled!', 'Включено!': 'Enabled!', 'удалено': 'removed', 'Удалено': 'Removed', 'скопирован': 'copied', 'Скопирован': 'Copied', 'скопировано': 'copied', 'Скопировано': 'Copied', 'скопировать': 'copy', 'Скопировать': 'Copy', 'копировать': 'copy', 'Копировать': 'Copy', 'создание:': 'creation:', 'Создание:': 'Creation:', 'файл:': 'file:', 'Файл:': 'File:', 'папка:': 'folder:', 'Папка:': 'Folder:', 'система:': 'system:', 'Система:': 'System:', 'остановлена': 'stopped', 'Остановлена': 'Stopped', 'остановлены': 'stopped', 'Остановлены': 'Stopped', 'завершена': 'completed', 'Завершена': 'Completed', 'завершены': 'completed', 'Завершены': 'Completed', 'выполнена': 'done', 'Выполнена': 'Done', 'выполнены': 'done', 'Выполнены': 'Done', 'удалена': 'removed', 'Удалена': 'Removed', 'создана': 'created', 'Создана': 'Created', 'созданы': 'created', 'Созданы': 'Created', 'включена': 'enabled', 'Включена': 'Enabled', 'отключена': 'disabled', 'Отключена': 'Disabled', 'найдена': 'found', 'Найдена': 'Found', 'найдены': 'found', 'Найдены': 'Found', 'установлена': 'installed', 'Установлена': 'Installed', 'установлено': 'installed', 'Установлено': 'Installed', 'установлены': 'installed', 'Установлены': 'Installed', 'установлен': 'installed', 'Установлен': 'Installed', 'сброшена': 'reset', 'Сброшена': 'Reset', 'сброшены': 'reset', 'Сброшены': 'Reset', 'очищена': 'cleaned', 'Очищена': 'Cleaned', 'заблокирована': 'blocked', 'Заблокирована': 'Blocked', 'заблокировано': 'blocked', 'Заблокировано': 'Blocked', 'заблокированы': 'blocked', 'Заблокированы': 'Blocked', 'заблокирован': 'blocked', 'Заблокирован': 'Blocked', 'разблокирована': 'unlocked', 'Разблокирована': 'Unlocked', 'разблокировано': 'unlocked', 'Разблокировано': 'Unlocked', 'запущена': 'launched', 'Запущена': 'Launched', 'запущены': 'launched', 'Запущены': 'Launched', 'перезапущена': 'restarted', 'Перезапущена': 'Restarted', 'перезапущено': 'restarted', 'Перезапущено': 'Restarted', 'обновлена': 'updated', 'Обновлена': 'Updated', 'обновлены': 'updated', 'Обновлены': 'Updated', 'восстановлена': 'restored', 'Восстановлена': 'Restored', 'скопирована': 'copied', 'Скопирована': 'Copied', 'скопированы': 'copied', 'Скопированы': 'Copied', 'разрешена': 'allowed', 'Разрешена': 'Allowed', 'разрешено': 'allowed', 'Разрешено': 'Allowed', 'разрешены': 'allowed', 'Разрешены': 'Allowed', 'запрещена': 'forbidden', 'Запрещена': 'Forbidden', 'запрещено': 'forbidden', 'Запрещено': 'Forbidden', 'запрещены': 'forbidden', 'Запрещены': 'Forbidden', 'активна': 'active', 'Активна': 'Active', 'активно': 'active', 'Активно': 'Active', 'активны': 'active', 'Активны': 'Active', 'активен': 'active', 'Активен': 'Active', 'неактивна': 'inactive', 'Неактивна': 'Inactive', 'неактивно': 'inactive', 'Неактивно': 'Inactive', 'неактивен': 'inactive', 'Неактивен': 'Inactive', 'доступны': 'available', 'Доступны': 'Available', 'отсутствует': 'missing', 'Отсутствует': 'Missing:', 'отсутствует:': 'missing:', 'Отсутствует:': 'Missing:', 'отсутствуют': 'missing', 'Отсутствуют': 'Missing', 'работает': 'works', 'Работает': 'Works:', 'работают': 'work', 'Работают': 'Work', 'работает:': 'works:', 'Работает:': 'Works:', 'неработает': 'not working', 'Неработает': 'Not working', 'поврежден': 'damaged', 'Поврежден': 'Damaged', 'повреждена': 'damaged', 'Повреждена': 'Damaged', 'повреждено': 'damaged', 'Повреждено': 'Damaged', 'повреждены': 'damaged', 'Повреждены': 'Damaged', 'исправен': 'ok', 'Исправен': 'Ok', 'исправна': 'ok', 'Исправна': 'Ok', 'исправно': 'ok', 'Исправно': 'Ok', 'исправить': 'fix', 'Исправить': 'Fix', 'исправление': 'fix', 'Исправление': 'Fix', 'исправлен': 'fixed', 'Исправлен': 'Fixed', 'исправлено': 'fixed', 'Исправлено': 'Fixed', 'исправлена': 'fixed', 'Исправлена': 'Fixed', 'требуется': 'required', 'Требуется': 'Required:', 'требуется:': 'required:', 'Требуется:': 'Required:', 'требуется перезагрузка': 'reboot required', 'Требуется перезагрузка': 'Reboot required', 'перезагрузка требуется': 'reboot required', 'Перезагрузка требуется': 'Reboot required', 'завершите': 'finish', 'Завершите': 'Finish', 'подтвердите': 'confirm', 'Подтвердите': 'Confirm', 'нажмите': 'press', 'Нажмите': 'Press:', 'нажмите:': 'press:', 'Нажмите:': 'Press:', 'нажмите чтобы': 'press to', 'Нажмите чтобы': 'Press to', 'выполните': 'run', 'Выполните': 'Run', 'перезапустите': 'restart', 'Перезапустите': 'Restart', 'перезагрузите': 'reboot', 'Перезагрузите': 'Reboot', 'запустите': 'launch', 'Запустите': 'Launch', 'откройте': 'open', 'Откройте': 'Open:', 'откройте:': 'open:', 'Откройте:': 'Open:', 'выберите:': 'select:', 'Выберите:': 'Select:', 'попробуйте': 'try', 'Попробуйте': 'Try', 'снова': 'again', 'Снова': 'Again', 'повторно': 'again', 'Повторно': 'Again', 'выполните повторно': 'retry', 'Выполните повторно': 'Retry', 'подождите': 'wait', 'Подождите': 'Wait', 'загрузка': 'loading', 'Загрузка': 'Loading', 'загрузки': 'loading', 'Загрузки': 'Loading', 'загружено': 'loaded', 'Загружено': 'Loaded', 'загружен': 'loaded', 'Загружен': 'Loaded', 'обнаружен': 'detected', 'Обнаружен': 'Detected', 'обнаружено': 'detected', 'Обнаружено': 'Detected', 'обнаружена': 'detected', 'Обнаружена': 'Detected', 'обнаружены': 'detected', 'Обнаружены': 'Detected', 'присутствует': 'present', 'Присутствует': 'Present', 'поддерживается': 'supported', 'Поддерживается': 'Supported', 'получено': 'received', 'Получено': 'Received', 'получен': 'received', 'Получен': 'Received', 'отправлено': 'sent', 'Отправлено': 'Sent', 'отправлен': 'sent', 'Отправлен': 'Sent', 'прервано': 'aborted', 'Прервано': 'Aborted', 'прерван': 'aborted', 'Прерван': 'Aborted', 'истекло': 'expired', 'Истекло': 'Expired', 'истек': 'expired', 'Истек': 'Expired', 'время': 'time', 'Время': 'Time:', 'время:': 'time:', 'Время:': 'Time:', 'времени': 'time', 'Времени': 'Time', 'таймаут': 'timeout', 'Таймаут': 'Timeout:', 'таймаут:': 'timeout:', 'Таймаут:': 'Timeout:', 'размер': 'size', 'Размер': 'Size:', 'размер:': 'size:', 'Размер:': 'Size:', 'тип': 'type', 'Тип': 'Type:', 'тип:': 'type:', 'Тип:': 'Type:', 'статус': 'status', 'Статус': 'Status:', 'статус:': 'status:', 'Статус:': 'Status:', 'состояние': 'state', 'Состояние': 'State:', 'состояние:': 'state:', 'Состояние:': 'State:', 'состояния': 'state', 'Состояния': 'State', 'данные': 'data', 'Данные': 'Data:', 'данных': 'data', 'Данных': 'Data', 'данные:': 'data:', 'Данные:': 'Data:', 'информация': 'info', 'Информация': 'Info:', 'информация:': 'info:', 'Информация:': 'Info:', 'информации': 'info', 'Информации': 'Info', 'подробнее': 'details', 'Подробнее': 'Details:', 'подробнее:': 'details:', 'Подробнее:': 'Details:', 'детально': 'detailed', 'Детально': 'Detailed', 'причина': 'reason', 'Причина': 'Reason:', 'причина:': 'reason:', 'Причина:': 'Reason:', 'причины': 'reason', 'Причины': 'Reason', 'решение': 'solution', 'Решение': 'Solution:', 'решение:': 'solution:', 'Решение:': 'Solution:', 'решения': 'solution', 'Решения': 'Solution', 'рекомендация': 'recommendation', 'Рекомендация': 'Recommendation', 'рекомендации': 'recommendations', 'Рекомендации': 'Recommendations', 'рекомендуется': 'recommended', 'Рекомендуется': 'Recommended:', 'рекомендуется:': 'recommended:', 'Рекомендуется:': 'Recommended:', 'внимание': 'warning', 'Внимание': 'Warning:', 'внимание:': 'warning:', 'Внимание:': 'Warning:', 'осторожно': 'caution', 'Осторожно': 'Caution', 'опасно': 'dangerous', 'Опасно': 'Dangerous:', 'опасно:': 'dangerous:', 'Опасно:': 'Dangerous:', 'риск': 'risk', 'Риск': 'Risk', 'риска': 'risk', 'Риска': 'Risk', 'необратимо': 'irreversible', 'Необратимо': 'Irreversible', 'необратимых': 'irreversible', 'Необратимых': 'Irreversible', 'назад': 'back', 'Назад': 'Back', 'далее': 'next', 'Далее': 'Next', 'вперед': 'forward', 'Вперед': 'Forward', 'выполнено успешно': 'completed successfully', 'Выполнено успешно': 'Completed successfully', 'операция выполнена': 'operation completed', 'Операция выполнена': 'Operation completed', 'операция завершена': 'operation completed', 'Операция завершена': 'Operation completed', 'изменения сохранены': 'changes saved', 'Изменения сохранены': 'Changes saved', 'изменения': 'changes', 'Изменения': 'Changes:', 'изменения:': 'changes:', 'Изменения:': 'Changes:', 'изменен': 'changed', 'Изменен': 'Changed', 'изменено': 'changed', 'Изменено': 'Changed', 'изменить': 'change', 'Изменить': 'Change', 'сохранить': 'save', 'Сохранить': 'Save', 'сохранен': 'saved', 'Сохранен': 'Saved', 'сохранено': 'saved', 'Сохранено': 'Saved', 'сохранена': 'saved', 'Сохранена': 'Saved', 'сохранены': 'saved', 'Сохранены': 'Saved', 'импорт': 'import', 'Импорт': 'Import', 'экспорт': 'export', 'Экспорт': 'Export', 'записано': 'written', 'Записано': 'Written', 'запись создана': 'entry created', 'Запись создана': 'Entry created', 'запись удалена': 'entry removed', 'Запись удалена': 'Entry removed', 'ключ': 'key', 'Ключ': 'Key:', 'ключи': 'keys', 'Ключи': 'Keys', 'ключ:': 'key:', 'Ключ:': 'Key:', 'параметр': 'parameter', 'Параметр': 'Parameter:', 'параметры': 'parameters', 'Параметры': 'Parameters', 'параметр:': 'parameter:', 'Параметр:': 'Parameter:', 'строка': 'line', 'Строка': 'Line', 'строки': 'lines', 'Строки': 'Lines', 'элемент': 'item', 'Элемент': 'Item:', 'элементы': 'items', 'Элементы': 'Items', 'элемент:': 'item:', 'Элемент:': 'Item:', 'компонент': 'component', 'Компонент': 'Component:', 'компоненты': 'components', 'Компоненты': 'Components', 'компонент:': 'component:', 'Компонент:': 'Component:', 'завершить процесс': 'end process', 'Завершить процесс': 'End process', 'перезапустить службу': 'restart service', 'Перезапустить службу': 'Restart service', 'запустить службу': 'start service', 'Запустить службу': 'Start service', 'остановить службу': 'stop service', 'Остановить службу': 'Stop service', 'вирусом': 'virus', 'Вирусом': 'Virus', 'службой': 'service', 'Службой': 'Service', 'процессом': 'process', 'Процессом': 'Process', 'путем': 'path', 'Путем': 'Path', 'путём': 'path', 'Путём': 'Path', 'администратором': 'administrator', 'Администратором': 'Administrator', 'системой': 'system', 'Системой': 'System', 'реестром': 'registry', 'Реестром': 'Registry', 'диском': 'drive', 'Диском': 'Drive', 'принтером': 'printer', 'Принтером': 'Printer', 'шрифтом': 'font', 'Шрифтом': 'Font', 'брандмауэром': 'firewall', 'Брандмауэром': 'Firewall', 'процессором': 'processor', 'Процессором': 'Processor', 'сетью': 'network', 'Сетью': 'Network', 'сети': 'network', 'Сети': 'Network', 'сервисом': 'service', 'Сервисом': 'Service', 'сервиса': 'service', 'Сервиса': 'Service', 'файле': 'file', 'Файле': 'File', 'системе': 'system', 'Системе': 'System', 'диске': 'drive', 'Диске': 'Drive', 'пользователе': 'user', 'Пользователе': 'User', 'администратора': 'administrator', 'Администратора': 'Administrator', 'полностью': 'fully', 'Полностью': 'Fully', 'частично': 'partially', 'Частично': 'Partially', 'автоматически': 'automatically', 'Автоматически': 'Automatically', 'принудительно': 'forcibly', 'Принудительно': 'Forcibly', 'немедленно': 'immediately', 'Немедленно': 'Immediately', 'временно': 'temporarily', 'Временно': 'Temporarily', 'постоянно': 'permanently', 'Постоянно': 'Permanently', 'локально': 'locally', 'Локально': 'Locally', 'удаленно': 'remotely', 'Удаленно': 'Remotely', 'отменена': 'cancelled', 'Отменена': 'Cancelled', 'отменены': 'cancelled', 'Отменены': 'Cancelled', 'пропущена': 'skipped', 'Пропущена': 'Skipped', 'пропущено': 'skipped', 'Пропущено': 'Skipped', 'пропущены': 'skipped', 'Пропущены': 'Skipped', 'пропущен': 'skipped', 'Пропущен': 'Skipped'},
         "uk": {'не': 'не', 'Не': 'Не', 'будет': 'буде', 'Будет': 'Буде', 'будут': 'будуть', 'Будут': 'Будуть', 'ошибка': 'помилка', 'Ошибка': 'Помилка', 'ошибки': 'помилки', 'Ошибки': 'Помилки', 'ошибок': 'помилок', 'Ошибок': 'Помилок:', 'ошибок:': 'помилок:', 'Ошибок:': 'Помилок:', 'ошибками': 'помилками', 'Ошибками': 'Помилками', 'ошибку': 'помилку', 'Ошибку': 'Помилку', 'файл': 'файл', 'Файл': 'Файл:', 'файла': 'файлу', 'Файла': 'Файлу', 'файлы': 'файли', 'Файлы': 'Файли', 'файлов': 'файлів', 'Файлов': 'Файлів:', 'файлом': 'файлом', 'Файлом': 'Файлом', 'удалось': 'вдалося', 'Удалось': 'Вдалося', 'не удалось': 'не вдалося', 'Не удалось': 'Не вдалося', 'задач': 'завдань', 'Задач': 'Завдань:', 'задача': 'завдання', 'Задача': 'Завдання', 'задачу': 'завдання', 'Задачу': 'Завдання', 'задачи': 'завдання', 'Задачи': 'Завдання', 'задаче': 'завданні', 'Задаче': 'Завданні', 'через': 'через', 'Через': 'Через', 'восстановление': 'відновлення', 'Восстановление': 'Відновлення', 'восстановления': 'відновлення', 'Восстановления': 'Відновлення:', 'восстановлено': 'відновлено', 'Восстановлено': 'Відновлено', 'восстановлен': 'відновлено', 'Восстановлен': 'Відновлено', 'восстановить': 'відновити', 'Восстановить': 'Відновити', 'восстанавливает': 'відновлює', 'Восстанавливает': 'Відновлює', 'восстанавливаеться': 'відновлюється', 'Восстанавливаеться': 'Відновлюється', 'восстановлены': 'відновлені', 'Восстановлены': 'Відновлені', 'восстановления:': 'відновлення:', 'Восстановления:': 'Відновлення:', 'системы': 'системи', 'Системы': 'Системи', 'система': 'система', 'Система': 'Система:', 'систему': 'систему', 'Систему': 'Систему', 'системные': 'системні', 'Системные': 'Системні', 'системный': 'системний', 'Системный': 'Системний', 'системной': 'системної', 'Системной': 'Системної', 'системных': 'системних', 'Системных': 'Системних', 'реестра': 'реєстру', 'Реестра': 'Реєстру', 'реестр': 'реєстр', 'Реестр': 'Реєстр', 'реестре': 'реєстрі', 'Реестре': 'Реєстрі', 'реестру': 'реєстру', 'Реестру': 'Реєстру', 'или': 'або', 'Или': 'Або', 'из': 'з', 'Из': 'З', 'все': 'всі', 'Все': 'Всі', 'всё': 'все', 'Всё': 'Все', 'всех': 'всіх', 'Всех': 'Всіх', 'всю': 'всю', 'Всю': 'Всю', 'запуск': 'запуск', 'Запуск': 'Запуск', 'запуска': 'запуску', 'Запуска': 'Запуску', 'запустить': 'запустити', 'Запустить': 'Запустити:', 'запущен': 'запущено', 'Запущен': 'Запущено:', 'запущено': 'запущено', 'Запущено': 'Запущено', 'запускает': 'запускає', 'Запускает': 'Запускає', 'панель': 'панель', 'Панель': 'Панель:', 'панели': 'панелі', 'Панели': 'Панелі', 'панель:': 'панель:', 'Панель:': 'Панель:', 'выберите': 'виберіть', 'Выберите': 'Виберіть:', 'удалить': 'видалити', 'Удалить': 'Видалити:', 'удаление': 'видалення', 'Удаление': 'Видалення:', 'удалены': 'видалені', 'Удалены': 'Видалені', 'удален': 'видалено', 'Удален': 'Видалено', 'удалить:': 'видалити:', 'Удалить:': 'Видалити:', 'процесс': 'процес', 'Процесс': 'Процес:', 'процесса': 'процесу', 'Процесса': 'Процесу', 'процессы': 'процеси', 'Процессы': 'Процеси', 'процессов': 'процесів', 'Процессов': 'Процесів:', 'процессе': 'процесі', 'Процессе': 'Процесі', 'только': 'лише', 'Только': 'Лише', 'что': 'що', 'Что': 'Що', 'настройки': 'налаштування', 'Настройки': 'Налаштування', 'настройка': 'налаштування', 'Настройка': 'Налаштування', 'настройку': 'налаштування', 'Настройку': 'Налаштування', 'настроек': 'налаштувань', 'Настроек': 'Налаштувань', 'настроить': 'налаштувати', 'Настроить': 'Налаштувати', 'при': 'при', 'При': 'При', 'бэкап': 'бекап', 'Бэкап': 'Бекап', 'бэкапы': 'бекапи', 'Бэкапы': 'Бекапи', 'бэкапа': 'бекапу', 'Бэкапа': 'Бекапу', 'бэкапов': 'бекапів', 'Бэкапов': 'Бекапів', 'путь': 'шлях', 'Путь': 'Шлях:', 'пути': 'шляхи', 'Пути': 'Шляхи', 'путь:': 'шлях:', 'Путь:': 'Шлях:', 'запись': 'запис', 'Запись': 'Запис:', 'записи': 'записи', 'Записи': 'Записи:', 'записей': 'записів', 'Записей': 'Записів', 'запись:': 'запис:', 'Запись:': 'Запис:', 'службу': 'службу', 'Службу': 'Службу:', 'служба': 'служба', 'Служба': 'Служба', 'службы': 'служби', 'Службы': 'Служби', 'служб': 'служб', 'Служб': 'Служб', 'службе': 'службі', 'Службе': 'Службі', 'службы:': 'служби:', 'Службы:': 'Служби:', 'очистка': 'очищення', 'Очистка': 'Очищення:', 'очистки': 'очищення', 'Очистки': 'Очищення', 'очистить': 'очистити', 'Очистить': 'Очистити', 'очищает': 'очищає', 'Очищает': 'Очищає', 'очищен': 'очищено', 'Очищен': 'Очищено', 'очищено': 'очищено', 'Очищено': 'Очищено', 'очистка:': 'очищення:', 'Очистка:': 'Очищення:', 'проверка': 'перевірка', 'Проверка': 'Перевірка:', 'проверки': 'перевірки', 'Проверки': 'Перевірки', 'проверяет': 'перевіряє', 'Проверяет': 'Перевіряє', 'проверить': 'перевірити', 'Проверить': 'Перевірити', 'проверяем': 'перевіряємо', 'Проверяем': 'Перевіряємо', 'проверка:': 'перевірка:', 'Проверка:': 'Перевірка:', 'нет': 'немає', 'Нет': 'Немає:', 'нет:': 'немає:', 'Нет:': 'Немає:', 'режим': 'режим', 'Режим': 'Режим', 'режима': 'режиму', 'Режима': 'Режиму', 'диспетчер': 'диспетчер', 'Диспетчер': 'Диспетчер:', 'диспетчер:': 'диспетчер:', 'Диспетчер:': 'Диспетчер:', 'если': 'якщо', 'Если': 'Якщо', 'доступ': 'доступ', 'Доступ': 'Доступ:', 'доступа': 'доступу', 'Доступа': 'Доступу:', 'доступ:': 'доступ:', 'Доступ:': 'Доступ:', 'доступно': 'доступно', 'Доступно': 'Доступно', 'доступна': 'доступна', 'Доступна': 'Доступна', 'доступен': 'доступний', 'Доступен': 'Доступний', 'отключен': 'вимкнено', 'Отключен': 'Вимкнено', 'отключено': 'вимкнено', 'Отключено': 'Вимкнено', 'отключены': 'вимкнені', 'Отключены': 'Вимкнені', 'отключить': 'вимкнути', 'Отключить': 'Вимкнути:', 'отключение': 'вимкнення', 'Отключение': 'Вимкнення', 'отключается': 'вимикається', 'Отключается': 'Вимикається', 'включен': 'увімкнено', 'Включен': 'Увімкнено', 'включено': 'увімкнено', 'Включено': 'Увімкнено', 'включены': 'увімкнені', 'Включены': 'Увімкнені', 'включить': 'увімкнути', 'Включить': 'Увімкнути:', 'включение': 'ввімкнення', 'Включение': 'Ввімкнення:', 'включает': 'вмикає', 'Включает': 'Вмикає', 'включить:': 'увімкнути:', 'Включить:': 'Увімкнути:', 'права': 'права', 'Права': 'Права:', 'прав': 'прав', 'Прав': 'Прав', 'права:': 'права:', 'Права:': 'Права:', 'свойства': 'властивості', 'Свойства': 'Властивості:', 'свойств': 'властивостей', 'Свойств': 'Властивостей', 'свойства:': 'властивості:', 'Свойства:': 'Властивості:', 'меню': 'меню', 'Меню': 'Меню:', 'меню:': 'меню:', 'Меню:': 'Меню:', 'управления': 'управління', 'Управления': 'Управління', 'управление': 'управління', 'Управление': 'Управління', 'папки': 'папки', 'Папки': 'Папки', 'папка': 'папка', 'Папка': 'Папка:', 'папку': 'папку', 'Папку': 'Папку:', 'папок': 'папок', 'Папок': 'Папок', 'папке': 'папці', 'Папке': 'Папці', 'создать': 'створити', 'Создать': 'Створити', 'создание': 'створення', 'Создание': 'Створення:', 'создан': 'створено', 'Создан': 'Створено', 'создано': 'створено', 'Создано': 'Створено', 'имя': 'ім\'я', 'Имя': 'Ім\'я:', 'имя:': 'ім\'я:', 'Имя:': 'Ім\'я:', 'разблокировка': 'розблокування', 'Разблокировка': 'Розблокування:', 'разблокирует': 'розблоковує', 'Разблокирует': 'Розблоковує', 'разблокирован': 'розблоковано', 'Разблокирован': 'Розблоковано', 'разблокированы': 'розблоковані', 'Разблокированы': 'Розблоковані', 'разблокировка:': 'розблокування:', 'Разблокировка:': 'Розблокування:', 'блокировки': 'блокування', 'Блокировки': 'Блокування', 'блокировка': 'блокування', 'Блокировка': 'Блокування', 'блокировку': 'блокування', 'Блокировку': 'Блокування', 'блокировок': 'блокувань', 'Блокировок': 'Блокувань', 'блокировала': 'блокувала', 'Блокировала': 'Блокувала', 'брандмауэр': 'брандмауер', 'Брандмауэр': 'Брандмауер:', 'брандмауэра': 'брандмауера', 'Брандмауэра': 'Брандмауера', 'брандмауэр:': 'брандмауер:', 'Брандмауэр:': 'Брандмауер:', 'вирус': 'вірус', 'Вирус': 'Вірус:', 'вируса': 'віруса', 'Вируса': 'Віруса', 'вирусы': 'віруси', 'Вирусы': 'Віруси', 'вирусов': 'вірусів', 'Вирусов': 'Вірусів', 'вирус:': 'вірус:', 'Вирус:': 'Вірус:', 'подтверждение': 'підтвердження', 'Подтверждение': 'Підтвердження', 'подтверждения': 'підтвердження', 'Подтверждения': 'Підтвердження', 'подтвердить': 'підтвердити', 'Подтвердить': 'Підтвердити', 'откат': 'відкат', 'Откат': 'Відкат:', 'откатить': 'відкотити', 'Откатить': 'Відкотити', 'откат:': 'відкат:', 'Откат:': 'Відкат:', 'список': 'список', 'Список': 'Список:', 'списка': 'списку', 'Списка': 'Списку', 'список:': 'список:', 'Список:': 'Список:', 'политики': 'політики', 'Политики': 'Політики', 'политика': 'політика', 'Политика': 'Політика', 'политик': 'політик', 'Политик': 'Політик', 'добавить': 'додати', 'Добавить': 'Додати', 'добавлен': 'додано', 'Добавлен': 'Додано', 'добавлено': 'додано', 'Добавлено': 'Додано', 'продолжить': 'продовжити', 'Продолжить': 'Продовжити', 'включено:': 'увімкнено:', 'Включено:': 'Увімкнено:', 'включение:': 'ввімкнення:', 'Включение:': 'Ввімкнення:', 'клавиши': 'клавіші', 'Клавиши': 'Клавіші', 'клавиша': 'клавіша', 'Клавиша': 'Клавіша', 'клавиатуре': 'клавіатурі', 'Клавиатуре': 'Клавіатурі', 'клавиатура': 'клавіатура', 'Клавиатура': 'Клавіатура', 'клавиатуры': 'клавіатури', 'Клавиатуры': 'Клавіатури', 'операция': 'операція', 'Операция': 'Операція', 'операции': 'операції', 'Операции': 'Операції', 'операцию': 'операцію', 'Операцию': 'Операцію', 'ограничений': 'обмежень', 'Ограничений': 'Обмежень', 'ограничение': 'обмеження', 'Ограничение': 'Обмеження', 'ограничения': 'обмеження', 'Ограничения': 'Обмеження', 'значение': 'значення', 'Значение': 'Значення:', 'значения': 'значення', 'Значения': 'Значення', 'значение:': 'значення:', 'Значение:': 'Значення:', 'пользователь': 'користувач', 'Пользователь': 'Користувач', 'пользователя': 'користувача', 'Пользователя': 'Користувача', 'пользователи': 'користувачі', 'Пользователи': 'Користувачі', 'пользователем': 'користувачем', 'Пользователем': 'Користувачем', 'пользователю': 'користувачу', 'Пользователю': 'Користувачу', 'подозрительные': 'підозрілі', 'Подозрительные': 'Підозрілі', 'подозрительных': 'підозрілих', 'Подозрительных': 'Підозрілих', 'подозрительный': 'підозрілий', 'Подозрительный': 'Підозрілий', 'найдено': 'знайдено', 'Найдено': 'Знайдено', 'найдено:': 'знайдено:', 'Найдено:': 'Знайдено:', 'найден': 'знайдено', 'Найден': 'Знайдено', 'блок': 'блок', 'Блок': 'Блок:', 'блок:': 'блок:', 'Блок:': 'Блок:', 'автозагрузки': 'автозавантаження', 'Автозагрузки': 'Автозавантаження', 'автозагрузка': 'автозавантаження', 'Автозагрузка': 'Автозавантаження', 'автозагрузку': 'автозавантаження', 'Автозагрузку': 'Автозавантаження', 'автозапуск': 'автозапуск', 'Автозапуск': 'Автозапуск', 'сброс': 'скидання', 'Сброс': 'Скидання', 'сброса': 'скидання', 'Сброса': 'Скидання', 'сбросить': 'скинути', 'Сбросить': 'Скинути', 'сброшен': 'скинуто', 'Сброшен': 'Скинуто', 'сброшено': 'скинуто', 'Сброшено': 'Скинуто', 'проводник': 'проводник', 'Проводник': 'Проводник:', 'проводник:': 'проводник:', 'Проводник:': 'Проводник:', 'сканирование': 'сканування', 'Сканирование': 'Сканування:', 'сканировать': 'сканувати', 'Сканировать': 'Сканувати', 'сканирование:': 'сканування:', 'Сканирование:': 'Сканування:', 'полный': 'повний', 'Полный': 'Повний', 'полная': 'повна', 'Полная': 'Повна', 'полное': 'повне', 'Полное': 'Повне', 'после': 'після', 'После': 'Після', 'перед': 'перед', 'Перед': 'Перед', 'выполняется': 'виконується', 'Выполняется': 'Виконується:', 'выполнено': 'виконано', 'Выполнено': 'Виконано', 'выполнено:': 'виконано:', 'Выполнено:': 'Виконано:', 'выполнить': 'виконати', 'Выполнить': 'Виконати', 'выполнения': 'виконання', 'Выполнения': 'Виконання', 'готов': 'готовий', 'Готов': 'Готовий', 'готова': 'готова', 'Готова': 'Готова', 'готово': 'готово', 'Готово': 'Готово', 'готовы': 'готові', 'Готовы': 'Готові', 'выполняется:': 'виконується:', 'Выполняется:': 'Виконується:', 'проблема': 'проблема', 'Проблема': 'Проблема', 'проблемы': 'проблеми', 'Проблемы': 'Проблеми', 'проблем:': 'проблем:', 'Проблем': 'Проблем:', 'Проблем:': 'Проблем:', 'предупреждение': 'попередження', 'Предупреждение': 'Попередження:', 'предупреждения': 'попередження', 'Предупреждения': 'Попередження', 'предупреждение:': 'попередження:', 'Предупреждение:': 'Попередження:', 'успешно': 'успішно', 'Успешно': 'Успішно', 'успешен': 'успішний', 'Успешен': 'Успішний', 'успешно:': 'успішно:', 'Успешно:': 'Успішно:', 'неизвестно': 'невідомо', 'Неизвестно': 'Невідомо', 'неизвестный': 'невідомий', 'Неизвестный': 'Невідомий', 'отключить:': 'вимкнути:', 'Отключить:': 'Вимкнути:', 'перезагрузка': 'перезавантаження', 'Перезагрузка': 'Перезавантаження', 'перезагрузить': 'перезавантажити', 'Перезагрузить': 'Перезавантажити', 'перезагрузки': 'перезавантаження', 'Перезагрузки': 'Перезавантаження', 'перезапустить': 'перезапустити', 'Перезапустить': 'Перезапустити', 'перезапуск': 'перезапуск', 'Перезапуск': 'Перезапуск', 'перезапущен': 'перезапущено', 'Перезапущен': 'Перезапущено', 'завершить': 'завершити', 'Завершить': 'Завершити', 'завершение': 'завершення', 'Завершение': 'Завершення', 'завершен': 'завершено', 'Завершен': 'Завершено', 'завершено': 'завершено', 'Завершено': 'Завершено', 'выбор': 'вибір', 'Выбор': 'Вибір', 'выбора': 'вибору', 'Выбора': 'Вибору', 'выбрано': 'вибрано', 'Выбрано': 'Вибрано', 'выбран': 'вибрано', 'Выбран': 'Вибрано', 'выбранный': 'вибраний', 'Выбранный': 'Вибраний', 'выбраны': 'вибрані', 'Выбраны': 'Вибрані', 'отмена': 'скасувати', 'Отмена': 'Скасувати', 'отменить': 'скасувати', 'Отменить': 'Скасувати', 'отменено': 'скасовано', 'Отменено': 'Скасовано', 'закрыть': 'закрити', 'Закрыть': 'Закрити', 'закрыт': 'закрито', 'Закрыт': 'Закрито', 'запустить:': 'запустити:', 'Запустить:': 'Запустити:', 'остановить': 'зупинити', 'Остановить': 'Зупинити', 'остановлен': 'зупинено', 'Остановлен': 'Зупинено', 'остановлено': 'зупинено', 'Остановлено': 'Зупинено', 'запущен:': 'запущено:', 'Запущен:': 'Запущено:', 'файлов:': 'файлів:', 'Файлов:': 'Файлів:', 'папку:': 'папку:', 'Папку:': 'Папку:', 'систем:': 'систем:', 'Систем': 'Систем:', 'Систем:': 'Систем:', 'реестра:': 'реєстру:', 'Реестра:': 'Реєстру:', 'службу:': 'службу:', 'Службу:': 'Службу:', 'доступа:': 'доступу:', 'Доступа:': 'Доступу:', 'дисков': 'дисків', 'Дисков': 'Дисків', 'диск': 'диск', 'Диск': 'Диск', 'диски': 'диски', 'Диски': 'Диски', 'диска': 'диска', 'Диска': 'Диска', 'принтер': 'принтер', 'Принтер': 'Принтер', 'принтера': 'принтера', 'Принтера': 'Принтера', 'шрифт': 'шрифт', 'Шрифт': 'Шрифт', 'шрифты': 'шрифти', 'Шрифты': 'Шрифти', 'шрифтов': 'шрифтів', 'Шрифтов': 'Шрифтів', 'тема': 'тема', 'Тема': 'Тема', 'темы': 'теми', 'Темы': 'Теми', 'язык': 'мова', 'Язык': 'Мова', 'языка': 'мови', 'Языка': 'Мови', 'драйвер': 'драйвер', 'Драйвер': 'Драйвер', 'драйвера': 'драйвери', 'Драйвера': 'Драйвери', 'драйверов': 'драйверів', 'Драйверов': 'Драйверів', 'обновление': 'оновлення', 'Обновление': 'Оновлення', 'обновления': 'оновлення', 'Обновления': 'Оновлення', 'обновить': 'оновити', 'Обновить': 'Оновити', 'обновлено': 'оновлено', 'Обновлено': 'Оновлено', 'центр': 'центр', 'Центр': 'Центр', 'центра': 'центра', 'Центра': 'Центра', 'безопасность': 'безпека', 'Безопасность': 'Безпека', 'безопасности': 'безпеки', 'Безопасности': 'Безпеки', 'безопасный': 'безпечний', 'Безопасный': 'Безпечний', 'безопасно': 'безпечно', 'Безопасно': 'Безпечно', 'защита': 'захист', 'Защита': 'Захист:', 'защиты': 'захисту', 'Защиты': 'Захисту', 'защита:': 'захист:', 'Защита:': 'Захист:', 'защитит': 'захистить', 'Защитит': 'Захистить', 'защищено': 'захищено', 'Защищено': 'Захищено', 'защищен': 'захищено', 'Защищен': 'Захищено', 'защищает': 'захищає', 'Защищает': 'Захищає', 'антивирус': 'антивірус', 'Антивирус': 'Антивірус', 'антивируса': 'антивіруса', 'Антивируса': 'Антивіруса', 'вредонос': 'шкідливий', 'Вредонос': 'Шкідливий', 'вредоносный': 'шкідливий', 'Вредоносный': 'Шкідливий', 'вредоносных': 'шкідливих', 'Вредоносных': 'Шкідливих', 'угроза': 'загроза', 'Угроза': 'Загроза', 'угрозы': 'загрози', 'Угрозы': 'Загрози', 'угроз:': 'загроз:', 'Угроз': 'Загроз:', 'Угроз:': 'Загроз:', 'восстановление системы': 'відновлення системи', 'Восстановление системы': 'Відновлення системи', 'восстановлено:': 'відновлено:', 'Восстановлено:': 'Відновлено:', 'поддержка': 'підтримка', 'Поддержка': 'Підтримка', 'поддержки': 'підтримки', 'Поддержки': 'Підтримки', 'поддерживает': 'підтримує', 'Поддерживает': 'Підтримує', 'инструмент': 'інструмент', 'Инструмент': 'Інструмент:', 'инструменты': 'інструменти', 'Инструменты': 'Інструменти', 'инструментов': 'інструментів', 'Инструментов': 'Інструментів', 'инструмент:': 'інструмент:', 'Инструмент:': 'Інструмент:', 'очищены': 'очищені', 'Очищены': 'Очищені', 'удаление:': 'видалення:', 'Удаление:': 'Видалення:', 'имена': 'імена', 'Имена': 'Імена', 'имен': 'імен', 'Имен': 'Імен', 'записи:': 'записи:', 'Записи:': 'Записи:', 'события': 'події', 'События': 'Події', 'событие': 'подія', 'Событие': 'Подія', 'событий': 'подій', 'Событий': 'Подій', 'журнал': 'журнал', 'Журнал': 'Журнал', 'журнала': 'журналу', 'Журнала': 'Журналу', 'задач:': 'завдань:', 'Задач:': 'Завдань:', 'процесс:': 'процес:', 'Процесс:': 'Процес:', 'процессов:': 'процесів:', 'Процессов:': 'Процесів:', 'отчет': 'звіт', 'Отчет': 'Звіт', 'отчёт': 'звіт', 'Отчёт': 'Звіт', 'отчета': 'звіту', 'Отчета': 'Звіту', 'точка': 'точка', 'Точка': 'Точка', 'точки': 'точки', 'Точки': 'Точки', 'точку': 'точку', 'Точку': 'Точку', 'конец': 'кінець', 'Конец': 'Кінець', 'завершения': 'завершення', 'Завершения': 'Завершення', 'восстановлено!': 'відновлено!', 'Восстановлено!': 'Відновлено!', 'успешно!': 'успішно!', 'Успешно!': 'Успішно!', 'выполнено!': 'виконано!', 'Выполнено!': 'Виконано!', 'готово!': 'готово!', 'Готово!': 'Готово!', 'отключено!': 'вимкнено!', 'Отключено!': 'Вимкнено!', 'включено!': 'увімкнено!', 'Включено!': 'Увімкнено!', 'удалено': 'видалено', 'Удалено': 'Видалено', 'скопирован': 'скопійовано', 'Скопирован': 'Скопійовано', 'скопировано': 'скопійовано', 'Скопировано': 'Скопійовано', 'скопировать': 'копіювати', 'Скопировать': 'Копіювати', 'копировать': 'копіювати', 'Копировать': 'Копіювати', 'создание:': 'створення:', 'Создание:': 'Створення:', 'файл:': 'файл:', 'Файл:': 'Файл:', 'папка:': 'папка:', 'Папка:': 'Папка:', 'система:': 'система:', 'Система:': 'Система:', 'остановлена': 'зупинена', 'Остановлена': 'Зупинена', 'остановлены': 'зупинені', 'Остановлены': 'Зупинені', 'завершена': 'завершена', 'Завершена': 'Завершена', 'завершены': 'завершені', 'Завершены': 'Завершені', 'выполнена': 'виконана', 'Выполнена': 'Виконана', 'выполнены': 'виконані', 'Выполнены': 'Виконані', 'удалена': 'видалена', 'Удалена': 'Видалена', 'создана': 'створена', 'Создана': 'Створена', 'созданы': 'створені', 'Созданы': 'Створені', 'включена': 'увімкнена', 'Включена': 'Увімкнена', 'отключена': 'вимкнена', 'Отключена': 'Вимкнена', 'найдена': 'знайдена', 'Найдена': 'Знайдена', 'найдены': 'знайдені', 'Найдены': 'Знайдені', 'установлена': 'встановлена', 'Установлена': 'Встановлена', 'установлено': 'встановлено', 'Установлено': 'Встановлено', 'установлены': 'встановлені', 'Установлены': 'Встановлені', 'установлен': 'встановлено', 'Установлен': 'Встановлено', 'сброшена': 'скинута', 'Сброшена': 'Скинута', 'сброшены': 'скинуті', 'Сброшены': 'Скинуті', 'очищена': 'очищена', 'Очищена': 'Очищена', 'заблокирована': 'заблокована', 'Заблокирована': 'Заблокована', 'заблокировано': 'заблоковано', 'Заблокировано': 'Заблоковано', 'заблокированы': 'заблоковані', 'Заблокированы': 'Заблоковані', 'заблокирован': 'заблоковано', 'Заблокирован': 'Заблоковано', 'разблокирована': 'розблокована', 'Разблокирована': 'Розблокована', 'разблокировано': 'розблоковано', 'Разблокировано': 'Розблоковано', 'запущена': 'запущена', 'Запущена': 'Запущена', 'запущены': 'запущені', 'Запущены': 'Запущені', 'перезапущена': 'перезапущена', 'Перезапущена': 'Перезапущена', 'перезапущено': 'перезапущено', 'Перезапущено': 'Перезапущено', 'обновлена': 'оновлена', 'Обновлена': 'Оновлена', 'обновлены': 'оновлені', 'Обновлены': 'Оновлені', 'восстановлена': 'відновлена', 'Восстановлена': 'Відновлена', 'скопирована': 'скопійована', 'Скопирована': 'Скопійована', 'скопированы': 'скопійовані', 'Скопированы': 'Скопійовані', 'разрешена': 'дозволена', 'Разрешена': 'Дозволена', 'разрешено': 'дозволено', 'Разрешено': 'Дозволено', 'разрешены': 'дозволені', 'Разрешены': 'Дозволені', 'запрещена': 'заборонена', 'Запрещена': 'Заборонена', 'запрещено': 'заборонено', 'Запрещено': 'Заборонено', 'запрещены': 'заборонені', 'Запрещены': 'Заборонені', 'активна': 'активна', 'Активна': 'Активна', 'активно': 'активно', 'Активно': 'Активно', 'активны': 'активні', 'Активны': 'Активні', 'активен': 'активний', 'Активен': 'Активний', 'неактивна': 'неактивна', 'Неактивна': 'Неактивна', 'неактивно': 'неактивно', 'Неактивно': 'Неактивно', 'неактивен': 'неактивний', 'Неактивен': 'Неактивний', 'доступны': 'доступні', 'Доступны': 'Доступні', 'отсутствует': 'відсутній', 'Отсутствует': 'Відсутній:', 'отсутствует:': 'відсутній:', 'Отсутствует:': 'Відсутній:', 'отсутствуют': 'відсутні', 'Отсутствуют': 'Відсутні', 'работает': 'працює', 'Работает': 'Працює:', 'работают': 'працюють', 'Работают': 'Працюють', 'работает:': 'працює:', 'Работает:': 'Працює:', 'неработает': 'не працює', 'Неработает': 'Не працює', 'поврежден': 'пошкоджено', 'Поврежден': 'Пошкоджено', 'повреждена': 'пошкоджена', 'Повреждена': 'Пошкоджена', 'повреждено': 'пошкоджено', 'Повреждено': 'Пошкоджено', 'повреждены': 'пошкоджені', 'Повреждены': 'Пошкоджені', 'исправен': 'справний', 'Исправен': 'Справний', 'исправна': 'справна', 'Исправна': 'Справна', 'исправно': 'справно', 'Исправно': 'Справно', 'исправить': 'виправити', 'Исправить': 'Виправити', 'исправление': 'виправлення', 'Исправление': 'Виправлення', 'исправлен': 'виправлено', 'Исправлен': 'Виправлено', 'исправлено': 'виправлено', 'Исправлено': 'Виправлено', 'исправлена': 'виправлена', 'Исправлена': 'Виправлена', 'требуется': 'потрібно', 'Требуется': 'Потрібно:', 'требуется:': 'потрібно:', 'Требуется:': 'Потрібно:', 'требуется перезагрузка': 'потрібно перезавантаження', 'Требуется перезагрузка': 'Потрібно перезавантаження', 'перезагрузка требуется': 'перезавантаження потрібно', 'Перезагрузка требуется': 'Перезавантаження потрібно', 'завершите': 'завершіть', 'Завершите': 'Завершіть', 'подтвердите': 'підтвердіть', 'Подтвердите': 'Підтвердіть', 'нажмите': 'натисніть', 'Нажмите': 'Натисніть:', 'нажмите:': 'натисніть:', 'Нажмите:': 'Натисніть:', 'нажмите чтобы': 'натисніть щоб', 'Нажмите чтобы': 'Натисніть щоб', 'выполните': 'виконайте', 'Выполните': 'Виконайте', 'перезапустите': 'перезапустіть', 'Перезапустите': 'Перезапустіть', 'перезагрузите': 'перезавантажте', 'Перезагрузите': 'Перезавантажте', 'запустите': 'запустіть', 'Запустите': 'Запустіть', 'откройте': 'відкрйте', 'Откройте': 'Відкрйте:', 'откройте:': 'відкрйте:', 'Откройте:': 'Відкрйте:', 'выберите:': 'виберіть:', 'Выберите:': 'Виберіть:', 'попробуйте': 'спробуйте', 'Попробуйте': 'Спробуйте', 'снова': 'знову', 'Снова': 'Знову', 'повторно': 'повторно', 'Повторно': 'Повторно', 'выполните повторно': 'виконайте повторно', 'Выполните повторно': 'Виконайте повторно', 'подождите': 'зачекайте', 'Подождите': 'Зачекайте', 'загрузка': 'завантаження', 'Загрузка': 'Завантаження', 'загрузки': 'завантаження', 'Загрузки': 'Завантаження', 'загружено': 'завантажено', 'Загружено': 'Завантажено', 'загружен': 'завантажено', 'Загружен': 'Завантажено', 'обнаружен': 'виявлено', 'Обнаружен': 'Виявлено', 'обнаружено': 'виявлено', 'Обнаружено': 'Виявлено', 'обнаружена': 'виявлена', 'Обнаружена': 'Виявлена', 'обнаружены': 'виявлені', 'Обнаружены': 'Виявлені', 'присутствует': 'наявний', 'Присутствует': 'Наявний', 'поддерживается': 'підтримується', 'Поддерживается': 'Підтримується', 'получено': 'отримано', 'Получено': 'Отримано', 'получен': 'отримано', 'Получен': 'Отримано', 'отправлено': 'надіслано', 'Отправлено': 'Надіслано', 'отправлен': 'надіслано', 'Отправлен': 'Надіслано', 'прервано': 'перервано', 'Прервано': 'Перервано', 'прерван': 'перервано', 'Прерван': 'Перервано', 'истекло': 'витекло', 'Истекло': 'Витекло', 'истек': 'витік', 'Истек': 'Витік', 'время': 'час', 'Время': 'Час:', 'время:': 'час:', 'Время:': 'Час:', 'времени': 'часу', 'Времени': 'Часу', 'таймаут': 'тайм-аут', 'Таймаут': 'Тайм-аут:', 'таймаут:': 'тайм-аут:', 'Таймаут:': 'Тайм-аут:', 'размер': 'розмір', 'Размер': 'Розмір:', 'размер:': 'розмір:', 'Размер:': 'Розмір:', 'тип': 'тип', 'Тип': 'Тип:', 'тип:': 'тип:', 'Тип:': 'Тип:', 'статус': 'статус', 'Статус': 'Статус:', 'статус:': 'статус:', 'Статус:': 'Статус:', 'состояние': 'стан', 'Состояние': 'Стан:', 'состояние:': 'стан:', 'Состояние:': 'Стан:', 'состояния': 'стану', 'Состояния': 'Стану', 'данные': 'дані', 'Данные': 'Дані:', 'данных': 'даних', 'Данных': 'Даних', 'данные:': 'дані:', 'Данные:': 'Дані:', 'информация': 'інформація', 'Информация': 'Інформація:', 'информация:': 'інформація:', 'Информация:': 'Інформація:', 'информации': 'інформації', 'Информации': 'Інформації', 'подробнее': 'докладніше', 'Подробнее': 'Докладніше:', 'подробнее:': 'докладніше:', 'Подробнее:': 'Докладніше:', 'детально': 'детально', 'Детально': 'Детально', 'причина': 'причина', 'Причина': 'Причина:', 'причина:': 'причина:', 'Причина:': 'Причина:', 'причины': 'причини', 'Причины': 'Причини', 'решение': 'рішення', 'Решение': 'Рішення:', 'решение:': 'рішення:', 'Решение:': 'Рішення:', 'решения': 'рішення', 'Решения': 'Рішення', 'рекомендация': 'рекомендація', 'Рекомендация': 'Рекомендація', 'рекомендации': 'рекомендації', 'Рекомендации': 'Рекомендації', 'рекомендуется': 'рекомендується', 'Рекомендуется': 'Рекомендується:', 'рекомендуется:': 'рекомендується:', 'Рекомендуется:': 'Рекомендується:', 'внимание': 'увага', 'Внимание': 'Увага:', 'внимание:': 'увага:', 'Внимание:': 'Увага:', 'осторожно': 'обережно', 'Осторожно': 'Обережно', 'опасно': 'небезпечно', 'Опасно': 'Небезпечно:', 'опасно:': 'небезпечно:', 'Опасно:': 'Небезпечно:', 'риск': 'ризик', 'Риск': 'Ризик', 'риска': 'ризику', 'Риска': 'Ризику', 'необратимо': 'незворотно', 'Необратимо': 'Незворотно', 'необратимых': 'незворотних', 'Необратимых': 'Незворотних', 'назад': 'назад', 'Назад': 'Назад', 'далее': 'далі', 'Далее': 'Далі', 'вперед': 'вперед', 'Вперед': 'Вперед', 'выполнено успешно': 'виконано успішно', 'Выполнено успешно': 'Виконано успішно', 'операция выполнена': 'операцію виконано', 'Операция выполнена': 'Операцію виконано', 'операция завершена': 'операцію завершено', 'Операция завершена': 'Операцію завершено', 'изменения сохранены': 'зміни збережено', 'Изменения сохранены': 'Зміни збережено', 'изменения': 'зміни', 'Изменения': 'Зміни:', 'изменения:': 'зміни:', 'Изменения:': 'Зміни:', 'изменен': 'змінено', 'Изменен': 'Змінено', 'изменено': 'змінено', 'Изменено': 'Змінено', 'изменить': 'змінити', 'Изменить': 'Змінити', 'сохранить': 'зберегти', 'Сохранить': 'Зберегти', 'сохранен': 'збережено', 'Сохранен': 'Збережено', 'сохранено': 'збережено', 'Сохранено': 'Збережено', 'сохранена': 'збережена', 'Сохранена': 'Збережена', 'сохранены': 'збережені', 'Сохранены': 'Збережені', 'импорт': 'імпорт', 'Импорт': 'Імпорт', 'экспорт': 'експорт', 'Экспорт': 'Експорт', 'записано': 'записано', 'Записано': 'Записано', 'запись создана': 'запис створено', 'Запись создана': 'Запис створено', 'запись удалена': 'запис видалено', 'Запись удалена': 'Запис видалено', 'ключ': 'ключ', 'Ключ': 'Ключ:', 'ключи': 'ключі', 'Ключи': 'Ключі', 'ключ:': 'ключ:', 'Ключ:': 'Ключ:', 'параметр': 'параметр', 'Параметр': 'Параметр:', 'параметры': 'параметри', 'Параметры': 'Параметри', 'параметр:': 'параметр:', 'Параметр:': 'Параметр:', 'строка': 'рядок', 'Строка': 'Рядок', 'строки': 'рядки', 'Строки': 'Рядки', 'элемент': 'елемнт', 'Элемент': 'Елемнт:', 'элементы': 'елемнти', 'Элементы': 'Елемнти', 'элемент:': 'елемнт:', 'Элемент:': 'Елемнт:', 'компонент': 'компонент', 'Компонент': 'Компонент:', 'компоненты': 'компоненти', 'Компоненты': 'Компоненти', 'компонент:': 'компонент:', 'Компонент:': 'Компонент:', 'завершить процесс': 'завершити процес', 'Завершить процесс': 'Завершити процес', 'перезапустить службу': 'перезапустити службу', 'Перезапустить службу': 'Перезапустити службу', 'запустить службу': 'запустити службу', 'Запустить службу': 'Запустити службу', 'остановить службу': 'зупинити службу', 'Остановить службу': 'Зупинити службу', 'вирусом': 'вірусом', 'Вирусом': 'Вірусом', 'службой': 'службою', 'Службой': 'Службою', 'процессом': 'процесом', 'Процессом': 'Процесом', 'путем': 'шляхом', 'Путем': 'Шляхом', 'путём': 'шляхом', 'Путём': 'Шляхом', 'администратором': 'адміністратором', 'Администратором': 'Адміністратором', 'системой': 'системою', 'Системой': 'Системою', 'реестром': 'реєстром', 'Реестром': 'Реєстром', 'диском': 'диском', 'Диском': 'Диском', 'принтером': 'принтером', 'Принтером': 'Принтером', 'шрифтом': 'шрифтом', 'Шрифтом': 'Шрифтом', 'брандмауэром': 'брандмауером', 'Брандмауэром': 'Брандмауером', 'процессором': 'процесором', 'Процессором': 'Процесором', 'сетью': 'мережею', 'Сетью': 'Мережею', 'сети': 'мережі', 'Сети': 'Мережі', 'сервисом': 'сервісом', 'Сервисом': 'Сервісом', 'сервиса': 'сервісу', 'Сервиса': 'Сервісу', 'файле': 'файлі', 'Файле': 'Файлі', 'системе': 'системі', 'Системе': 'Системі', 'диске': 'диску', 'Диске': 'Диску', 'пользователе': 'користувачі', 'Пользователе': 'Користувачі', 'администратора': 'адміністратора', 'Администратора': 'Адміністратора', 'полностью': 'повністю', 'Полностью': 'Повністю', 'частично': 'частково', 'Частично': 'Частково', 'автоматически': 'автоматично', 'Автоматически': 'Автоматично', 'принудительно': 'примусово', 'Принудительно': 'Примусово', 'немедленно': 'негайно', 'Немедленно': 'Негайно', 'временно': 'тимчасово', 'Временно': 'Тимчасово', 'постоянно': 'постійно', 'Постоянно': 'Постійно', 'локально': 'локально', 'Локально': 'Локально', 'удаленно': 'віддалено', 'Удаленно': 'Віддалено', 'отменена': 'скасовована', 'Отменена': 'Скасовована', 'отменены': 'скасовані', 'Отменены': 'Скасовані', 'пропущена': 'пропущена', 'Пропущена': 'Пропущена', 'пропущено': 'пропущено', 'Пропущено': 'Пропущено', 'пропущены': 'пропущені', 'Пропущены': 'Пропущені', 'пропущен': 'пропущено', 'Пропущен': 'Пропущено'},
@@ -1812,8 +1763,6 @@ class LanguageManager:
             if lang_idx < len(translated):
                 return translated[lang_idx]
             return translated[0 if self.language == "en" else 1]
-        # Only touch strings containing Cyrillic; paths, values and user input
-        # therefore remain untouched.
         if not re.search(r"[А-Яа-яЁёІіЇїЄєҐґ]", source):
             return source
         pair = self._get_fallback_pattern()
@@ -1823,8 +1772,7 @@ class LanguageManager:
         return source
 
 
-# Repair-card text is kept separately to make the large repair catalogue easy
-# to maintain.  Every title and description shown on those cards is localized.
+# тексты карточек ремонта лежат отдельно
 REPAIR_CATALOG_TRANSLATIONS = {
         'Сброс пароля': ('Password reset', 'Скидання пароля', 'Passwort zurücksetzen', 'Resetowanie hasła', 'Réinitialisation du mot de passe'),
         'Починка запуска программ (.exe)': ('Fix program launching (.exe)', 'Виправлення запуску програм (.exe)', 'Reparieren von Programmstarts (.exe)', 'Uruchamia się program naprawczy (.exe)', 'Lancement du programme de réparation (.exe)'),
@@ -1976,7 +1924,6 @@ def print_hacker_message(message):
 
 
 def _register_backup(path, diagnostics=None):
-    """Record backup metadata outside the backup directory for restore validation."""
     try:
         os.makedirs(BACKUP_SECURITY_DIR, exist_ok=True)
         if not _harden_backup_security_dir(diagnostics) or _is_reparse_point(BACKUP_SECURITY_DIR):
@@ -2009,7 +1956,6 @@ def _register_backup(path, diagnostics=None):
 
 
 def _harden_acl_path(path, diagnostics=None, set_owner=True):
-    """Apply the manifest owner and DACL to one existing path."""
     if _is_reparse_point(path):
         return False
     is_directory = os.path.isdir(path)
@@ -2052,12 +1998,10 @@ def _harden_acl_path(path, diagnostics=None, set_owner=True):
 
 
 def _harden_backup_security_dir(diagnostics=None):
-    """Reset the manifest directory to a known owner and DACL."""
     return _harden_acl_path(BACKUP_SECURITY_DIR, diagnostics)
 
 
 def _verified_backup_path(filename, suffix):
-    """Return a backup path only when its recorded metadata still matches."""
     valid_name = (
         rf"registry_backup_\d{{8}}_\d{{6}}(?:_\d{{2}})?{re.escape(suffix)}"
         if suffix == ".reg"
@@ -2088,7 +2032,6 @@ def _verified_backup_path(filename, suffix):
 
 
 def iter_tree_paths(root_path):
-    """Yield all directory and file paths under root_path using scandir for speed."""
     root_path = os.path.normpath(root_path)
     if not os.path.exists(root_path):
         return
@@ -2112,7 +2055,6 @@ def iter_tree_paths(root_path):
 
 
 def _is_reparse_point(path):
-    """Check if path is a reparse point (symlink or junction) using WinAPI."""
     import ctypes
     FILE_ATTRIBUTE_REPARSE_POINT = 0x400
     attrs = ctypes.windll.kernel32.GetFileAttributesW(path)
@@ -2120,11 +2062,6 @@ def _is_reparse_point(path):
         return False  # path does not exist
     return bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
 
-# Whitelist of directories NoVir is explicitly allowed to delete within.
-# Nothing outside these directories can ever be deleted via safe_remove/safe_rmtree.
-# Narrow whitelist: only allow deletion within specific subdirectories.
-# NOTE: C:\Users is intentionally NOT in this list to prevent accidental mass deletion.
-# GroupPolicy paths are handled separately via _DELETION_WHITELIST_EXTENDED.
 _DELETION_WHITELIST = [
     "c:\\windows\\temp",
     "c:\\windows\\prefetch",
@@ -2133,9 +2070,7 @@ _DELETION_WHITELIST = [
     "c:\\windows\\system32\\grouppolicyusers",
 ]
 
-# User locations that NoVir may clean after a confirmation.  Do not allow the
-# whole profile: the file explorer must never become a general-purpose
-# destructive delete tool for Documents, Desktop, Pictures, or other data.
+# папки юзера для чистки по подтверждению
 _CURRENT_USER_PROFILE = os.environ.get("USERPROFILE", "")
 _DELETION_WHITELIST_EXTENDED = [
     path for path in (
@@ -2159,26 +2094,16 @@ def _path_in_whitelist(real_path, whitelist_key):
     return False
 
 def is_path_safe_for_deletion(target_path):
-    """
-    Hardened path safety check.
-    Uses realpath() to resolve symlinks/junctions, then enforces:
-    - Whitelist: must be inside an allowed directory
-    - Reparse point guard: no junctions/symlinks
-    - No system root or critical directories
-    """
     import os
 
     try:
-        # Resolve all symlinks and junctions to the real filesystem path
         real = os.path.realpath(target_path).lower().rstrip("\\")
     except Exception:
         return False
 
-    # Guard: block reparse points at target itself
     if _is_reparse_point(target_path):
         return False
 
-    # Absolute hard blocks — never delete these regardless of whitelist
     critical_paths = [
         "c:\\", "c:\\windows", "c:\\system32", "c:\\syswow64",
         "c:\\program files", "c:\\program files (x86)",
@@ -2189,20 +2114,16 @@ def is_path_safe_for_deletion(target_path):
         if real == blocked:
             return False
 
-    # Whitelist: realpath must start with allowed directory
     if not (_path_in_whitelist(real, 0) or _path_in_whitelist(real, 1)):
         return False
 
     return True
 
 def safe_remove(path):
-    """Safely delete a single file after strict validation."""
     if not require_mutation_allowed(f"safe_remove: {path}"): return False
     if not is_path_safe_for_deletion(path): return False
     import os
     try:
-        # Note: this is a best-effort re-check, not an atomic guarantee.
-    # TOCTOU risk between check and remove is minimal in local-only use but non-zero.
         if not os.path.isfile(path):
             return False
         if _is_reparse_point(path):
@@ -2214,12 +2135,10 @@ def safe_remove(path):
         return False
 
 def safe_rmtree(path, _gui_parent=None):
-    """Safely delete a directory tree, checking every item individually."""
     if not require_mutation_allowed(f"safe_rmtree: {path}"): return False
     if not is_path_safe_for_deletion(path): return False
     import os, shutil
 
-    # Extra confirmation if path falls in extended whitelist (user data area)
     real = os.path.realpath(path).lower().rstrip("\\")
     if _path_in_whitelist(real, 1):
         try:
@@ -2248,10 +2167,8 @@ def safe_rmtree(path, _gui_parent=None):
             if msg.exec() != QMessageBox.Yes:
                 return False
         except Exception:
-            # No Qt context (e.g. CLI mode) — require explicit flag instead
             return False
 
-    # Fast traversal with scandir: less overhead than repeated os.walk() calls.
     for candidate in iter_tree_paths(path):
         if _is_reparse_point(candidate):
             return False
@@ -2272,7 +2189,6 @@ def require_mutation_allowed(action_name):
     return True
 
 def confirm_high_risk_action(title, details):
-    """Require an explicit confirmation before changing system-wide security state."""
     if DRY_RUN:
         return True
     try:
@@ -2290,7 +2206,6 @@ def confirm_high_risk_action(title, details):
         return False
 
 def run_command(cmd, as_admin=False):
-    """Run an argv command without invoking a shell."""
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Команда: {cmd}{Colors.RESET}")
         return True, "", ""
@@ -2306,7 +2221,6 @@ def run_command(cmd, as_admin=False):
         return False, "", str(e)
 
 def _run_safe_process(args, timeout=15):
-    """Run a fixed executable without shell parsing."""
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Команда: {args}{Colors.RESET}")
         return True, "", ""
@@ -2323,11 +2237,53 @@ def _run_safe_process(args, timeout=15):
     except (OSError, subprocess.SubprocessError) as error:
         return False, "", str(error)
 
+_OFFLINE_REG_STATE = {
+    "mounted": False,
+    "drive": "",
+    "control_set": "ControlSet001",
+    "mounts": [],
+}
+
+def _route_offline_key(key_path, hive):
+    if not _OFFLINE_REG_STATE.get("mounted"):
+        return None
+    raw_path = str(key_path or "").lstrip("\\")
+    k_upper = raw_path.upper()
+    cset = _OFFLINE_REG_STATE.get("control_set", "ControlSet001")
+    if hive == winreg.HKEY_LOCAL_MACHINE or hive is None:
+        if k_upper.startswith("SOFTWARE\\"):
+            rel = raw_path[len("SOFTWARE\\"):]
+            return (winreg.HKEY_LOCAL_MACHINE, "OFFLINE_SOFTWARE\\" + rel)
+        elif k_upper.startswith("SYSTEM\\"):
+            rel = raw_path[len("SYSTEM\\"):]
+            if rel.upper().startswith("CURRENTCONTROLSET\\"):
+                rel = cset + "\\" + rel[len("CURRENTCONTROLSET\\"):]
+            return (winreg.HKEY_LOCAL_MACHINE, "OFFLINE_SYSTEM\\" + rel)
+    elif hive == winreg.HKEY_CURRENT_USER:
+        return (winreg.HKEY_USERS, "OFFLINE_USER\\" + raw_path)
+    return None
+
 def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hive=None):
-    """Установка значения в реестре с обходом блокировок"""
+    """Установка значения в реестре с обходом блокировок и поддержкой оффлайн-системы."""
     if not require_mutation_allowed(f"reg_set_value: {key_path}\\{value_name}"):
         return True
-    
+
+    if _OFFLINE_REG_STATE.get("mounted"):
+        off_target = _route_offline_key(key_path, hive)
+        if off_target:
+            off_hive, off_key_path = off_target
+            try:
+                for access in [winreg.KEY_SET_VALUE | getattr(winreg, "KEY_WOW64_64KEY", 0),
+                               winreg.KEY_SET_VALUE | getattr(winreg, "KEY_WOW64_32KEY", 0)]:
+                    try:
+                        with winreg.CreateKeyEx(off_hive, off_key_path, 0, access) as key:
+                            winreg.SetValueEx(key, value_name, 0, value_type, value_data)
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
     hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
     success = False
     for current_hive in hives:
@@ -2351,24 +2307,37 @@ def reg_set_value(key_path, value_name, value_data, value_type=winreg.REG_SZ, hi
         except Exception:
             continue
         success = success or hive_success
-        # `hive=None` means HKLM first, then HKCU only as a fallback. Writing
-        # the same setting to both hives can unexpectedly override per-user
-        # policy and creates duplicate state.
         if hive_success:
             break
     return success
 
 def reg_delete_value(key_path, value_name, hive=None):
-    """Удаление значения из реестра с обходом блокировок"""
+    """Удаление значения из реестра с обходом блокировок и поддержкой оффлайн-системы."""
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Удаление из реестра: {key_path} -> {value_name}{Colors.RESET}")
         return True
+
+    if _OFFLINE_REG_STATE.get("mounted"):
+        off_target = _route_offline_key(key_path, hive)
+        if off_target:
+            off_hive, off_key_path = off_target
+            try:
+                for access in [winreg.KEY_SET_VALUE | getattr(winreg, "KEY_WOW64_64KEY", 0),
+                               winreg.KEY_SET_VALUE | getattr(winreg, "KEY_WOW64_32KEY", 0)]:
+                    try:
+                        key = winreg.OpenKey(off_hive, off_key_path, 0, access)
+                        winreg.DeleteValue(key, value_name)
+                        winreg.CloseKey(key)
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
     
     hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
     success = False
     for hive in hives:
         hive_name = "HKLM" if hive == winreg.HKEY_LOCAL_MACHINE else "HKCU"
-        # Метод 1: Прямое удаление
         for access in [winreg.KEY_SET_VALUE |             getattr(winreg, "KEY_WOW64_64KEY", 0), winreg.KEY_SET_VALUE |             getattr(winreg, "KEY_WOW64_32KEY", 0)]:
             try:
                 rollback_mgr.snapshot_value(hive, key_path, value_name)
@@ -2377,11 +2346,9 @@ def reg_delete_value(key_path, value_name, hive=None):
                 winreg.CloseKey(key)
                 success = True
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 continue
         
         if not success:
-            # Метод 2: Через REG DELETE
             rollback_mgr.snapshot_value(hive, key_path, value_name)
             res, _, _ = run_command(["reg", "delete", f"{hive_name}\\{key_path}", "/v", value_name, "/f"])
             if res: success = True
@@ -2389,21 +2356,94 @@ def reg_delete_value(key_path, value_name, hive=None):
     return success
 
 def run_reg(hive, key_path, value_name, value_data, value_type=winreg.REG_SZ):
-    """Compatibility wrapper for legacy registry write call sites."""
     return reg_set_value(key_path, value_name, value_data, value_type, hive=hive)
 
 def delete_registry_key(hive, key_path, value_name=None):
-    """Compatibility wrapper for legacy value/key deletion call sites."""
     if value_name == "DisallowRun":
         return reg_delete_key(f"{key_path}\\{value_name}", hive=hive)
     if value_name:
         return reg_delete_value(key_path, value_name, hive=hive)
     return reg_delete_key(key_path, hive=hive)
 
+
+def enable_windows_privilege(privilege_name):
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        token_adjust_privileges = 0x0020
+        token_query = 0x0008
+        se_privilege_enabled = 0x00000002
+
+        class LUID(ctypes.Structure):
+            _fields_ = [("LowPart", wintypes.DWORD),
+                        ("HighPart", wintypes.LONG)]
+
+        class LUID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Luid", LUID),
+                        ("Attributes", wintypes.DWORD)]
+
+        class TOKEN_PRIVILEGES(ctypes.Structure):
+            _fields_ = [("PrivilegeCount", wintypes.DWORD),
+                        ("Privileges", LUID_AND_ATTRIBUTES * 1)]
+
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(
+                kernel32.GetCurrentProcess(),
+                token_adjust_privileges | token_query,
+                ctypes.byref(token)):
+            return False
+        luid = LUID()
+        if not advapi32.LookupPrivilegeValueW(
+                None, str(privilege_name), ctypes.byref(luid)):
+            kernel32.CloseHandle(token)
+            return False
+        privileges = TOKEN_PRIVILEGES()
+        privileges.PrivilegeCount = 1
+        privileges.Privileges[0].Luid = luid
+        privileges.Privileges[0].Attributes = se_privilege_enabled
+        adjusted = advapi32.AdjustTokenPrivileges(
+            token, False, ctypes.byref(privileges), 0, None, None)
+        last_error = ctypes.get_last_error()
+        kernel32.CloseHandle(token)
+        return bool(adjusted) and last_error == 0
+    except Exception:
+        return False
+
+
+def enable_registry_load_privileges():
+    enabled = False
+    for name in ("SeRestorePrivilege", "SeBackupPrivilege",
+                 "SeSecurityPrivilege"):
+        try:
+            enabled = enable_windows_privilege(name) or enabled
+        except Exception:
+            pass
+    return enabled
+
+
 def reg_delete_key(key_path, recursive=False, hive=None):
-    """Удаление ключа реестра"""
+    """Удаление ключа реестра с поддержкой оффлайн-системы"""
     if not require_mutation_allowed(f"reg_delete_key: {key_path}"):
         return True
+
+    if _OFFLINE_REG_STATE.get("mounted"):
+        off_target = _route_offline_key(key_path, hive)
+        if off_target:
+            off_hive, off_key_path = off_target
+            try:
+                if recursive:
+                    off_hive_str = "HKLM" if off_hive == winreg.HKEY_LOCAL_MACHINE else "HKU"
+                    subprocess.run(['reg', 'delete', f'{off_hive_str}\\{off_key_path}', '/f'],
+                                   shell=False, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                else:
+                    winreg.DeleteKey(off_hive, off_key_path)
+            except Exception:
+                pass
     
     hives = [hive] if hive else [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
     success_any = False
@@ -2413,7 +2453,7 @@ def reg_delete_key(key_path, recursive=False, hive=None):
         try:
             if recursive:
                 res = subprocess.run(['reg', 'delete', f'{hive_str}\\{key_path}', '/f'],
-                                     shell=False, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                                     shell=False, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 if res.returncode == 0:
                     success_any = True
             else:
@@ -2428,21 +2468,12 @@ def reg_delete_key(key_path, recursive=False, hive=None):
     return success_any
 
 
-# ═══════════════════════════════════════════════════════════════
-# ПОДДЕРЖКА ВЕРСИЙ WINDOWS (7 / 8 / 8.1 / 10 / 11)
-# ═══════════════════════════════════════════════════════════════
-# Пользователь может выбрать целевую версию в «Настройках». В зависимости
-# от неё функции используют разные команды/ключи реестра. По умолчанию —
-# автоопределение текущей Windows. Win10/11 остаются дефолтным поведением.
 _WIN_ORDER = {"7": 70, "8": 80, "8.1": 81, "10": 100, "11": 110}
-# Порядок соответствует индексам комбобокса (0 = автоопределение).
 WIN_VERSION_KEYS = ("11", "10", "8.1", "8", "7")
 WIN_VERSION_LABELS = ("Windows 11", "Windows 10", "Windows 8.1",
                       "Windows 8", "Windows 7")
 _WIN_TARGET = {"value": None}  # None = автоопределение
 
-# Иконки версий для комбобокса «Версия Windows»: папка win_icons/ рядом
-# с программой (у собранного exe — внутри _MEIPASS).
 WIN_ICON_FILES = {"11": "w11.png", "10": "w10.png",
                   "8.1": "w8.png", "8": "w8.png", "7": "w7.png"}
 _WIN_ICON_CACHE = {}
@@ -2544,20 +2575,9 @@ def save_win_target():
         pass
 
 
-# Применяем сохранённый выбор при старте приложения.
 load_win_target()
 
 
-# ═══════════════════════════════════════════════════════════════
-# ЗАЩИТА ФОНОВЫХ QThread-ВОРКЕРОВ ОТ РАННЕГО УНИЧТОЖЕНИЯ
-# ═══════════════════════════════════════════════════════════════
-# Пока на QThread есть Python-ссылка, C++ объект жив. Если воркер
-# хранится в локальной переменной или перезаписывается
-# (self.worker = Worker(...)), сборщик мусора уничтожает работающий
-# поток, и Qt печатает «QThread: Destroyed while thread is still
-# running» (вплоть до падения). keep_thread() держит поток в реестре
-# до сигнала finished; наружу возвращается сам поток, поэтому все
-# последующие connect()/start() работают как раньше.
 _LIVE_QTHREADS = set()
 
 
@@ -2571,9 +2591,6 @@ def keep_thread(thread):
     return thread
 
 
-# ═══════════════════════════════════════════════════════════════
-# БЛОК 1: ВИЗУАЛЬНОЕ ВОССТАНОВЛЕНИЕ (ИНТЕРФЕЙС)
-# ═══════════════════════════════════════════════════════════════
 
 def Font_Standard_Full():
     """Сброс всех подстановок шрифтов в реестре на Segoe UI"""
@@ -2599,23 +2616,19 @@ def Font_Standard_Full():
     
     success_count = 0
     try:
-        # Сбрасываем подстановки шрифтов
         key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes", 0, winreg.KEY_SET_VALUE)
         for font, substitute in font_substitutes:
             try:
                 winreg.SetValueEx(key, font, 0, winreg.REG_SZ, substitute)
                 success_count += 1
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         winreg.CloseKey(key)
         
-        # Восстанавливаем LogPixels (масштабирование DPI) - вирусы часто ставят 0 или 200
         try:
             reg_set_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontDPI", "LogPixels", 96, winreg.REG_DWORD)
             success_count += 1
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
         
         # Восстанавливаем масштаб через HKCU
@@ -2623,10 +2636,8 @@ def Font_Standard_Full():
             reg_set_value(r"Control Panel\Desktop", "LogPixels", 96, winreg.REG_DWORD)
             success_count += 1
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
         
-        # Проверяем и восстанавливаем базовые шрифты в ветке Fonts
         try:
             fonts_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts", 0, winreg.KEY_SET_VALUE)
             # Базовые шрифты, которые должны быть
@@ -2640,7 +2651,6 @@ def Font_Standard_Full():
             ]
             for font_name, font_file in base_fonts:
                 try:
-                    # Проверяем, существует ли значение
                     try:
                         winreg.QueryValueEx(fonts_key, font_name)
                     except FileNotFoundError:
@@ -2648,14 +2658,11 @@ def Font_Standard_Full():
                         winreg.SetValueEx(fonts_key, font_name, 0, winreg.REG_SZ, font_file)
                         success_count += 1
                 except Exception as _e:
-                    # Expected exception, intentionally ignored
                     pass
             winreg.CloseKey(fonts_key)
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
         
-        # Очищаем кэш шрифтов (FNTCACHE.DAT) - вирусы часто портят его
         try:
             font_cache_path = os.path.join(os.environ['SystemRoot'], 'System32', 'FNTCACHE.DAT')
             if os.path.exists(font_cache_path):
@@ -2700,7 +2707,6 @@ def Wallpaper_Force():
             winreg.CloseKey(key)
             success = True
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
     
     if success:
@@ -2717,12 +2723,10 @@ def Visual_Styles_Fix():
     print_hacker_message("Кто-то отключил стили оформления. Возвращаю стандартную тему.")
     
     try:
-        # Включаем темы
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1, winreg.REG_DWORD)
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1, winreg.REG_DWORD)
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 1, winreg.REG_DWORD)
         
-        # Удаляем блокировку тем
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoThemesTab")
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\System", "NoVisualStyleChoice")
         
@@ -2739,10 +2743,8 @@ def Icon_Size_Reset():
     print_hacker_message("Иконки некорректного размера. Сбрасываю к стандартным настройкам.")
     
     try:
-        # Сбрасываем DPI на 96 (100%)
         reg_set_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers", "~", "HIGHDPIAWARE")
         
-        # Сбрасываем масштаб иконок
         reg_set_value(r"Control Panel\Desktop\WindowMetrics", "Shell Icon Size", "32", winreg.REG_SZ)
         
         # Обновляем настройки отображения
@@ -2764,13 +2766,11 @@ def Cursor_Restore():
     print_hacker_message("Курсор некорректно отображается. Возвращаю стандартную стрелку.")
     
     try:
-        # Сбрасываем настройки курсора
         cursor_path = os.path.join(os.environ['SystemRoot'], 'Cursors', 'aero_arrow.cur')
         reg_set_value(r"Control Panel\Cursors", "", "Windows Default", winreg.REG_SZ)
         reg_set_value(r"Control Panel\Cursors", "Arrow", cursor_path, winreg.REG_EXPAND_SZ)
         reg_set_value(r"Control Panel\Cursors", "AppStarting", cursor_path, winreg.REG_EXPAND_SZ)
         
-        # Удаляем кастомные схемы
         reg_delete_value(r"Control Panel\Cursors", "Scheme Source")
         
         logger.log("Cursor_Restore", "success", "Стандартный курсор восстановлен")
@@ -2795,15 +2795,12 @@ def Screen_Rotate_Lock():
         return True
     
     try:
-        # Используем PowerShell для поворота экрана через WMI
         result = subprocess.run([
             "powershell", "-Command",
             "$wmi = Get-WmiObject -Namespace root/wmi -Class WmiMonitorIDToPOMethod; $wmi.InvokeMethod(0, 1)"
         ], capture_output=True)
         
-        # Альтернативный метод через дисплей с правильными спецсимволами SendKeys
         # ^ = Control, % = Alt, {UP} = Стрелка вверх
-        # ПРИМЕЧАНИЕ: Работает только если горячие клавиши включены в драйвере видеокарты
         subprocess.run(["powershell", "-Command", "(New-Object -ComObject WScript.Shell).SendKeys('^%{UP}')"], capture_output=True)
         
         logger.log("Screen_Rotate_Lock", "success", "Ориентация экрана сброшена на 0°")
@@ -2820,7 +2817,6 @@ def ClearType_Fix():
     print_hacker_message("Сглаживание текста отключено. Включаю ClearType.")
     
     try:
-        # Включаем ClearType
         reg_set_value(r"Control Panel\Desktop", "FontSmoothing", "2", winreg.REG_SZ)
         reg_set_value(r"Control Panel\Desktop", "FontSmoothingType", "2", winreg.REG_DWORD)
         reg_set_value(r"Control Panel\Desktop", "FontSmoothingGamma", "220", winreg.REG_DWORD)
@@ -2834,9 +2830,6 @@ def ClearType_Fix():
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
         return False
 
-# ═══════════════════════════════════════════════════════════════
-# БЛОК 2: РЕАНИМАЦИЯ ПРОВОДНИКА И ОБОЛОЧКИ
-# ═══════════════════════════════════════════════════════════════
 
 def Shell_Standard():
     """Проверка пути explorer.exe"""
@@ -2846,7 +2839,6 @@ def Shell_Standard():
         correct_path = os.path.join(os.environ['SystemRoot'], 'explorer.exe')
         reg_set_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", "Shell", "explorer.exe", winreg.REG_SZ)
         
-        # Проверяем и удаляем подозрительные значения
         suspicious_keys = [
             (r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", "Userinit"),
             (r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon", "System")
@@ -2861,10 +2853,8 @@ def Shell_Standard():
                 if "explorer.exe" not in value.lower() and value != "userinit.exe,":
                     print(f"{Colors.YELLOW}[!] Обнаружено подозрительное значение: {value}{Colors.RESET}")
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
-        # Перезапускаем проводник
         if DRY_RUN:
             print(f"{Colors.CYAN}[DRY-RUN] Будет перезапущен explorer.exe{Colors.RESET}")
         else:
@@ -2908,7 +2898,6 @@ def Drive_Visibility():
     print_hacker_message("Диски скрыты в системе. Восстанавливаю видимость.")
     
     try:
-        # Сбрасываем NoDrives в 0 (все диски видны)
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDrives", 0, winreg.REG_DWORD)
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun", 0, winreg.REG_DWORD)
         
@@ -2953,11 +2942,9 @@ def System_Tray_Show():
     print_hacker_message("Значки в трее отсутствуют. Восстанавливаю отображение.")
     
     try:
-        # Включаем системный трей
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoTrayItemsDisplay", 0, winreg.REG_DWORD)
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoTrayContextMenu")
         
-        # Включаем отдельные иконки
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoSetTaskbar", 0, winreg.REG_DWORD)
         
         logger.log("System_Tray_Show", "success", "Системный трей восстановлен")
@@ -2973,14 +2960,11 @@ def Desktop_Icons_Revive():
     print_hacker_message("Рабочий стол пуст. Восстанавливаю отображение значков.")
     
     try:
-        # Включаем отображение иконок рабочего стола
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "IconsOnly", 1, winreg.REG_DWORD)
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowInfoTip", 1, winreg.REG_DWORD)
         
-        # Удаляем блокировку
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDesktop")
         
-        # Перезапускаем проводник
         if not DRY_RUN:
             subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], capture_output=True)
             time.sleep(0.5)
@@ -3001,12 +2985,10 @@ def HiddenFiles_Show():
     print_hacker_message("Скрытые файлы не отображаются. Включаю видимость.")
     
     try:
-        # Включаем отображение скрытых файлов
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "Hidden", 1, winreg.REG_DWORD)
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "ShowSuperHidden", 1, winreg.REG_DWORD)
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced", "HideFileExt", 0, winreg.REG_DWORD)
         
-        # Удаляем блокировку
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoHidden")
         
         # Обновляем проводник
@@ -3046,14 +3028,12 @@ def Shell_Validation():
         try:
             shell_value, _ = winreg.QueryValueEx(key, "Shell")
         except FileNotFoundError:
-            # Значения Shell нет — это стандарт на чистой Windows.
             winreg.CloseKey(key)
             print(f"{Colors.GREEN}[+] Shell не задан — стандартное поведение (explorer.exe){Colors.RESET}")
             logger.log("Shell_Validation", "success", "Shell не задан — стандарт")
             return True
         winreg.CloseKey(key)
 
-        # Нормализация: кавычки, пробелы, %SystemRoot%, полный путь, лишние аргументы.
         normalized = str(shell_value or "").strip().strip('"').strip("'")
         if not normalized:
             print(f"{Colors.GREEN}[+] Shell пуст — стандартное поведение (explorer.exe){Colors.RESET}")
@@ -3079,7 +3059,6 @@ def Shell_Validation():
             print(f"{Colors.RED}[!] Не удалось записать Shell: {reg_e}{Colors.RESET}")
         return False
     except Exception as e:
-        # Нет доступа/ключа — не признак заражения, проверка просто пропущена.
         logger.log("Shell_Validation", "warning", f"Проверка пропущена: {e}")
         print(f"{Colors.YELLOW}[!] Проверка Shell пропущена: {e}{Colors.RESET}")
         return True
@@ -3100,7 +3079,6 @@ def Userinit_Fix():
         userinit_value, _ = winreg.QueryValueEx(key, "Userinit")
         winreg.CloseKey(key)
         
-        # Userinit должен быть userinit.exe, может быть с запятой и другими параметрами
         if "userinit.exe" not in userinit_value.lower():
             print(f"{Colors.YELLOW}[!] Обнаружен модифицированный Userinit: {userinit_value}{Colors.RESET}")
             reg_set_value(key_path, "Userinit", "userinit.exe,", winreg.REG_SZ)
@@ -3115,9 +3093,6 @@ def Userinit_Fix():
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
         return False
 
-# ═══════════════════════════════════════════════════════════════
-# БЛОК 3: РЕЕСТР И ДОСТУП (HARD)
-# ═══════════════════════════════════════════════════════════════
 
 def Reg_Write_Enable():
     """Разблокировка редактирования реестра"""
@@ -3567,8 +3542,7 @@ def _emergency_delete_scheduled_tasks(backup_dir, dry_run):
 
 
 def Emergency_Recovery():
-    """Aggressive autostart and icon recovery with a full backup."""
-    print_hacker_message("Экстремальное восстановление автозагрузки, задач и иконок.")
+    print_hacker_message("Глубокая очистка автозагрузки и иконок.")
     dry_run = bool(DRY_RUN)
     backup_dir = ""
     backup = {
@@ -3593,7 +3567,6 @@ def Emergency_Recovery():
     moved_items = []
     system_root = os.environ.get("SystemRoot") or r"C:\Windows"
 
-    # 1. Run / RunOnce / policy Run entries in every relevant hive and view.
     clean_keys = [
         r"Software\Microsoft\Windows\CurrentVersion\Run",
         r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
@@ -3621,7 +3594,6 @@ def Emergency_Recovery():
             cleaned_count += _emergency_clear_registry_values(
                 hive, key_path, backup["registry_run"], hive_name, dry_run)
 
-    # 2. AppInit_DLLs cleanup (64-bit and 32-bit views).
     for key_path in (
         r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows",
         r"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows",
@@ -3654,7 +3626,6 @@ def Emergency_Recovery():
             "LoadAppInit_DLLs", 0, winreg.REG_DWORD,
             backup=None, dry_run=dry_run)
 
-    # 3. AppCertDlls cleanup (another DLL injection autostart).
     for key_path in (
         r"SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDlls",
     ):
@@ -3672,7 +3643,6 @@ def Emergency_Recovery():
         cleaned_count += _emergency_clear_registry_values(
             winreg.HKEY_LOCAL_MACHINE, key_path, backup["appinit"], "HKLM", dry_run)
 
-    # 4. Winlogon Shell/Userinit reset.
     winlogon_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
     try:
         key = winreg.OpenKey(
@@ -3703,7 +3673,6 @@ def Emergency_Recovery():
             backup=None, dry_run=True,
         )
     else:
-        # Backup already recorded; normal logging path.
         _emergency_set_value(
             winreg.HKEY_LOCAL_MACHINE, "HKLM", winlogon_path,
             "Shell", "explorer.exe", winreg.REG_SZ,
@@ -3713,7 +3682,6 @@ def Emergency_Recovery():
             "Userinit", userinit, winreg.REG_SZ,
             backup=None, dry_run=True)
 
-    # 5. Move startup-folder files into the backup.
     startup_roots = [
         (os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"), "user"),
         (os.path.join(os.environ.get("ProgramData", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"), "common"),
@@ -3743,7 +3711,6 @@ def Emergency_Recovery():
         except Exception:
             continue
 
-    # 6. Scheduled tasks: export and delete all non-Microsoft tasks.
     print(f"{Colors.YELLOW}[!] Поиск и удаление сторонних задач планировщика...{Colors.RESET}")
     if backup_dir:
         tasks_deleted, task_list, exported_names = _emergency_delete_scheduled_tasks(
@@ -3753,10 +3720,8 @@ def Emergency_Recovery():
     backup["scheduled_tasks"] = task_list
     cleaned_count += len(task_list) if dry_run else tasks_deleted
 
-    # 7. Icon recovery.
     print(f"{Colors.YELLOW}[!] Восстановление иконок рабочего стола и кэша...{Colors.RESET}")
     try:
-        # Additional desktop-icon settings.
         reg_set_value(
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
             "HideIcons", 0, winreg.REG_DWORD)
@@ -3765,7 +3730,6 @@ def Emergency_Recovery():
             "ShowInfoTip", 1, winreg.REG_DWORD)
         reg_delete_value(
             r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDesktop")
-        # Shell Icon overrides and icon cache size.
         for key_path in (
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons",
         ):
@@ -3785,7 +3749,6 @@ def Emergency_Recovery():
                     })
                     if backup_dir:
                         cleaned_count += 0
-                # remove all values
                 for view_flag in (            getattr(winreg, "KEY_WOW64_64KEY", 0),             getattr(winreg, "KEY_WOW64_32KEY", 0)):
                     try:
                         k = winreg.OpenKey(
@@ -3808,7 +3771,6 @@ def Emergency_Recovery():
         reg_set_value(
             r"Software\Microsoft\Windows\CurrentVersion\Explorer",
             "Max Cached Icons", "8192")
-        # Tray icon streams.
         for value_name in ("IconStreams", "PastIconsStream"):
             try:
                 reg_delete_value(
@@ -3823,7 +3785,6 @@ def Emergency_Recovery():
         logger.log("Emergency_Recovery", "icon", str(error))
         print(f"{Colors.RED}[!] Ошибка при восстановлении иконок: {error}{Colors.RESET}")
 
-    # Persist backup JSON.
     if backup_dir:
         try:
             with open(os.path.join(backup_dir, "backup.json"), "w", encoding="utf-8") as json_file:
@@ -3831,7 +3792,6 @@ def Emergency_Recovery():
         except Exception:
             pass
 
-    # Logging completion.
     logger.log(
         "Emergency_Recovery", "success",
         "Агрессивная очистка автозагрузки и восстановление иконок выполнены",
@@ -3864,7 +3824,7 @@ def Replace_Sethc_Utilman():
 
 def File_Full_Access():
     """Полный доступ к файлу (Takeown & Icacls)"""
-    print_hacker_message("Запуск процедуры получения прав на файл.")
+    print_hacker_message("Забираю права на файл.")
     if not confirm_high_risk_action(
         "Опасная операция: права файла",
         "Выдача полного доступа может ослабить защиту выбранного системного файла.",
@@ -3938,18 +3898,15 @@ def Easy_Launcher():
         import sys, shutil, os
         import winreg
         
-        # 1. Отключение UAC
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA", 0, winreg.REG_DWORD)
         
         novir_path = sys.executable
         if novir_path.endswith('.exe'):
-            # 2. Копирование как nov.exe
             nov_path = r"C:\Windows\nov.exe"
             try:
                 shutil.copy(novir_path, nov_path)
             except: pass
             
-            # 3. Контекстное меню
             try:
                 key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, r"Directory\Background\shell\NoVir")
                 winreg.SetValue(key, "", winreg.REG_SZ, "Запустить NoVir")
@@ -4053,7 +4010,6 @@ def FilterKeys_Disable():
         return True
         
     try:
-        # Flags "58" = Off. "59" or "62" = On
         import winreg
         reg_set_value(r"Control Panel\Accessibility\Keyboard Response", "Flags", "58", winreg.REG_SZ, hive=winreg.HKEY_CURRENT_USER)
         reg_set_value(r"Control Panel\Accessibility\StickyKeys", "Flags", "506", winreg.REG_SZ, hive=winreg.HKEY_CURRENT_USER)
@@ -4105,7 +4061,6 @@ def MouseKeys_Disable():
         logger.log("MouseKeys_Disable", "success", "MouseKeys будут отключены")
         return True
     
-    # reg_set_value возвращает bool и не бросает исключения — проверяем результат
     if reg_set_value(r"Control Panel\Accessibility\MouseKeys", "Flags", "38", winreg.REG_SZ, hive=winreg.HKEY_CURRENT_USER):
         logger.log("MouseKeys_Disable", "success", "MouseKeys отключены")
         print(f"{Colors.GREEN}[+] MouseKeys отключены{Colors.RESET}")
@@ -4129,7 +4084,6 @@ def Language_Bar_Restore():
         subprocess.Popen([ctfmon], creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoLanguageBand", hive=winreg.HKEY_CURRENT_USER)
         
-        # Настоящее состояние панели языка: ShowStatus = 3 (закрепить в панели задач)
         reg_set_value(r"Software\Microsoft\CTF\LangBar", "ShowStatus", 3, winreg.REG_DWORD, hive=winreg.HKEY_CURRENT_USER)
         
         logger.log("Language_Bar_Restore", "success", "Панель языка восстановлена (ctfmon перезапущен)")
@@ -4169,7 +4123,6 @@ def Keyboard_Troubleshoot_Run():
         logger.log("Keyboard_Troubleshoot_Run", "success", "Диагностика клавиатуры будет запущена")
         return True
     
-    # Проверяем наличие msdt.exe (удалён в свежих сборках Windows 11)
     msdt = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "msdt.exe")
     if not os.path.exists(msdt):
         logger.log("Keyboard_Troubleshoot_Run", "warning", "msdt.exe отсутствует в этой сборке Windows")
@@ -4177,7 +4130,6 @@ def Keyboard_Troubleshoot_Run():
         return False
     
     try:
-        # Запускаем в фоне: мастер диалог живёт, пока пользователь его не закроет
         subprocess.Popen(
             [msdt, "-id", "KeyboardDiagnostic"],
             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
@@ -4197,7 +4149,6 @@ def WinHotkey_Policy_Clean():
     keys_to_delete = [
         (r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoWinKeys"),
         (r"Software\Policies\Microsoft\Windows\Explorer", "NoWinKeys"),
-        # Блокировка Win+L (рабочая политика — отдельный путь, не Policies\...\System)
         (r"Software\Microsoft\Windows\CurrentVersion\Policies\System", "DisableLockWorkstation"),
     ]
     
@@ -4272,7 +4223,6 @@ def UAC_Default_Fix():
     print_hacker_message("Восстанавливаю стандартный уровень контроля учетных записей (UAC).")
     
     try:
-        # Включаем UAC (EnableLUA = 1)
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA", 1, winreg.REG_DWORD)
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", 1, winreg.REG_DWORD)
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "ConsentPromptBehaviorAdmin", 5, winreg.REG_DWORD)
@@ -4290,11 +4240,9 @@ def Admin_Shares_Restore():
     print_hacker_message("Восстанавливаю скрытые административные ресурсы (C$, ADMIN$).")
     
     try:
-        # Включаем админские шары
         reg_set_value(r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "AutoShareWks", 1, winreg.REG_DWORD)
         reg_set_value(r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "AutoShareServer", 1, winreg.REG_DWORD)
         
-        # Перезапускаем сервер
         if DRY_RUN:
             print(f"{Colors.CYAN}[DRY-RUN] Будет перезапущена служба lanmanserver{Colors.RESET}")
         else:
@@ -4352,7 +4300,6 @@ def IFEO_Clean():
     """Очистка Image File Execution Options - удаление вирусных перехватчиков запуска"""
     print_hacker_message("Вирус прописал debugger для диспетчера задач? Щас вычистю IFEO, чтобы программы запускались нормально!")
     
-    # Критичные системные программы, которые вирусы часто перехватывают
     critical_apps = [
         'taskmgr.exe',
         'msconfig.exe',
@@ -4378,7 +4325,6 @@ def IFEO_Clean():
             print(f"{Colors.GREEN}[+] Image File Execution Options будет очищен{Colors.RESET}")
             return True
         
-        # Проверяем и удаляем debugger для критичных приложений
         for app in critical_apps:
             app_path = f"{ifeo_path}\\{app}"
             try:
@@ -4397,12 +4343,10 @@ def IFEO_Clean():
             except Exception as e:
                 pass
         
-        # Также проверяем общие настройки IFEO
         try:
             key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ifeo_path, 0, winreg.KEY_READ)
             winreg.CloseKey(key)
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
         
         logger.log("IFEO_Clean", "success", f"Очищено {cleaned_count} перехватчиков")
@@ -4446,9 +4390,6 @@ def Regedit_CMD_Unlock():
     
     return success
 
-# ═══════════════════════════════════════════════════════════════
-# БЛОК 4: СЕТЬ И ИНТЕРНЕТ
-# ═══════════════════════════════════════════════════════════════
 
 def Hosts_Clean_Hard():
     """Очистка файла hosts от вирусных записей"""
@@ -4468,30 +4409,10 @@ def Hosts_Clean_Hard():
     
     try:
         hosts_path = r"C:\Windows\System32\drivers\etc\hosts"
-        # Сначала снимаем атрибуты (только чтение, скрытый, системный)
         subprocess.run(["attrib", "-r", "-s", "-h", hosts_path], capture_output=True)
         
         default_hosts = """# Copyright (c) 1993-2009 Microsoft Corp.
-#
-# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.
-#
-# This file contains the mappings of IP addresses to host names. Each
-# entry should be kept on an individual line. The IP address should
-# be placed in the first column followed by the corresponding host name.
-# The IP address and the host name should be separated by at least one
-# space.
-#
-# Additionally, comments (such as these) may be inserted on individual
-# lines or following the machine name denoted by a '#' symbol.
-#
-# For example:
-#
-#      102.54.94.97     rhino.acme.com          # source server
-#       38.25.63.10     x.acme.com              # x client host
 
-# localhost name resolution is handled within DNS itself.
-#	127.0.0.1       localhost
-#	::1             localhost
 """
         
         # Пытаемся записать с правами администратора
@@ -4502,7 +4423,6 @@ def Hosts_Clean_Hard():
             print(f"{Colors.GREEN}[+] Файл hosts очищен{Colors.RESET}")
             return True
         except PermissionError:
-            # Если нет прав, используем PowerShell с elevate
             ps_cmd = f'''$content = @'
 {default_hosts}
 '@; Set-Content -Path "{hosts_path}" -Value $content -Force'''
@@ -4520,7 +4440,6 @@ def Proxy_Nuke():
     print_hacker_message("Вирус установил свой прокси для слежки. Отключаю.")
     
     try:
-        # Отключаем прокси в реестре
         reg_set_value(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "ProxyEnable", 0, winreg.REG_DWORD)
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "ProxyServer")
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings", "AutoConfigURL")
@@ -4528,7 +4447,6 @@ def Proxy_Nuke():
         # То же самое для HKLM
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings", "ProxyEnable", 0, winreg.REG_DWORD)
         
-        # Отключаем через netsh
         if not DRY_RUN:
             subprocess.run(["netsh", "winhttp", "reset", "proxy"], capture_output=True)
         else:
@@ -4559,8 +4477,6 @@ def DNS_Google_Force():
         return True
     
     try:
-        # Получаем список активных интерфейсов через PowerShell.
-        # Win8+: Get-NetAdapter. Win7: модуля нет — через WMI (NetConnectionID).
         if win_at_least("8"):
             ps_cmd = "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -ExpandProperty Name"
         else:
@@ -4620,10 +4536,8 @@ def Firewall_State_Reset():
         return True
     
     try:
-        # Сбрасываем брандмауэр
         subprocess.run(["netsh", "advfirewall", "reset"], capture_output=True)
         
-        # Включаем брандмауэр для всех профилей
         subprocess.run(["netsh", "advfirewall", "set", "allprofiles", "state", "on"], capture_output=True)
         
         logger.log("Firewall_State_Reset", "success", "Брандмауэр сброшен")
@@ -4675,16 +4589,13 @@ def Network_Discovery_On():
         return True
     
     try:
-        # Включаем через netsh (старый и новый методы)
         run_command(["netsh", "firewall", "set", "service", "type=fileandprint", "mode=enable"])
         run_command(["netsh", "advfirewall", "firewall", "set", "rule", "group=Network Discovery", "new", "enable=Yes"])
         run_command(["netsh", "advfirewall", "firewall", "set", "rule", "group=File and Printer Sharing", "new", "enable=Yes"])
         
-        # Включаем через PowerShell (самый надежный метод для Win10/11)
         ps_cmd = "Set-NetFirewallRule -DisplayGroup 'Network Discovery' -Enabled True; Set-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Enabled True"
         run_command(["powershell", "-NoProfile", "-Command", ps_cmd])
         
-        # Включаем службы, необходимые для обнаружения
         services = ['upnphost', 'SSDPSRV', 'FDResPub', 'FunctionDiscoveryDataPublishing']
         for svc in services:
             run_command(["sc", "config", svc, "start=auto"])
@@ -4710,15 +4621,12 @@ def Route_Reset():
         return True
     
     try:
-        # Сбрасываем таблицу маршрутизации
         subprocess.run(["route", "-f"], capture_output=True)
         
-        # Включаем NetBios через службу
         try:
             subprocess.run(["sc", "config", "lmhosts", "start=auto"], capture_output=True)
             subprocess.run(["sc", "start", "lmhosts"], capture_output=True)
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
         
         logger.log("Route_Reset", "success", "Маршруты сброшены")
@@ -4803,10 +4711,8 @@ def Temp_Deep_Clean():
                                 safe_rmtree(item_path)
                                 total_deleted += 1
                         except Exception as _e:
-                            # Expected exception, intentionally ignored
                             pass
                 except Exception as _e:
-                    # Expected exception, intentionally ignored
                     pass
     
     logger.log("Temp_Deep_Clean", "success", f"Удалено {total_deleted} файлов")
@@ -4829,7 +4735,6 @@ def Prefetch_Wipe():
                     try:
                         safe_remove(item_path)
                     except Exception as _e:
-                        # Expected exception, intentionally ignored
                         pass
         
         logger.log("Prefetch_Wipe", "success", "Prefetch очищен")
@@ -4851,8 +4756,6 @@ def RecycleBin_Empty():
         return True
     
     try:
-        # Win8.1+/Win10/11: Clear-RecycleBin. Win7/8.0: команда не нужна —
-        # очищаем через Shell.Application COM (доступен во всех версиях).
         if win_at_least("8.1"):
             ps_cmd = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
         else:
@@ -4920,11 +4823,8 @@ def Process_Blacklist_Kill():
                 exe_path = str(proc_info.get('exe', '') or proc_info.get('path', '')).lower()
                 is_legitimate = False
                 
-                # Проверка системных процессов (должны быть в system32 и от SYSTEM)
                 critical_system = ['svchost.exe', 'winlogon.exe', 'lsass.exe', 'csrss.exe', 'services.exe', 'taskhostw.exe', 'spoolsv.exe']
                 if proc_name in critical_system:
-                    # Never terminate a known Windows core process just because
-                    # its owner cannot be queried (access is often denied).
                     if any(exe_path.startswith(path) for path in whitelist_paths):
                         is_legitimate = True
                 
@@ -4932,9 +4832,6 @@ def Process_Blacklist_Kill():
                 elif any(exe_path.startswith(path) for path in whitelist_paths):
                     is_legitimate = True
                 
-                # With no executable path we cannot distinguish a system
-                # process from a spoof.  Leave it untouched instead of risking
-                # a false-positive termination.
                 if not is_legitimate and exe_path:
                     if DRY_RUN:
                         print(f"{Colors.CYAN}[DRY-RUN] Был бы убит процесс: {proc_name} (PID: {proc_info['pid']}, Path: {exe_path}){Colors.RESET}")
@@ -4958,14 +4855,10 @@ def SafeMode_Registry_Fix():
     print_hacker_message("Safe Mode сломан или стерт? Это частая мишень вирусов. Щас восстановим его из пепла!")
     
     try:
-        # 1. Снимаем ограничения на ветку реестра (если вирус изменил права доступа)
-        # Мы используем reg.exe для попытки сброса прав или принудительного создания
         reg_root = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SafeBoot"
         
-        # 2. Восстанавливаем AlternateShell (оболочка безопасного режима)
         reg_set_value(r"SYSTEM\CurrentControlSet\Control\SafeBoot", "AlternateShell", "cmd.exe", winreg.REG_SZ)
         
-        # 3. Полный список критических служб для Minimal (Безопасный режим)
         minimal_services = [
             'AppInfo', 'Base', 'Boot Bus Extender', 'Boot File System', 'Business', 'CryptSvc',
             'DCOM Launch', 'Disk', 'EventLog', 'File System', 'Filter Manager', 'HelpSvc',
@@ -4975,13 +4868,11 @@ def SafeMode_Registry_Fix():
             'WinMgmt', 'Workstation'
         ]
         
-        # 4. Полный список критических служб для Network (Безопасный режим с сетью)
         network_services = minimal_services + [
             'DNS Cache', 'LanmanWorkstation', 'NLA', 'NSI', 'Tcpip', 'Tcpip6', 'Tdx',
             'WebClient', 'WinHttpAutoProxySvc'
         ]
 
-        # Восстанавливаем основные ветки, если они удалены целиком
         for mode in ['Minimal', 'Network']:
             key_path = f"SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\{mode}"
             reg_set_value(key_path, "", "", winreg.REG_SZ)
@@ -4989,13 +4880,10 @@ def SafeMode_Registry_Fix():
             services = minimal_services if mode == 'Minimal' else network_services
             for svc in services:
                 svc_path = f"{key_path}\\{svc}"
-                # Устанавливаем тип "Service" для каждого элемента
                 reg_set_value(svc_path, "", "Service", winreg.REG_SZ)
 
-        # 5. Восстанавливаем BootExecute (критично для автозапуска при загрузке)
         reg_set_value(r"SYSTEM\CurrentControlSet\Control\Session Manager", "BootExecute", "autocheck autochk *", winreg.REG_MULTI_SZ)
         
-        # 6. Снимаем флаг "NoSafeBoot" если вирус его поставил
         reg_delete_value(r"Software\Microsoft\Windows\CurrentVersion\Policies\System", "NoSafeBoot")
         
         logger.log("SafeMode_Registry_Fix", "success", "Safe Mode полностью реконструирован")
@@ -5022,12 +4910,9 @@ def SafeMode_Next_Boot_Setup():
         return True
     
     try:
-        # Восстанавливаем Safe Mode в реестре ПЕРЕД настройкой загрузки (на случай если стерто)
         SafeMode_Registry_Fix()
         
         # Настройка через bcdedit
-        # minimal - безопасный режим
-        # alternateshell yes - поддержка командной строки
         success1, _, err1 = run_command(["bcdedit", "/set", "{current}", "safeboot", "minimal"])
         success2, _, err2 = run_command(["bcdedit", "/set", "{current}", "safebootalternateshell", "yes"])
         
@@ -5056,7 +4941,6 @@ def SafeMode_Boot_Restore_Service():
         # Путь к скрипту восстановления
         script_path = os.path.join(os.environ['SystemRoot'], 'SafeModeGuard.bat')
         
-        # Создаем батник, который восстанавливает реестр Safe Mode
         content = f"""@echo off
 reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot" /v "AlternateShell" /t REG_SZ /d "cmd.exe" /f
 reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\SafeBoot\\Minimal" /f
@@ -5067,8 +4951,6 @@ bcdedit /set {{current}} safebootalternateshell yes
         with open(script_path, 'w') as f:
             f.write(content)
             
-        # Добавляем в локальную политику выключения (через реестр/планировщик)
-        # Самый надежный способ - задача при событии выключения или просто немедленная перезагрузка
         print(f"{Colors.YELLOW}[!] ВНИМАНИЕ: Сейчас будет выполнена принудительная настройка и перезагрузка через 10 секунд!{Colors.RESET}")
         
         # Выполняем настройку
@@ -5087,7 +4969,6 @@ def AutoRun_Disable():
     print_hacker_message("Автозапуск с флешек — это дыра для вирусов. Щас отключим!")
     
     try:
-        # Отключаем автозапуск для всех дисков
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun", 0xDD, winreg.REG_DWORD)
         reg_set_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\IniFileMapping", "Autorun.inf", "@SYS:DoesNotExist", winreg.REG_SZ)
         
@@ -5123,10 +5004,8 @@ def IconCache_Clear():
                 safe_remove(file_path)
                 cleaned_count += 1
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
     
-    # Перезапускаем проводник
     subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], capture_output=True)
     time.sleep(1)
     subprocess.run(["explorer.exe"], capture_output=True)
@@ -5168,10 +5047,8 @@ def Startup_Clean():
                         cleaned_count += 1
                         print(f"{Colors.YELLOW}[!] Удалено из автозагрузки: {item}{Colors.RESET}")
                     except Exception as _e:
-                        # Expected exception, intentionally ignored
                         pass
     
-    # Также проверяем реестр Run
     run_keys = [
         r"Software\Microsoft\Windows\CurrentVersion\Run",
         r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
@@ -5195,7 +5072,6 @@ def Startup_Clean():
                     break
             winreg.CloseKey(key)
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
     
     logger.log("Startup_Clean", "success", f"Очищено {cleaned_count} записей автозагрузки")
@@ -5213,7 +5089,6 @@ def TaskScheduler_Clean():
         return True
     
     try:
-        # Получаем список задач: Win8+ через Get-ScheduledTask, Win7 через schtasks.
         if win_at_least("8"):
             ps_cmd = "Get-ScheduledTask | Where-Object {$_.TaskName -notmatch '^Microsoft$'} | Select-Object TaskName, TaskPath"
             result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
@@ -5226,7 +5101,6 @@ def TaskScheduler_Clean():
         for line in lines:
             if 'temp' in line.lower() or 'hack' in line.lower() or 'virus' in line.lower():
                 print(f"{Colors.YELLOW}[!] Обнаружена подозрительная задача: {line}{Colors.RESET}")
-                # Можно добавить удаление, но это рискованно - лучше только показать
                 suspicious_count += 1
         
         logger.log("TaskScheduler_Clean", "success", f"Проверено задач планировщика")
@@ -5237,9 +5111,6 @@ def TaskScheduler_Clean():
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
         return False
 
-# ═══════════════════════════════════════════════════════════════
-# БЛОК 6: ПРОДВИНУТЫЕ ИСПРАВЛЕНИЯ
-# ═══════════════════════════════════════════════════════════════
 
 def WMI_Repair():
     """Восстановление службы управления Windows"""
@@ -5252,7 +5123,6 @@ def WMI_Repair():
         return True
     
     try:
-        # Перезапускаем службу WMI
         subprocess.run(["net", "stop", "winmgmt", "/y"], capture_output=True)
         time.sleep(2)
         subprocess.run(["net", "start", "winmgmt"], capture_output=True)
@@ -5270,9 +5140,6 @@ def WMI_Repair():
 
 _WMI_NAMESPACE = r"root\subscription"
 
-# CIM/CLI is used instead of a compiled COM helper: it works on Windows 7-11
-# with the built-in PowerShell, needs no extra Python packages, and lets us
-# enumerate/remove root\subscription objects without touching the repository.
 _WMI_ENUM_SCRIPT = r"""
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
@@ -5562,7 +5429,6 @@ def _wmi_add_reason(entry, reason):
 
 
 def _wmi_path_suffix(path):
-    """Return the class/name part of a WMI object path."""
     text = str(path or "").strip()
     if ":" in text:
         text = text.rsplit(":", 1)[-1]
@@ -5570,7 +5436,6 @@ def _wmi_path_suffix(path):
 
 
 def _wmi_path_name(path):
-    """Extract the Name value from a WMI object path."""
     suffix = _wmi_path_suffix(path)
     match = re.search(r'Name\s*=\s*["\']([^"\']+)["\']', suffix, re.IGNORECASE)
     if match:
@@ -5597,7 +5462,6 @@ def _wmi_paths_match(left, right):
 
 
 def _wmi_score_text(text, rules, threshold=30):
-    """Score command/script/query text and return (suspicious, reasons)."""
     content = str(text or "")
     if not content.strip():
         return False, []
@@ -5610,7 +5474,6 @@ def _wmi_score_text(text, rules, threshold=30):
             if reason not in reasons:
                 reasons.append(reason)
 
-    # Long base64 blobs are almost always encoded payloads in WMI persistence.
     try:
         import base64
         for match in re.finditer(r"[A-Za-z0-9+/]{80,}={0,2}", content):
@@ -5722,7 +5585,6 @@ def _wmi_find_consumer(entries, path, name, consumer_type):
 
 
 def _wmi_link_and_score(entries):
-    """Flag consumers/filters independently, then propagate through bindings."""
     for entry in entries:
         entry["suspicious"] = False
         entry["reasons"] = []
@@ -5753,7 +5615,6 @@ def _wmi_link_and_score(entries):
 
     bindings = [entry for entry in entries if entry["kind"] == "Binding"]
     for binding in bindings:
-        # Штатный биндинг службы журналов Windows (SCM Event Log) легитимен
         if "SCM Event Log" in binding.get("name", "") or binding.get("consumer_type") == "NTEventLogEventConsumer":
             binding["suspicious"] = False
             continue
@@ -5767,8 +5628,6 @@ def _wmi_link_and_score(entries):
             binding["suspicious"] = True
             _wmi_add_reason(binding, "Осиротевший биндинг")
 
-    # A malicious consumer makes its filter part of the persistence pair and
-    # vice versa. Iterate because one binding can reveal another linked object.
     for _ in range(len(bindings) + 1):
         changed = False
         for binding in bindings:
@@ -5798,7 +5657,6 @@ def _wmi_link_and_score(entries):
 
 
 def _wmi_run_powershell(script, env=None, timeout=60):
-    """Run a fixed PowerShell script and return (ok, stdout, stderr)."""
     if sys.platform != "win32":
         return False, "", "WMI доступен только в Windows"
     last_error = ""
@@ -5851,7 +5709,6 @@ def _wmi_parse_json(text):
 
 
 def _wmi_collect_persistence():
-    """Enumerate root\\subscription objects and mark suspicious entries."""
     ok, output, error = _wmi_run_powershell(_WMI_ENUM_SCRIPT)
     if not ok:
         return [], error or "Не удалось запустить PowerShell"
@@ -5907,7 +5764,6 @@ def _wmi_dump_directory():
 
 
 def _wmi_export_dump(entries):
-    """Write a JSON and a readable TXT dump; return both paths."""
     folder = _wmi_dump_directory()
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     json_path = os.path.join(folder, f"wmi_persistence_{stamp}.json")
@@ -5958,7 +5814,6 @@ def _wmi_export_dump(entries):
 
 
 def _wmi_expand_removal_targets(entries, selected):
-    """Add bindings linked to selected filters/consumers, bindings first."""
     if not selected:
         return []
     result = []
@@ -6010,7 +5865,6 @@ def _wmi_expand_removal_targets(entries, selected):
 
 
 def _wmi_remove_entries(entries):
-    """Delete WMI objects through CIM. Returns a result dictionary."""
     targets = []
     seen = set()
     for entry in entries or []:
@@ -6085,7 +5939,6 @@ def _wmi_remove_entries(entries):
 
 
 def WMI_Persistence_Sweep():
-    """Find and remove hidden WMI event persistence in root\\subscription."""
     print_hacker_message("WMI root\\subscription: ищу скрытые фильтры и консьюмеры...")
     entries, scan_error = _wmi_collect_persistence()
 
@@ -6152,9 +6005,6 @@ def WMI_Persistence_Sweep():
     print(f"{Colors.GREEN}[+] WMI: удалено объектов {len(removed)}{Colors.RESET}")
     return True
 
-# ═══════════════════════════════════════════════════════════════
-# NTFS ALTERNATE DATA STREAMS (ADS) / ZONE.IDENTIFIER
-# ═══════════════════════════════════════════════════════════════
 
 _ADS_MAX_PATH = 260
 _ADS_MAX_READ = 4 * 1024 * 1024
@@ -6183,8 +6033,6 @@ _ADS_EXEC_EXTENSIONS = (
     ".py",
     ".pif",
 )
-# Reasons intentionally reuse existing WMI translation keys where the meaning
-# matches. Only ADS-specific labels need new translations.
 _ADS_TEXT_RULES = (
     ("powershell", 40, "PowerShell-команда"),
     ("pwsh", 40, "PowerShell-команда"),
@@ -6226,7 +6074,6 @@ _ADS_WIN32_API = None
 
 
 def _ads_win32_api():
-    """Lazily bind FindFirstStreamW / FindNextStreamW / FindClose."""
     global _ADS_WIN32_API
     if _ADS_WIN32_API is not None:
         return _ADS_WIN32_API
@@ -6274,7 +6121,6 @@ def _ads_extended_path(path):
 
 
 def _ads_stream_name(raw):
-    """Normalize ':name:$DATA' to 'name', and the default stream to ''."""
     text = str(raw or "").strip()
     if text.startswith(":"):
         text = text[1:]
@@ -6284,7 +6130,6 @@ def _ads_stream_name(raw):
 
 
 def _ads_enumerate_streams(path):
-    """List named NTFS streams through FindFirstStreamW/FindNextStreamW."""
     api = _ads_win32_api()
     if api is None:
         return [], "NTFS ADS доступны только в Windows"
@@ -6298,8 +6143,6 @@ def _ads_enumerate_streams(path):
         return [], str(error)
     if not handle or handle == invalid_handle:
         code = _ads_last_error()
-        # 1/50: file system has no stream support, 5: access denied,
-        # 38: no more streams. None of these are scan failures.
         if code in (1, 5, 38, 50):
             return [], ""
         return [], f"FindFirstStreamW: {_ads_format_winerror(code)}"
@@ -6313,8 +6156,6 @@ def _ads_enumerate_streams(path):
             if not api.FindNextStreamW(handle, ctypes.byref(data)):
                 code = _ads_last_error()
                 if code not in (0, 38):
-                    # Keep the streams found so far; one unreadable entry must
-                    # not discard the rest of the file's stream list.
                     pass
                 break
     finally:
@@ -6331,7 +6172,6 @@ def _ads_read_stream(path, name, limit=_ADS_MAX_READ):
 
 
 def _ads_find_pe_offsets(data, limit=24):
-    """Find MZ/PE pairs, including payloads appended inside a stream."""
     if not data or len(data) < 0x40:
         return []
     found = []
@@ -6400,7 +6240,6 @@ def _ads_add_reason(reasons, reason):
 
 
 def _ads_analyze_stream(name, size, data, truncated=False):
-    """Score one named stream; returns (suspicious, reasons, pe_offsets)."""
     reasons = []
     score = 0
     data = data or b""
@@ -6517,7 +6356,6 @@ def _ads_default_roots():
             seen.add(key)
             unique.append(path)
 
-    # %TEMP% is usually nested inside %LOCALAPPDATA%; do not walk it twice.
     filtered = []
     for path in unique:
         key = os.path.normcase(path).rstrip("\\/") + os.sep
@@ -6575,7 +6413,6 @@ def _ads_sort_key(entry):
 
 
 def _ads_collect_streams(progress=None, cancel_event=None, roots=None):
-    """Scan roots for named streams and classify ADS/Zone.Identifier entries."""
     stats = {
         "roots": [],
         "files": 0,
@@ -6698,7 +6535,6 @@ def _ads_dump_directory():
 
 
 def _ads_export_dump(entries, stats=None, action="scan"):
-    """Write JSON and readable TXT evidence before removing any stream."""
     folder = _ads_dump_directory()
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     json_path = os.path.join(folder, f"ads_scan_{stamp}.json")
@@ -6780,7 +6616,6 @@ def _ads_is_safe_stream_target(path, name):
 
 
 def _ads_delete_streams(entries):
-    """Delete only selected named streams; the default file content is untouched."""
     removed = []
     errors = []
     targets = []
@@ -6841,7 +6676,6 @@ def _ads_delete_streams(entries):
 
 
 def NTFS_ADS_Sweep():
-    """Find hidden NTFS data streams and remove them without touching file data."""
     print_hacker_message("NTFS ADS: ищу скрытые потоки и метки Zone.Identifier...")
     entries, scan_error, stats = _ads_collect_streams()
 
@@ -7022,7 +6856,6 @@ def _proc_win32_api():
             if result == 0 and ctypes.GetLastError() != 0:
                 break
             if result == 0:
-                # Move forward to avoid an infinite loop.
                 address += 0x1000
                 if address == 0:
                     break
@@ -7281,8 +7114,6 @@ def _proc_compare_main_image(api, handle, path):
 
     header_memory = api["read"](handle, base, _PROC_HEADER_READ)
     if header_memory is None:
-        # Недоступность чтения памяти системного процесса — это штатное поведение Windows (PPL/System),
-        # а не признак hollowing или инъекции. Не создаем ложную тревогу.
         return findings
 
     memory_pe = _proc_parse_pe_blob(header_memory)
@@ -7326,7 +7157,6 @@ def _proc_compare_main_image(api, handle, path):
             continue
         memory_bytes = api["read"](handle, virtual_address, raw_size)
         if memory_bytes is None or len(memory_bytes) < raw_size:
-            # Недоступность чтения отдельной защищенной секции — пропускаем без ложного флага
             continue
         disk_hash = hashlib.sha256(disk_bytes[:raw_size]).hexdigest()
         memory_hash = hashlib.sha256(memory_bytes[:raw_size]).hexdigest()
@@ -7474,9 +7304,6 @@ def _proc_collect_memory(progress=None, cancel_event=None):
             if suspicious_region:
                 suspicious_rwx += 1
 
-        # Compare the on-disk PE image with the loaded executable image.
-        # Only code sections and headers are compared to avoid normal runtime
-        # changes in initialized data sections.
         if exe and os.path.isfile(exe):
             try:
                 module_base, module_path = api["main_module"](handle)
@@ -7641,7 +7468,6 @@ def _proc_export_dump(entries, stats=None, action="scan"):
 
 
 def Process_Hollowing_Scan():
-    """Find suspicious process-memory regions and PE mismatches."""
     import os as _os
     print_hacker_message("Проверяю память процессов на hollowing и внедрённый код...")
     entries, scan_error, stats = _proc_collect_memory()
@@ -7721,7 +7547,6 @@ def Service_State_Scan():
     started_count = 0
     for service in critical_services:
         try:
-            # Проверяем состояние службы
             result = subprocess.run(["sc", "query", service], capture_output=True, text=True)
             if "STOPPED" in result.stdout:
                 # Запускаем службу
@@ -7729,7 +7554,6 @@ def Service_State_Scan():
                 started_count += 1
                 print(f"{Colors.YELLOW}[!] Запущена служба: {service}{Colors.RESET}")
         except Exception as _e:
-            # Expected exception, intentionally ignored
             pass
     
     logger.log("Service_State_Scan", "success", f"Запущено {started_count} служб")
@@ -7747,7 +7571,6 @@ def Cert_Store_Clean():
         return True
     
     try:
-        # Удаляем подозрительные сертификаты через PowerShell
         ps_cmd = '''
 Get-ChildItem -Path Cert:\\LocalMachine\\Root | Where-Object {
     $_.Issuer -eq $_.Subject -and $_.NotBefore -gt (Get-Date).AddDays(-30)
@@ -7778,7 +7601,6 @@ def WinUpdate_Reset():
         subprocess.run(["net", "stop", "wuauserv", "/y"], capture_output=True)
         subprocess.run(["net", "stop", "bits", "/y"], capture_output=True)
         
-        # Удаляем папки обновлений
         update_dirs = [
             os.path.join(os.environ['SystemRoot'], 'SoftwareDistribution', 'Download'),
             os.path.join(os.environ['SystemRoot'], 'SoftwareDistribution', 'DataStore'),
@@ -7796,10 +7618,8 @@ def WinUpdate_Reset():
                             elif os.path.isdir(item_path):
                                 safe_rmtree(item_path)
                         except Exception as _e:
-                            # Expected exception, intentionally ignored
                             pass
                 except Exception as _e:
-                    # Expected exception, intentionally ignored
                     pass
         
         # Запускаем службы обратно
@@ -7829,7 +7649,6 @@ def LNK_File_Fix():
                 if item.endswith('.lnk'):
                     lnk_path = entry.path
                     try:
-                        # Проверяем цель ярлыка через PowerShell
                         ps_cmd = f"$shell = New-Object -ComObject WScript.Shell; $shortcut = $shell.CreateShortcut('{lnk_path}'); $shortcut.TargetPath"
                         result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
                         target = result.stdout.strip().lower()
@@ -7841,11 +7660,9 @@ def LNK_File_Fix():
                             if DRY_RUN:
                                 print(f"{Colors.CYAN}[DRY-RUN] Будет удален ярлык: {lnk_path}{Colors.RESET}")
                             else:
-                                # Удаляем ярлык
                                 safe_remove(lnk_path)
                             fixed_count += 1
                     except Exception as _e:
-                        # Expected exception, intentionally ignored
                         pass
         
         logger.log("LNK_File_Fix", "success", f"Исправлено {fixed_count} ярлыков")
@@ -7871,7 +7688,6 @@ def Print_Spooler_Fix():
         subprocess.run(["net", "stop", "spooler", "/y"], capture_output=True)
         time.sleep(1)
         
-        # Удаляем файлы очереди
         spool_path = os.path.join(os.environ['SystemRoot'], 'System32', 'spool', 'PRINTERS')
         if os.path.exists(spool_path):
             for entry in os.scandir(spool_path):
@@ -7880,7 +7696,6 @@ def Print_Spooler_Fix():
                 try:
                     safe_remove(item_path)
                 except Exception as _e:
-                    # Expected exception, intentionally ignored
                     pass
         
         # Запускаем службу обратно
@@ -7898,7 +7713,6 @@ def Self_Defense_Engine():
     """Постоянная проверка собственного процесса на закрытие"""
     print_hacker_message("Включаю самооборону! Если вирус попытается меня закрыть — я сразу respawn!")
     
-    # Это упрощенная версия — в реальности нужен отдельный процесс-монитор
     logger.log("Self_Defense_Engine", "success", "Самооборона активирована (базовая защита)")
     print(f"{Colors.GREEN}[+] Режим самообороны активирован{Colors.RESET}")
     print(f"{Colors.YELLOW}[!] Примечание: Для полной защиты нужен отдельный монитор-процесс{Colors.RESET}")
@@ -7916,7 +7730,6 @@ def SafeMode_Full_Repair():
         print(f"{Colors.GREEN}[+] Safe Mode будет восстановлен{Colors.RESET}")
         return True
     
-    # Базовые драйверы и службы для Safe Mode
     minimal_services = [
         ('Basic', 'Driver Group'),
         ('Bus Extenders', 'Driver Group'),
@@ -7961,8 +7774,6 @@ def SafeMode_Full_Repair():
             try:
                 winreg.SetValueEx(key, service, 0, winreg.REG_SZ, service_type)
             except (OSError, PermissionError) as e:
-                # Игнорируем ошибки при записи отдельных значений
-                # Некоторые драйверы могут отсутствовать в конкретной системе
                 pass
         winreg.CloseKey(key)
         
@@ -7977,8 +7788,6 @@ def SafeMode_Full_Repair():
             try:
                 winreg.SetValueEx(key, service, 0, winreg.REG_SZ, service_type)
             except (OSError, PermissionError) as e:
-                # Игнорируем ошибки при записи отдельных значений
-                # Некоторые драйверы могут отсутствовать в конкретной системе
                 pass
         winreg.CloseKey(key)
         
@@ -8011,7 +7820,6 @@ def EXE_Assoc():
         return True
     
     try:
-        # Восстанавливаем ассоциацию .exe напрямую через реестр.
         with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, ".exe") as extension_key:
             winreg.SetValue(extension_key, "", winreg.REG_SZ, "exefile")
         with winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, r"exefile\shell\open\command") as command_key:
@@ -8067,7 +7875,6 @@ def Admin_Force():
         return True
     
     try:
-        # Запрашиваем привилегию SeTakeOwnershipPrivilege
         privilege_id = 20  # SeTakeOwnershipPrivilege
         token = ctypes.c_void_p()
         advapi32 = ctypes.windll.advapi32
@@ -8099,7 +7906,6 @@ def MSCONFIG_Unlock():
         return True
     
     try:
-        # Удаляем блокировки msconfig в IFEO и политиках
         keys_to_check = [
             (r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\msconfig.exe", None),
             (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "DisableTaskMgr"),
@@ -8113,7 +7919,6 @@ def MSCONFIG_Unlock():
                 else:
                     reg_delete_key(key_path, recursive=True)
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
         logger.log("MSCONFIG_Unlock", "success", "msconfig разблокирован")
@@ -8135,7 +7940,6 @@ def Windows_Defender_Enable():
         return True
     
     try:
-        # Удаляем ключи отключения Защитника
         defender_keys = [
             (r"SOFTWARE\Policies\Microsoft\Windows Defender", "DisableAntiSpyware"),
             (r"SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection", "DisableRealtimeMonitoring"),
@@ -8147,7 +7951,6 @@ def Windows_Defender_Enable():
             try:
                 reg_delete_value(key_path, value_name)
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
         # Запускаем службы Защитника
@@ -8173,7 +7976,6 @@ def System_Restore_Enable():
         return True
     
     try:
-        # Удаляем блокировки восстановления системы
         keys_to_delete = [
             (r"SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore", "DisableSR"),
             (r"SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore", "DisableConfig"),
@@ -8184,10 +7986,8 @@ def System_Restore_Enable():
             try:
                 reg_delete_value(key_path, value_name)
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
-        # Включаем службу
         subprocess.run(["sc", "config", "sr", "start=", "demand"], capture_output=True)
         
         logger.log("System_Restore_Enable", "success", "Восстановление системы включено")
@@ -8209,7 +8009,6 @@ def AutoPlay_Disable():
         return True
     
     try:
-        # Отключаем автозапуск для всех дисков
         reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer", "NoDriveTypeAutoRun", 255, winreg.REG_DWORD)
         
         # Для всех пользователей
@@ -8234,7 +8033,6 @@ def Boot_Sector_Check():
         return True
     
     try:
-        # Проверяем bcdedit на наличие подозрительных записей
         result = subprocess.run(["bcdedit", "/enum", "firmware"], capture_output=True, text=True)
         
         suspicious_found = False
@@ -8242,7 +8040,6 @@ def Boot_Sector_Check():
             suspicious_found = True
             print(f"{Colors.YELLOW}[!] Найдены подозрительные записи в загрузчике!{Colors.RESET}")
         
-        # Проверяем MBR через diskpart
         diskpart_cmd = "list disk"
         result = subprocess.run(["diskpart", "/s", "-"], input=diskpart_cmd, capture_output=True, text=True)
         
@@ -8281,7 +8078,6 @@ def Chrome_Extensions_Clean():
             if os.path.exists(ext_path):
                 for entry in os.scandir(ext_path):
                     ext_id = entry.name
-                    # Проверяем на подозрительные ID (обычно вирусы имеют случайные ID)
                     if len(ext_id) == 32 and all(c in 'abcdefghijklmnopqrstuvwxyz' for c in ext_id[:5]):
                         print(f"{Colors.YELLOW}[!] Подозрительное расширение: {ext_id}{Colors.RESET}")
                         suspicious_count += 1
@@ -8326,7 +8122,6 @@ def Startup_Registry_Scan():
                 while True:
                     try:
                         name, value, _ = winreg.EnumValue(key, i)
-                        # Проверяем на подозрительные пути
                         value_lower = str(value).lower()
                         if any(x in value_lower for x in ['temp', 'appdata', 'random', 'svch0st', 'csrss.exe']):
                             if 'system32' not in value_lower and 'syswow64' not in value_lower:
@@ -8337,7 +8132,6 @@ def Startup_Registry_Scan():
                         break
                 winreg.CloseKey(key)
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
         logger.log("Startup_Registry_Scan", "success", f"Найдено подозрительных: {len(suspicious_entries)}")
@@ -8371,7 +8165,6 @@ def Event_Viewer_Clean():
             try:
                 subprocess.run(["wevtutil", "cl", log_name], capture_output=True)
             except Exception as _e:
-                # Expected exception, intentionally ignored
                 pass
         
         logger.log("Event_Viewer_Clean", "success", "Журналы событий очищены")
@@ -8382,9 +8175,7 @@ def Event_Viewer_Clean():
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
         return False
 
-# ═══════════════════════════════════════════════════════════════
 # СИСТЕМА РЕЗЕРВНОГО КОПИРОВАНИЯ
-# ═══════════════════════════════════════════════════════════════
 
 def Backup_Registry():
     """Экспорт ключей реестра в файл"""
@@ -8400,7 +8191,6 @@ def Backup_Registry():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_prefix = os.path.join(BACKUP_DIR, f"registry_backup_{timestamp}")
         
-        # Экспортируем важные ключи
         keys_to_export = [
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion",
             "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion",
@@ -8464,7 +8254,6 @@ def Backup_System_Restore():
         return True
     
     try:
-        # Создаем точку восстановления через PowerShell
         ps_cmd = "Checkpoint-Computer -Description 'NoVir Backup' -RestorePointType 'MODIFY_SETTINGS'"
         result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
         
@@ -8526,7 +8315,6 @@ def Backup_Firewall():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = os.path.join(BACKUP_DIR, f"firewall_backup_{timestamp}.wfw")
         
-        # Экспортируем правила брандмауэра
         result = subprocess.run(["netsh", "advfirewall", "export", backup_file], capture_output=True)
         
         if result.returncode == 0:
@@ -8680,9 +8468,7 @@ def Restore_From_Backup():
         print(f"{Colors.RED}[!] Ошибка: {e}{Colors.RESET}")
         return False
 
-# ═══════════════════════════════════════════════════════════════
 # ДИСПЕТЧЕР ЗАДАЧ
-# ═══════════════════════════════════════════════════════════════
 
 class ProcessAnalyzer:
     """Анализатор процессов для определения уровня угрозы"""
@@ -8708,7 +8494,6 @@ class ProcessAnalyzer:
             
             threat_score = 0
             
-            # Проверка на подозрительные имена
             for suspicious in ProcessAnalyzer.SUSPICIOUS_NAMES:
                 if suspicious in name:
                     threat_score += 5
@@ -8727,12 +8512,10 @@ class ProcessAnalyzer:
             if any(char.isdigit() for char in name):
                 threat_score += 1
             
-            # Ограничиваем диапазон 0-10
             threat_score = max(0, min(10, threat_score))
             
             return threat_score * 10
         except Exception as _e:
-            # Expected exception, intentionally ignored
             return 50  # Средний уровень угрозы по умолчанию
 
     @staticmethod
@@ -8870,7 +8653,6 @@ def freeze_process(pid):
         kernel32.CloseHandle(h_process)
         return status == 0
     except Exception as _e:
-        # Expected exception, intentionally ignored
         return False
 
 def resume_process(pid):
@@ -8887,10 +8669,8 @@ def resume_process(pid):
         kernel32.CloseHandle(h_process)
         return status == 0
     except Exception as _e:
-        # Expected exception, intentionally ignored
         return False
 
-# Restart Manager API Constants
 from ctypes import wintypes
 RM_SESSION_KEY_LEN = 16
 CCH_RM_SESSION_KEY = RM_SESSION_KEY_LEN * 2
@@ -8936,7 +8716,6 @@ def get_locking_processes(file_path):
         n_proc_info = ctypes.c_uint(0)
         reboot_reasons = ctypes.c_uint(0)
         
-        # Первая попытка: узнать нужный размер буфера
         res = rstrtmgr.RmGetList(session_handle, ctypes.byref(n_proc_info_needed), ctypes.byref(n_proc_info), None, ctypes.byref(reboot_reasons))
         
         if res == 234: # ERROR_MORE_DATA
@@ -8972,7 +8751,6 @@ def kill_process_force(pid):
         kernel32.CloseHandle(h_process)
         return status != 0
     except Exception as _e:
-        # Expected exception, intentionally ignored
         return False
 
 def enable_privilege(privilege_name):
@@ -9029,7 +8807,6 @@ def set_process_critical(pid, is_critical=True):
         kernel32.CloseHandle(h_process)
         return status == 0
     except Exception as _e:
-        # Expected exception, intentionally ignored
         return False
 
 def open_in_explorer(path):
@@ -9041,7 +8818,6 @@ def open_in_explorer(path):
             subprocess.run(['explorer', path], check=False)
             return True
     except Exception as _e:
-        # Expected exception, intentionally ignored
         return False
     return False
 
@@ -9229,7 +9005,6 @@ def SmartScreen_Enable():
         logger.log("SmartScreen_Enable", "success", "SmartScreen будет включен")
         return True
 
-    # Windows 7: политик System\EnableSmartScreen ещё нет — только AppHost-оценка.
     if win_is("7"):
         ok = reg_set_value(
             r"Software\Microsoft\Windows\CurrentVersion\AppHost",
@@ -9256,9 +9031,8 @@ def SmartScreen_Enable():
 
 def Ransomware_Shield_Enable():
     """Включение защиты от шифровальщиков (Controlled Folder Access)"""
-    # Controlled Folder Access появился в Windows 10 1709. На Win7/8/8.1 нет.
     if not win_at_least("10"):
-        print_hacker_message("Защита от шифровальщиков появилась в Windows 10.")
+        print_hacker_message("В этой версии Windows нет контроля доступа к папкам (нужна Win10+).")
         logger.log("Ransomware_Shield_Enable", "warning",
                    f"Controlled Folder Access недоступен на Windows {win_target()}")
         print(f"{Colors.YELLOW}[!] Controlled Folder Access недоступен на Windows "
@@ -9296,7 +9070,6 @@ def SMBv1_Disable():
         logger.log("SMBv1_Disable", "success", "SMBv1 будет отключен")
         return True
 
-    # Windows 7: нет DISM-фичи SMB1Protocol — отключаем через реестр.
     if win_is("7"):
         ok = reg_set_value(
             r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
@@ -9314,7 +9087,6 @@ def SMBv1_Disable():
     ])
     text = f"{out}\n{err}".lower()
     
-    # DISM возвращает код 3010 (нужна перезагрузка) — это тоже успех
     if (ok or "already" in text or "disabled" in text or "отключ" in text
             or "completed successfully" in text or "успешно" in text
             or "restart" in text or "перезагруз" in text):
@@ -9353,9 +9125,8 @@ def WDigest_Disable():
 
 def LSA_Protection_Enable():
     """Включение защиты LSA (RunAsPPL) для защиты от кражи паролей"""
-    # RunAsPPL появился в Windows 8.1. На Win7/8.0 ключ не поддерживается.
     if not win_at_least("8.1"):
-        print_hacker_message("Защита LSA (RunAsPPL) появилась в Windows 8.1.")
+        print_hacker_message("Защита LSA не поддерживается на старых сборках Windows.")
         logger.log("LSA_Protection_Enable", "warning",
                    f"RunAsPPL недоступен на Windows {win_target()}")
         print(f"{Colors.YELLOW}[!] RunAsPPL недоступен на Windows {win_target()} — "
@@ -9417,7 +9188,6 @@ def Guest_Account_Disable():
         logger.log("Guest_Account_Disable", "success", "Гостевая учетная запись будет отключена")
         return True
     
-    # Имя гостевой записи зависит от языка системы: "Guest" или "Гость"
     attempts = [
         ["net", "user", "Guest", "/active:no"],
         ["net", "user", "Гость", "/active:no"],
@@ -9474,7 +9244,6 @@ def UAC_Max_Upgrade():
         logger.log("UAC_Max_Upgrade", "success", "UAC будет повышен")
         return True
     
-    # reg_set_value возвращает bool и не бросает исключения — проверяем каждый ключ
     ok1 = reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableLUA", 1, winreg.REG_DWORD, hive=winreg.HKEY_LOCAL_MACHINE)
     ok2 = reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "ConsentPromptBehaviorAdmin", 2, winreg.REG_DWORD, hive=winreg.HKEY_LOCAL_MACHINE)
     ok3 = reg_set_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "PromptOnSecureDesktop", 1, winreg.REG_DWORD, hive=winreg.HKEY_LOCAL_MACHINE)
@@ -9491,9 +9260,8 @@ def UAC_Max_Upgrade():
 
 def SecureBoot_Status():
     """Проверка состояния Secure Boot (только чтение)"""
-    # Управление Secure Boot появилось в Windows 8. На Win7 его нет.
     if not win_at_least("8"):
-        print_hacker_message("Secure Boot не поддерживается на Windows 7.")
+        print_hacker_message("В Windows 7 нет проверки Secure Boot.")
         logger.log("SecureBoot_Status", "warning", "Secure Boot не поддерживается на Win7")
         print(f"{Colors.YELLOW}[!] Secure Boot не поддерживается на Windows 7 "
               f"(появился в Windows 8){Colors.RESET}")
@@ -9537,12 +9305,9 @@ def BitLocker_Status():
         print(f"{Colors.YELLOW}[!] Не удалось проверить BitLocker (доступна только на Pro/Enterprise){Colors.RESET}")
         return False
     
-    # ВАЖНО: "Percentage Protected: 0%" печатается и на НЕзашифрованном томе,
-    # поэтому матчит на саму подпись — надо парсить число, а не искать подпись.
     m = re.search(r"(?:percentage protected|процент защищ|percent protected)\s*[:：]\s*(\d+)", low)
     pct = int(m.group(1)) if m else None
     
-    # Статус защиты (English "Protection Status: Protection On" / Русский "Защита включена")
     protection_on = ("protection on" in low or "защита включена" in low
                      or "включена" in low and "защит" in low)
     
@@ -9560,7 +9325,7 @@ def BitLocker_Status():
 
 def Defender_Update_Sigs():
     """Обновление подписей Microsoft Defender"""
-    print_hacker_message("Обновляю signatures Microsoft Defender.")
+    print_hacker_message("Обновляю сигнатуры Защитника Windows.")
     
     if DRY_RUN:
         print(f"{Colors.CYAN}[DRY-RUN] Подписи Defender будут обновлены{Colors.RESET}")
@@ -9573,7 +9338,6 @@ def Defender_Update_Sigs():
             "powershell", "-NoProfile", "-Command", "Update-MpSignature"
         ], timeout=60)
     else:
-        # Windows 7/8: модуля Defender нет — обновляем через MpCmdRun.exe.
         candidates = []
         for base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
                      os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
@@ -9778,9 +9542,6 @@ HIGH_RISK_FUNCTION_NAMES = {
     "UAC_Max_Upgrade",
 }
 
-# ═══════════════════════════════════════════════════════════════
-# GUI КЛАССЫ (PYSIDE6)
-# ═══════════════════════════════════════════════════════════════
 
 if GUI_MODE:
     from PySide6.QtWidgets import (QDialog, QVBoxLayout, QPushButton, QLabel, QScrollArea, 
@@ -9796,7 +9557,6 @@ if GUI_MODE:
     
 
     class WinPEBuildWorker(QThread):
-        """Run the official ADK preparation and USB-writing scripts off the UI thread."""
         stage_changed = Signal(str)
         result_ready = Signal(object)
 
@@ -9813,8 +9573,6 @@ if GUI_MODE:
                 "COMSPEC",
                 os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe"),
             )
-            # A raw Windows command line is used intentionally: passing nested
-            # quoted paths as a QProcess argument makes cmd.exe treat \" as text.
             command_line = f'"{comspec}" /d /c {command}'
             return subprocess.run(
                 command_line,
@@ -9886,7 +9644,6 @@ if GUI_MODE:
                 })
 
     def _remember_source(widget, property_name, value):
-        """Return the unlocalized value retained on a Qt object."""
         source = widget.property(property_name)
         if source is None:
             source = value
@@ -9895,7 +9652,6 @@ if GUI_MODE:
 
 
     def localize_widget_tree(root):
-        """Translate all display text below *root* without changing user data."""
         if getattr(root, "_novir_localizing", False):
             return
         try:
@@ -9961,7 +9717,6 @@ if GUI_MODE:
                             if index < widget.count():
                                 widget.setTabText(index, language_manager.translate(source))
                 except Exception:
-                    # A widget can be destroyed while a dialog is closing.
                     continue
         finally:
             try:
@@ -9971,7 +9726,6 @@ if GUI_MODE:
 
 
     class TranslationEventFilter(QObject):
-        """Localize main windows and every late-created dialog on first display."""
         def eventFilter(self, watched, event):
             if event.type() in (QEvent.Show, QEvent.WindowActivate):
                 _last_lang = getattr(watched, "_novir_localized_lang", None)
@@ -9988,7 +9742,6 @@ if GUI_MODE:
 
 
     class LanguageSelectionDialog(QDialog):
-        """Shown once, before the main NoVir window is created."""
         def __init__(self, parent=None):
             super().__init__(parent)
             self.setWindowTitle("Выбор языка / Language / Sprache / Język / Langue")
@@ -10014,7 +9767,6 @@ if GUI_MODE:
             self.accept()
 
         def reject(self):
-            # Closing the chooser accepts the documented default: English.
             language_manager.set_language("en")
             super().reject()
 
@@ -10112,7 +9864,6 @@ if GUI_MODE:
                     data = self.loader_func()
                 except Exception:
                     data = []
-                # emit list of tuples (name, val)
                 self.data_signal.emit(data)
             except Exception:
                 self.data_signal.emit([])
@@ -10253,7 +10004,6 @@ if GUI_MODE:
             header = QFrame()
             header.setObjectName("TaskHeader")
             header.setStyleSheet("""
-                #TaskHeader {
                     background-color: #000000;
                     border: 1px solid #333333;
                     border-radius: 16px;
@@ -10272,7 +10022,6 @@ if GUI_MODE:
             buttons_frame = QFrame()
             buttons_frame.setObjectName("ActionBar")
             buttons_frame.setStyleSheet("""
-                #ActionBar {
                     background-color: rgba(255,255,255,0.035);
                     border: 1px solid #111111;
                     border-radius: 14px;
@@ -10324,7 +10073,6 @@ if GUI_MODE:
             buttons_layout.addStretch()
             layout.addWidget(buttons_frame)
 
-            # Строка поиска по PID или имени
             search_row = QHBoxLayout()
             search_row.setSpacing(8)
             search_label = QLabel("Поиск:")
@@ -10356,7 +10104,6 @@ if GUI_MODE:
             table_frame = QFrame()
             table_frame.setObjectName("ProcessTableFrame")
             table_frame.setStyleSheet("""
-                #ProcessTableFrame {
                     background-color: rgba(255,255,255,0.03);
                     border: 1px solid #111111;
                     border-radius: 14px;
@@ -10473,11 +10220,9 @@ if GUI_MODE:
 
             self.table.setUpdatesEnabled(True)
             self.table.viewport().update()
-            # Re-apply search filter after refresh
             if hasattr(self, "search_edit"):
                 self._filter_processes(self.search_edit.text())
 
-            # Запуск асинхронного сканирования через Defender
             processes_to_scan = []
             for r in range(self.table.rowCount()):
                 exe_path = self.table.item(r, 2).text()
@@ -10624,45 +10369,36 @@ if GUI_MODE:
         path_lower = str(path).lower()
         name_lower = str(name).lower()
 
-        # 0. Файлы в папке автозагрузки — легитимны, даже если путь внутри
-        # AppData\Roaming или ProgramData. Красным помечаем только реально
-        # подозрительные имена.
         if 'start menu\\programs\\startup' in path_lower or 'start menu/programs/startup' in path_lower:
             for bad_name in ProcessAnalyzer.SUSPICIOUS_NAMES:
                 if bad_name in name_lower:
                     return QColor(244, 67, 54)
             return QColor(76, 175, 80)
         
-        # 1. Подозрительные пути
         danger_paths = ['appdata\\local\\temp', 'appdata\\roaming', 'programdata']
         for dp in danger_paths:
             if dp in path_lower:
                 return QColor(244, 67, 54) # Red
                 
-        # 2. Подозрительные имена в пути (из словаря)
         for bad_name in ProcessAnalyzer.SUSPICIOUS_NAMES:
             if bad_name in path_lower or bad_name in name_lower:
                 return QColor(244, 67, 54) # Red
                 
-        # 3. Легитимный Shell/Userinit без полного пути (чистая Windows)
         _base = path_lower.replace('/', '\\').split('\\')[-1].strip().strip('"').strip()
         if _base in ('explorer.exe', 'explorer.exe,'):
             if ('\\' not in path_lower and '/' not in path_lower) or 'windows' in path_lower or '%systemroot%' in path_lower:
                 return QColor(76, 175, 80) # Green — стандартное значение
 
-        # 4. Маскировка системных процессов
         system_procs = ['svchost.exe', 'explorer.exe', 'csrss.exe', 'lsass.exe', 'winlogon.exe']
         for sp in system_procs:
             if sp in path_lower and 'system32' not in path_lower and 'syswow64' not in path_lower:
                 return QColor(244, 67, 54) # Red
                 
-        # 4. Безопасные пути (System32)
         safe_paths = ['windows\\system32', 'windows\\syswow64']
         for sp in safe_paths:
             if sp in path_lower:
                 return QColor(76, 175, 80) # Green
                 
-        # 5. Нейтрально
         return QColor(0, 0, 0) # Black text for white background
 
     class ToolWindow(QDialog):
@@ -10855,7 +10591,6 @@ if GUI_MODE:
             root_layout.setContentsMargins(10, 10, 10, 10)
             root_layout.setSpacing(6)
 
-            # Панель быстрых переходов
             quick_bar = QHBoxLayout()
             quick_bar.setSpacing(6)
             lbl_quick = QLabel("БЫСТРЫЙ ПЕРЕХОД:")
@@ -10877,7 +10612,6 @@ if GUI_MODE:
             quick_bar.addStretch()
             root_layout.addLayout(quick_bar)
 
-            # Адресная строка пути
             path_layout = QHBoxLayout()
             path_layout.setSpacing(6)
             lbl_path = QLabel("ПУТЬ:")
@@ -10892,7 +10626,6 @@ if GUI_MODE:
             path_layout.addWidget(btn_refresh)
             root_layout.addLayout(path_layout)
 
-            # Сплиттер: дерево разделов слева, таблица параметров справа
             splitter = QSplitter(Qt.Horizontal)
             self.tree = QTreeWidget()
             self.tree.setHeaderHidden(True)
@@ -11315,7 +11048,6 @@ if GUI_MODE:
 
         @staticmethod
         def _run_hidden(args, timeout=25, encoding="utf-8"):
-            """Run a Windows console tool without flashing a console window."""
             try:
                 return subprocess.run(
                     args, capture_output=True, text=True,
@@ -11334,7 +11066,6 @@ if GUI_MODE:
                 return None
 
         def _list_users(self):
-            """Return real local account names (PowerShell first, net user fallback)."""
             names = []
             ps = self._run_hidden([
                 "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -11368,7 +11099,6 @@ if GUI_MODE:
             return sorted(result, key=lambda item: (item.lower() != "administrator", item.lower()))
 
         def _admin_names(self):
-            """Return lowercase names of members of the local Administrators group."""
             admins = set()
             ps = self._run_hidden([
                 "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -11579,7 +11309,6 @@ if GUI_MODE:
             item = self.disk_table.item(row, 0)
             if not item: return None
             raw = item.text().strip()
-            # Extract drive letter (e.g. 'C:' or 'D:')
             if len(raw) >= 2 and raw[1] == ':':
                 return raw[:2].upper()
             return raw
@@ -11630,7 +11359,6 @@ if GUI_MODE:
                 QMessageBox.warning(self, "Предупреждение", "Выберите накопитель в таблице.")
                 return
             cleaned_mb = 0
-            # 1. Clean $Recycle.Bin on chosen drive
             recycle_path = f"{letter}\\$Recycle.Bin"
             if os.path.exists(recycle_path):
                 try:
@@ -11644,7 +11372,6 @@ if GUI_MODE:
                                 cleaned_mb += sz / (1024 * 1024)
                             except Exception: pass
                 except Exception: pass
-            # 2. If system drive, clean Temp
             if letter.upper() == "C:":
                 temp_paths = [os.environ.get("TEMP", ""), r"C:\Windows\Temp"]
                 for tp in temp_paths:
@@ -11667,7 +11394,6 @@ if GUI_MODE:
             if not letter:
                 QMessageBox.warning(self, "Предупреждение", "Выберите том для форматирования.")
                 return
-            # HARD LOCK on system volume
             sys_drive = os.environ.get("SystemDrive", "C:").upper()
             if letter.upper() == sys_drive:
                 QMessageBox.critical(self, "БЛОКИРОВКА БЕЗОПАСНОСТИ", "Форматирование системного диска C: категорически запрещено!")
@@ -11724,7 +11450,6 @@ if GUI_MODE:
             self.setMinimumSize(800, 500)
             self.resize(900, 540)
 
-            # Чистый стиль как в Windows CMD
             self.setStyleSheet("""
                 QDialog {
                     background-color: #000000;
@@ -11782,13 +11507,11 @@ if GUI_MODE:
             root.setContentsMargins(0, 0, 0, 0)
             root.setSpacing(0)
 
-            # Область вывода — занимает всё пространство
             self.output_area = QTextEdit()
             self.output_area.setReadOnly(True)
             self.output_area.setFont(QFont("Consolas", 11))
             root.addWidget(self.output_area)
 
-            # Строка ввода — внизу, вровень
             input_row = QHBoxLayout()
             input_row.setContentsMargins(0, 0, 0, 0)
             input_row.setSpacing(0)
@@ -11807,7 +11530,6 @@ if GUI_MODE:
             input_row.addWidget(self.btn_run)
             root.addLayout(input_row)
 
-            # Запуск процесса
             self.process = QProcess(self)
             self.process.setProcessChannelMode(QProcess.MergedChannels)
             self.process.readyReadStandardOutput.connect(self.handle_output)
@@ -11947,12 +11669,10 @@ if GUI_MODE:
                 }
             """)
 
-            # ── Главный layout ──────────────────────────────────────────
             root = QVBoxLayout(self)
             root.setContentsMargins(0, 0, 0, 0)
             root.setSpacing(0)
 
-            # ── Верхняя панель ──────────────────────────────────────────
             topbar = QFrame()
             topbar.setObjectName("topbar")
             topbar.setFixedHeight(42)
@@ -11971,7 +11691,6 @@ if GUI_MODE:
             top_layout.addWidget(self.lbl_method)
             root.addWidget(topbar)
 
-            # ── Кнопки быстрых команд ───────────────────────────────────
             quick_bar = QFrame()
             quick_bar.setStyleSheet("background-color: #0f0f0f; border-bottom: 1px solid #1a1a1a;")
             quick_layout = QHBoxLayout(quick_bar)
@@ -12012,14 +11731,12 @@ if GUI_MODE:
             quick_layout.addWidget(btn_clear)
             root.addWidget(quick_bar)
 
-            # ── Область вывода ──────────────────────────────────────────
             self.output_area = QTextEdit()
             self.output_area.setReadOnly(True)
             self.output_area.setFont(QFont("Consolas", 10))
             self.output_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             root.addWidget(self.output_area)
 
-            # ── Нижняя панель ввода ─────────────────────────────────────
             bottombar = QFrame()
             bottombar.setObjectName("bottombar")
             bottombar.setFixedHeight(52)
@@ -12045,7 +11762,6 @@ if GUI_MODE:
             bottom_layout.addWidget(self.btn_run)
             root.addWidget(bottombar)
 
-            # ── Запуск процесса ─────────────────────────────────────────
             self.process = QProcess(self)
             self.process.setProcessChannelMode(QProcess.MergedChannels)
             self.process.readyReadStandardOutput.connect(self.handle_output)
@@ -12103,274 +11819,6 @@ if GUI_MODE:
         def closeEvent(self, event):
             self.process.kill()
             super().closeEvent(event)
-
-
-    class GroqAIWorker(QThread):
-        response_ready = Signal(str)
-        
-        def __init__(self, api_key, memory):
-            super().__init__()
-            self.api_key = api_key
-            self.memory = memory
-            
-        def run(self):
-            import urllib.request
-            import urllib.error
-            import json
-            req = urllib.request.Request(
-                "https://api.groq.com/openai/v1/chat/completions",
-                method="POST"
-            )
-            req.add_header("Authorization", f"Bearer {self.api_key}")
-            req.add_header("Content-Type", "application/json")
-            req.add_header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-            )
-            data = {
-                "model": "openai/gpt-oss-120b",
-                "messages": self.memory,
-                "max_completion_tokens": 400,
-                # gpt-oss — reasoning-модель: без low размышления съедают
-                # лимит токенов, и content приходит пустым.
-                "reasoning_effort": "low",
-            }
-            try:
-                with urllib.request.urlopen(
-                    req,
-                    data=json.dumps(data).encode("utf-8"),
-                    timeout=20,
-                ) as response:
-                    res = json.loads(response.read().decode("utf-8"))
-                    reply = str(res["choices"][0]["message"].get("content") or "").strip()
-                    if not reply:
-                        self.response_ready.emit(
-                            "[Ошибка AI]: Пустой ответ модели. "
-                            "Повторите вопрос."
-                        )
-                        return
-                    self.response_ready.emit(reply)
-            except urllib.error.HTTPError as e:
-                body = ""
-                try:
-                    body = e.read().decode("utf-8", errors="replace")[:200]
-                except Exception:
-                    pass
-                if e.code == 401:
-                    self.response_ready.emit(
-                        "[Ошибка AI]: Неверный API-ключ (401). "
-                        "Проверьте подключение к интернету."
-                    )
-                elif e.code == 429:
-                    self.response_ready.emit(
-                        "[Ошибка AI]: Превышен лимит запросов (429). "
-                        "Подождите несколько секунд и попробуйте снова."
-                    )
-                elif e.code >= 500:
-                    self.response_ready.emit(
-                        f"[Ошибка AI]: Сервер Groq недоступен ({e.code}). "
-                        "Повторите попытку позже."
-                    )
-                else:
-                    self.response_ready.emit(
-                        f"[Ошибка AI]: HTTP {e.code}. {body}"
-                    )
-            except OSError as e:
-                self.response_ready.emit(
-                    f"[Ошибка AI]: Нет соединения с сервером. "
-                    f"Проверьте интернет. ({e})"
-                )
-            except Exception as e:
-                self.response_ready.emit(f"[Ошибка AI]: {type(e).__name__}: {e}")
-
-    class NoVirAIChatDialog(QDialog):
-        def __init__(self, issues_text, parent=None):
-            from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit, QPushButton, QMessageBox
-            from PySide6.QtCore import Qt
-            super().__init__(parent)
-            self.setWindowTitle("NoVir AI")
-            self.setMinimumSize(800, 600)
-            self.setStyleSheet("""
-                QDialog { background-color: #000000; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; }
-                QLabel { color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; background: transparent; }
-                QTextEdit { background-color: #080808; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; border: 1px solid #222222; padding: 8px; }
-                QLineEdit { background-color: #080808; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; border: 1px solid #222222; padding: 9px; }
-                QLineEdit:focus { border: 1px solid #444444; }
-                QPushButton { background-color: #111111; color: #ffffff; font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; font-weight: bold; padding: 9px 20px; border: 1px solid #222222; letter-spacing: 1px; }
-                QPushButton:hover { background-color: #1e1e1e; border: 1px solid #444444; }
-                QPushButton:pressed { background-color: #2a2a2a; }
-                QPushButton:disabled { color: #555555; border: 1px solid #1a1a1a; }
-            """)
-            
-            self._vbox = QVBoxLayout(self)
-            beta_notice = QLabel(
-                "БЕТА-ВЕРСИЯ: ИИ может ошибаться. Не доверяйте ответам без проверки; "
-                "перед запуском внимательно проверьте каждую команду. Используйте ИИ на свой риск. "
-                "NoVir не отвечает за последствия выполнения предложенных команд."
-            )
-            beta_notice.setWordWrap(True)
-            beta_notice.setStyleSheet(
-                "QLabel { background-color: #0a0a0a; color: #888888; "
-                "border: 1px solid #222222; padding: 8px; font-size: 10px; }"
-            )
-            self._vbox.addWidget(beta_notice)
-
-            self.chat_area = QTextEdit()
-            self.chat_area.setReadOnly(True)
-            self._vbox.addWidget(self.chat_area)
-            
-            inp_layout = QHBoxLayout()
-            self.input_field = QLineEdit()
-            self.input_field.setPlaceholderText("Напишите ответ или вопрос NoVir AI...")
-            self.input_field.returnPressed.connect(self.send_msg)
-            
-            self.btn_send = QPushButton("Отправить")
-            self.btn_send.setCursor(Qt.PointingHandCursor)
-            self.btn_send.clicked.connect(self.send_msg)
-
-            self.btn_clear = QPushButton("Очистить")
-            self.btn_clear.setCursor(Qt.PointingHandCursor)
-            self.btn_clear.clicked.connect(self.clear_chat)
-
-            inp_layout.addWidget(self.input_field)
-            inp_layout.addWidget(self.btn_send)
-            inp_layout.addWidget(self.btn_clear)
-            self._vbox.addLayout(inp_layout)
-            
-            _k = b")C=ng\x08'\x03\x0c\x06j29\x04azS$c\x0e}\x1e\tdd\x046J6ltize\x03Hbh`\x06\x05|\x16\x06z#\x08\x7f\x08\x0b\x00\x0bR\x1euf"
-            _x = b'N0V1R_S3CR3T_2024'
-            self.api_key = ''.join(chr(b ^ _x[i % len(_x)]) for i, b in enumerate(_k))
-            
-            sys_prompt = """Ты — NoVir AI, встроенный помощник программы NoVir. Помогай пользователю разбираться с Windows, диагностикой и функциями NoVir.
-
-Качество ответов:
-- Всегда учитывай контекст, но отвечай максимум 45 словами. Без вступления, повторения вопроса, заголовков, пустых строк и длинных списков.
-- Если результаты NoVir все OK: ответь одной короткой фразой, что явных проблем не найдено. Не перечисляй проверки и не придумывай дополнительные гипотезы, тесты или команды.
-- Если есть INFO/WARNING/ERROR: упомяни только реальные отклонения, не пересказывай OK. Дай не более одной осторожной гипотезы и одного безопасного следующего шага; называй причину гипотезой, не фактом.
-- Используй таблицу только если пользователь явно просит её или нужно сравнить несколько вариантов. Формат Markdown: не более 3 колонок и 4 строк данных, короткие ячейки; не помещай в таблицу длинные абзацы. Для обычного ответа используй одну фразу или короткие пункты.
-- В режиме предложения плана не запускай операции и не формируй маркер [EXECUTE:]. Для единственного предложенного действия коротко назови риск.
-- Не выдумывай факты, результаты проверки системы, возможности программы или успешное выполнение действий. Если данных недостаточно или ты не уверен, прямо скажи об этом и задай уточняющий вопрос.
-- Для потенциально устаревших или зависящих от версии сведений обозначай неопределённость. Отделяй установленный факт от предположения.
-- Не повторяй бета-предупреждение в каждом ответе: оно постоянно показано в окне чата.
-- Пиши по-русски просто и по делу. Подробности давай только если их прямо попросили.
-
-Безопасность команд:
-- Не утверждай, что команда безопасна или необходима, если не можешь это обосновать. Перед предложением объясни, что команда изменит, какие у неё риски и как при необходимости откатить изменение.
-- Не предлагай удаление данных, отключение защиты, изменение реестра, настройки загрузки, прав доступа или системных служб без явного объяснения последствий и точного подтверждения пользователя.
-- Никогда не запускай команду сам. Сначала покажи её обычным текстом и попроси пользователя явно подтвердить именно эту команду в чате. До такого подтверждения не добавляй маркер выполнения.
-- Только после явного подтверждения пользователем выдай команду отдельным маркером строго в формате [EXECUTE: команда] без Markdown и лишних кавычек. Выбирай только безопасные диагностические команды Windows; не добавляй `cmd /c`.
-- Если запрос неоднозначен, команда выглядит разрушительной или её последствия непонятны, не выдавай маркер выполнения; предложи безопасную проверку или попроси уточнения.
-
-Справка по NoVir: приложение включает Умную Диагностику, Бэкап и Откат, Проводник, Утилиты Фикса и Командную строку."""
-            self.memory = [{"role": "system", "content": sys_prompt}]
-            self.worker = None
-            
-            if issues_text == "MANUAL":
-                first_msg = "Коротко поздоровайся и скажи, что помогаешь с NoVir и Windows. Не перечисляй все функции; попроси описать вопрос или проблему."
-            else:
-                first_msg = (
-                    "Суммируй результаты максимум в 45 словах. Если все проверки OK, скажи это одной фразой. "
-                    "Иначе назови только отклонение, одну гипотезу и один безопасный шаг. "
-                    "Это анализ, не выполняй исправления и не выдавай [EXECUTE:].\n\n"
-                    f"Результаты:\n{issues_text}"
-                )
-                
-            self.append_chat("Вы", first_msg)
-            self.memory.append({"role": "user", "content": first_msg})
-            self.process_ai()
-            
-        def append_chat(self, sender, text):
-            color = "#ffffff" if sender == "NoVir AI" else "#888888" if sender == "Вы" else "#aaaaaa"
-            import html
-            sender_html = html.escape(str(sender))
-            message_html = render_chat_message(text)
-            self.chat_area.append(
-                f"<b style='color:{color}; font-size: 14px;'>{sender_html}:</b><br>"
-                f"<span style='color:#e0e0e0;'>{message_html}</span><br><br>"
-            )
-            self.chat_area.verticalScrollBar().setValue(self.chat_area.verticalScrollBar().maximum())
-            
-        def clear_chat(self):
-            """Очищает историю чата, сохраняя системный промпт."""
-            self.chat_area.clear()
-            self.memory = [self.memory[0]] if self.memory else []
-            self.append_chat("Система", "История очищена.")
-
-        def send_msg(self):
-            text = self.input_field.text().strip()
-            if not text: return
-            self.input_field.clear()
-            self.append_chat("Вы", text)
-            self.memory.append({"role": "user", "content": text})
-            self.process_ai()
-            
-        def process_ai(self):
-            self.btn_send.setEnabled(False)
-            self.worker = keep_thread(GroqAIWorker(self.api_key, self.memory))
-            self.worker.response_ready.connect(self.on_response)
-            self.worker.start()
-            
-        def on_response(self, reply):
-            self.btn_send.setEnabled(True)
-            self.memory.append({"role": "assistant", "content": reply})
-            
-            import re
-            exec_match = re.search(r'\[EXECUTE:\s*(.+?)\]', reply, re.IGNORECASE)
-            
-            clean_reply = re.sub(r'\[EXECUTE:\s*.+?\]', '', reply, flags=re.IGNORECASE).strip()
-            if clean_reply:
-                self.append_chat("NoVir AI", clean_reply)
-                
-            if exec_match:
-                cmd = exec_match.group(1).strip()
-                from PySide6.QtWidgets import QMessageBox
-                if not ai_command_is_allowed(cmd):
-                    self.append_chat(
-                        "Система",
-                        "Команда заблокирована встроенной проверкой безопасности. "
-                        "Не запускаются shell-операторы, оболочки и опасные команды.",
-                    )
-                    return
-                ans = QMessageBox.question(
-                    self,
-                    "Проверьте команду NoVir AI",
-                    "ИИ может ошибаться. Внимательно проверьте команду и её последствия. "
-                    "Продолжая, вы разрешаете её выполнение на свой риск; NoVir не отвечает "
-                    "за результат.\n\n"
-                    f"Команда:\n{cmd}\n\nВыполнить эту команду?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if ans == QMessageBox.Yes:
-                    import subprocess
-                    self.append_chat("Система", f"Выполняется: {cmd}")
-                    try:
-                        command_args = parse_ai_command(cmd)
-                        if not command_args:
-                            raise ValueError("Команда не прошла проверку безопасности")
-                        res = subprocess.run(
-                            command_args,
-                            shell=False,
-                            capture_output=True,
-                            text=True,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                        )
-                        out = (res.stdout + res.stderr).strip()
-                        if not out:
-                            out = "Вывода нет."
-                        outcome = "выполнена" if res.returncode == 0 else f"завершилась с кодом {res.returncode}"
-                        self.append_chat("Система", f"Команда {outcome}.\nРезультат:\n{out}")
-                        self.memory.append({"role": "user", "content": f"Команда {outcome}. Код возврата: {res.returncode}. Результат:\n{out}\nЧто дальше?"})
-                        self.process_ai()
-                    except Exception as e:
-                        self.append_chat("Система", f"Ошибка: {e}")
-                        self.memory.append({"role": "user", "content": f"Ошибка выполнения: {e}"})
-                        self.process_ai()
-                else:
-                    self.append_chat("Система", "Вызов команды отклонён пользователем.")
-                    self.memory.append({"role": "user", "content": "Я не разрешил выполнять эту команду. Предложи другой вариант или объясни подробнее."})
-                    self.process_ai()
 
 
     class NoVirToast(QFrame):
@@ -12536,7 +11984,6 @@ if GUI_MODE:
                 super().mousePressEvent(event)
 
     class AutostartChangesDialog(QDialog):
-        """B&W window that reports new or changed autostart entries."""
 
         def __init__(self, parent, entries, hidden_system=0):
             super().__init__(parent)
@@ -12923,6 +12370,348 @@ if GUI_MODE:
             except Exception:
                 return None
 
+    _NOVIR_SNOWMAN_ART = [
+        " " * 32 + '██████████████',
+        '                                █████      █████',
+        '                                ███ █ █      ███',
+        '                                 ████ ██    ███',
+        '                                 ███   █████████',
+        '                             ██████         ███████',
+        '              ██            ██████ ██████████ █████          ██ ██',
+        '          ███████           ████████ ██████████████         █████ █',
+        '          █████████          █████████████████████         ████████',
+        '          ██████ ███          ██ ██ ██ ███ █    █        █████████',
+        '            █████████         ████████ █   ███  █      ███ ███████',
+        '                ███ ███      █████████     █ ████    █████████',
+        '                  ██████████ █████████████████████████████',
+        '                   ██████████████   █████████  █████ ████',
+        '                       ████   ███               ███████',
+        '                         ████ ███  █████ ████     ███',
+        '                          █████  ███████ ██████  █ ███',
+        '                          ██████████  █████ ██████████',
+        '                          ██  ████    █████   █████ ██',
+        '                          ██          █████         ██',
+        '                          ██          █████        ███',
+        '                          ███      █ █████ ████████████',
+        '                        █   █████████████           █████',
+        '                      ██     █████████████████████    ████',
+        '                      █                  ███████████    ███',
+        '                     █                           ████    ██',
+        '                    █                               █     ██',
+        '                   ██                                     ██',
+        '                   ██                                      ██',
+        '                   ██                                      ██',
+        '                    ██ ██                                 ██',
+        '                    ██  █  █                             ███',
+        '                     ██                                 ███',
+        '                      ████                            ████',
+        '                      ███████                      ██████',
+        '                         █████████████      ██████████',
+        '                             ██████████████████████',
+        '                                     ███████',
+    ]
+
+    _NOVIR_SNOWMAN_EMOTIONS = {
+        "idle", "happy", "sad", "thinking", "alert",
+        "sleep", "love", "wink", "angry",
+    }
+
+    def _novir_snowman_rows(emotion="idle", blink=False):
+        rows = [list(line.ljust(80)) for line in _NOVIR_SNOWMAN_ART]
+        if emotion not in _NOVIR_SNOWMAN_EMOTIONS:
+            emotion = "idle"
+
+        def put(row, col, char=" "):
+            if 0 <= row < len(rows) and 0 <= col < 80:
+                rows[row][col] = char
+
+        def rect(row0, row1, col0, col1, char=" "):
+            for row in range(row0, row1 + 1):
+                for col in range(col0, col1 + 1):
+                    put(row, col, char)
+
+        # Clean white face plate; the original art has noisy gaps there.
+        rect(8, 11, 33, 47, "█")
+
+        if blink and emotion in ("idle", "happy", "love"):
+            rect(9, 9, 35, 37, " ")
+            rect(9, 9, 43, 45, " ")
+        elif emotion in ("idle", "happy", "sad", "love"):
+            rect(9, 10, 36, 37, " ")
+            rect(9, 10, 43, 44, " ")
+        elif emotion == "thinking":
+            rect(9, 10, 36, 37, " ")
+            rect(9, 10, 43, 44, " ")
+            put(10, 44, "█")
+        elif emotion == "alert":
+            rect(9, 11, 35, 37, " ")
+            rect(9, 11, 43, 45, " ")
+        elif emotion == "sleep":
+            rect(9, 9, 35, 37, " ")
+            rect(9, 9, 43, 45, " ")
+        elif emotion == "wink":
+            rect(9, 10, 36, 37, " ")
+            rect(9, 9, 43, 45, " ")
+        elif emotion == "angry":
+            rect(8, 8, 35, 37, " ")
+            rect(8, 8, 43, 45, " ")
+            rect(9, 10, 36, 37, " ")
+            rect(9, 10, 43, 44, " ")
+
+        if emotion in ("idle", "sleep"):
+            rect(11, 11, 39, 42, " ")
+        elif emotion in ("happy", "love", "wink"):
+            rect(11, 11, 39, 42, " ")
+            put(10, 38, " ")
+            put(10, 43, " ")
+        elif emotion == "sad":
+            rect(10, 10, 39, 42, " ")
+            put(11, 38, " ")
+            put(11, 43, " ")
+        elif emotion == "thinking":
+            for col in (38, 40, 42):
+                put(11, col, " ")
+        elif emotion == "alert":
+            rect(11, 11, 39, 40, " ")
+        elif emotion == "angry":
+            rect(10, 10, 39, 42, " ")
+            put(11, 38, " ")
+            put(11, 43, " ")
+
+        return ["".join(row) for row in rows]
+
+    class SnowmanView(QWidget):
+        """Pixel-art snowman drawn as filled cells, independent of font glyphs."""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.emotion = "idle"
+            self._blink = False
+            self.setMinimumSize(160, 140)
+            from PySide6.QtCore import QTimer
+            self._blink_timer = QTimer(self)
+            self._blink_timer.setInterval(4800)
+            self._blink_timer.timeout.connect(self._blink_once)
+            self._blink_timer.start()
+
+        def set_emotion(self, emotion):
+            self.emotion = emotion if emotion in _NOVIR_SNOWMAN_EMOTIONS else "idle"
+            if self.emotion not in ("idle", "happy", "love"):
+                self._blink = False
+            self.update()
+
+        def _blink_once(self):
+            if self.emotion not in ("idle", "happy", "love"):
+                return
+            self._blink = True
+            self.update()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(150, self._end_blink)
+
+        def _end_blink(self):
+            self._blink = False
+            self.update()
+
+        def paintEvent(self, event):
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            rows = _novir_snowman_rows(self.emotion, self._blink)
+            cell = max(1, min(self.width() // 80, self.height() // 76))
+            cell_w, cell_h = cell, cell * 2
+            x0 = (self.width() - cell_w * 80) // 2
+            y0 = (self.height() - cell_h * len(rows)) // 2
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#f2f2f2"))
+            for row_index, line in enumerate(rows):
+                for col_index, char in enumerate(line):
+                    if char == "█":
+                        painter.drawRect(
+                            x0 + col_index * cell_w,
+                            y0 + row_index * cell_h,
+                            cell_w,
+                            cell_h,
+                        )
+            painter.end()
+
+    class SnowmanCompanion(QWidget):
+        """Transparent in-app snowman: no window, no buttons, draggable, pettable."""
+
+        closed = Signal()
+        moved = Signal(int, int)
+
+        TIPS = [
+            "Перед лечением создай точку восстановления — потом сможешь откатить.",
+            "Автозагрузку проверяй по каждой записи: имя, путь и подпись.",
+            "Если Windows не грузится, запусти NoVir из WinRE и включи офлайн-режим.",
+            "Карантин сохраняет файл: ложное срабатывание можно вернуть.",
+            "BCD пересобирается кнопкой «ВОСТАНОВИТЬ ЗАГРУЗКУ».",
+            "Проверь hosts, DNS и прокси — вирусы часто прячутся там.",
+            "Не удаляй всё подряд: сначала посмотри, что именно найдено.",
+            "После исправлений перезагрузись и запусти диагностику ещё раз.",
+            "Сомневаешься в записи автозагрузки — закрепи её и наблюдай.",
+            "Перед правкой реестра NoVir делает точку отката.",
+        ]
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            from PySide6.QtCore import QTimer
+            self._silent_close = False
+            self._drag_pos = None
+            self._dragged = False
+            self._last_tip = -1
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WA_StyledBackground, False)
+            self.setFixedSize(210, 285)
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setSpacing(2)
+
+            self.speech = QLabel("Привет! Я слежу за порядком.")
+            self.speech.setWordWrap(True)
+            self.speech.setFixedWidth(150)
+            self.speech.setFixedHeight(50)
+            self.speech.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            self.speech.setStyleSheet(
+                "QLabel { color: #dddddd; background: rgba(18, 18, 18, 210);"
+                " border: 1px solid #444; border-radius: 8px; padding: 4px 6px;"
+                " font-size: 9px; }")
+            self.speech.installEventFilter(self)
+            outer.addWidget(self.speech, 0, Qt.AlignLeft)
+
+            self.view = SnowmanView(self)
+            self.view.installEventFilter(self)
+            outer.addWidget(self.view, 1, Qt.AlignRight)
+
+            self._revert_timer = QTimer(self)
+            self._revert_timer.setSingleShot(True)
+            self._revert_timer.timeout.connect(self._revert_to_idle)
+
+            self._tip_timer = QTimer(self)
+            self._tip_timer.setInterval(50000)
+            self._tip_timer.timeout.connect(self._idle_tip)
+            self._tip_timer.start()
+
+        def say(self, emotion, text, duration=7000):
+            self.view.set_emotion(emotion)
+            if text:
+                self.speech.setText(str(text))
+                self.speech.show()
+            if duration:
+                self._revert_timer.start(max(1500, int(duration)))
+            else:
+                self._revert_timer.stop()
+
+        def _revert_to_idle(self):
+            self.view.set_emotion("idle")
+
+        def next_tip(self):
+            if not self.TIPS:
+                return
+            import random
+            index = random.randrange(len(self.TIPS))
+            if len(self.TIPS) > 1 and index == self._last_tip:
+                index = (index + 1) % len(self.TIPS)
+            self._last_tip = index
+            self.say("happy", self.TIPS[index], 9000)
+            self._tip_timer.start()
+
+        def pet(self):
+            self.view.set_emotion("happy")
+            self.next_tip()
+
+        def _idle_tip(self):
+            if not self.isVisible() or self._revert_timer.isActive():
+                return
+            self.next_tip()
+
+        def _start_drag(self, event):
+            if event.button() != Qt.LeftButton:
+                return False
+            self._drag_pos = (
+                event.globalPosition().toPoint()
+                - self.mapToGlobal(QPoint(0, 0))
+            )
+            self._dragged = False
+            event.accept()
+            return True
+
+        def _drag_to(self, event):
+            if self._drag_pos is None or not (event.buttons() & Qt.LeftButton):
+                return False
+            parent = self.parentWidget()
+            if parent is None:
+                return False
+            new_global = event.globalPosition().toPoint() - self._drag_pos
+            pos = parent.mapFromGlobal(new_global)
+            max_x = max(0, parent.width() - self.width())
+            max_y = max(0, parent.height() - self.height())
+            self.move(
+                max(0, min(pos.x(), max_x)),
+                max(0, min(pos.y(), max_y)),
+            )
+            self._dragged = True
+            event.accept()
+            return True
+
+        def _end_drag(self, event):
+            if self._drag_pos is None:
+                return False
+            dragged = self._dragged
+            self._drag_pos = None
+            if dragged:
+                self.moved.emit(self.x(), self.y())
+            else:
+                self.pet()
+            event.accept()
+            return True
+
+        def mousePressEvent(self, event):
+            if self._start_drag(event):
+                return
+            super().mousePressEvent(event)
+
+        def mouseMoveEvent(self, event):
+            if self._drag_to(event):
+                return
+            super().mouseMoveEvent(event)
+
+        def mouseReleaseEvent(self, event):
+            if self._end_drag(event):
+                return
+            super().mouseReleaseEvent(event)
+
+        def eventFilter(self, obj, event):
+            drag_objects = (
+                getattr(self, "speech", None),
+                getattr(self, "view", None),
+            )
+            if obj in drag_objects and obj is not None:
+                if event.type() == QEvent.MouseButtonPress:
+                    if self._start_drag(event):
+                        return True
+                elif event.type() == QEvent.MouseMove:
+                    if self._drag_to(event):
+                        return True
+                elif event.type() == QEvent.MouseButtonRelease:
+                    if self._end_drag(event):
+                        return True
+            return super().eventFilter(obj, event)
+
+        def contextMenuEvent(self, event):
+            self.close()
+            event.accept()
+
+        def shutdown(self):
+            self._silent_close = True
+            self.close()
+
+        def closeEvent(self, event):
+            self._tip_timer.stop()
+            self._revert_timer.stop()
+            if not self._silent_close:
+                self.closed.emit()
+            super().closeEvent(event)
+
     class NoVirGUI(QMainWindow):
         update_result = Signal(object)
         RECOVERY_ACTIONS = {"dns", "taskmgr"}
@@ -12952,9 +12741,6 @@ if GUI_MODE:
             if self._always_on_top_enabled:
                 window_flags |= Qt.WindowStaysOnTopHint
             self.setWindowFlags(window_flags) # Безрамочное окно
-            # WinRE/WinPE may have no DWM composition.  Translucent windows can
-            # render as invisible or black rectangles there, so use an opaque
-            # black window in the recovery environment.
             self.setAttribute(Qt.WA_TranslucentBackground, not self._winre_ui)
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
@@ -12969,27 +12755,43 @@ if GUI_MODE:
             self._autostart_changes_dialog = None
             self._autostart_dialog_dismissed = set()
             self._autostart_manual_check = False
+            self._pin_autostart_enabled = False
+            self._pin_autostart_items = {}
+            self._pin_autostart_pinned_at = ""
+            self._pin_worker = None
+            self._pin_dialog_open = False
+            self._autostart_offline_drive = ""
+            self._autostart_offline_mounts = []
+            self._autostart_offline_mounts_drive = ""
+            self._autostart_offline_user_profile = ""
+            self._autostart_offline_user_name = ""
+            self._autostart_offline_has_software = False
+            self._autostart_offline_has_system = False
+            self._autostart_offline_has_user = False
+            self._autostart_offline_error = ""
+            from PySide6.QtCore import QTimer as _PinQTimer
+            self._pin_timer = _PinQTimer(self)
+            self._pin_timer.setInterval(15000)
+            self._pin_timer.timeout.connect(self._check_pinned_autostart)
             self.worker = None
             self.advanced_mode = False
             self._toasts = []
+            self._snowman = None
             self.update_result.connect(self._on_update_checked)
             self.init_ui()
             self._apply_display_geometry()
             self.toggle_advanced_mode(0)
-            # Фоновый прогрев страниц в свободное время (по одной за тик с паузой 300мс)
+            self._load_pinned_autostart_state()
             self._warm_queue = list(self._lazy_pages.keys())
             from PySide6.QtCore import QTimer as _QTimer
             _QTimer.singleShot(1200, self._warm_up_pages)
             if not self._winre_ui:
-                # WinRE has no normal user profile/network: scanning the live
-                # WinPE autostart and checking GitHub only adds noise and
-                # background errors.  Both remain available manually if needed.
+                _QTimer.singleShot(1800, self._maybe_show_snowman)
                 _QTimer.singleShot(2500, self._startup_autostart_scan)
                 _QTimer.singleShot(6000, self.check_for_updates)
 
 
         def _compute_display_profile(self):
-            """Resolution-aware sizing for WinRE, small screens and 4K monitors."""
             mode = None
             try:
                 mode = self._detect_special_boot_mode()
@@ -13019,9 +12821,6 @@ if GUI_MODE:
             if compact:
                 base_px = 12
             else:
-                # On a normal desktop we keep the original NoVir geometry and
-                # 13 px font exactly as before.  4K scaling is applied solely by
-                # QT_SCALE_FACTOR or by the Windows high-DPI system.
                 base_px = 13
 
             if compact:
@@ -13030,9 +12829,6 @@ if GUI_MODE:
                 window_width = max(min_width, int(screen_width * 0.98))
                 window_height = max(min_height, int(screen_height * 0.98))
             else:
-                # Preserve the original app size (1000x700 by default), but never
-                # exceed a small screen.  Do not auto-stretch across the whole
-                # desktop on non-WinRE, non-4K systems.
                 min_width = min(1000, max(640, screen_width - 20))
                 min_height = min(700, max(480, screen_height - 20))
                 window_width = 1000 if screen_width >= 1000 else min_width
@@ -13052,8 +12848,6 @@ if GUI_MODE:
                 app = QApplication.instance()
                 if app is not None:
                     font = app.font()
-                    # Consolas is not guaranteed in every WinRE image; Segoe UI
-                    # is the safe system font for the recovery environment.
                     font.setFamily("Segoe UI" if is_winre else "Consolas")
                     font.setPixelSize(base_px)
                     app.setFont(font)
@@ -13062,7 +12856,6 @@ if GUI_MODE:
             return profile
 
         def _apply_display_geometry(self):
-            """Fit the window to the available screen area and center it."""
             try:
                 app = QApplication.instance()
                 screen = app.primaryScreen() if app else None
@@ -13082,16 +12875,12 @@ if GUI_MODE:
                 pass
 
         def _detect_special_boot_mode(self):
-            """Detect WinRE/WinPE or Windows Safe Mode boot environment."""
             if sys.platform != "win32":
                 return None
 
             system_root = os.environ.get("SystemRoot", "")
             system_drive = os.environ.get("SystemDrive", "").upper()
 
-            # WinPE / WinRE images always carry the MiniNT marker.  WinRE also
-            # normally boots from X:, so use that as a fallback when the key is
-            # not readable.
             try:
                 with winreg.OpenKey(
                     winreg.HKEY_LOCAL_MACHINE,
@@ -13109,7 +12898,6 @@ if GUI_MODE:
                 return ("winre", "WINRE · СРЕДА ВОССТАНОВЛЕНИЯ",
                         "OFFLINE-РЕЖИМ · %s" % (system_root or "X:\\Windows"))
 
-            # SM_CLEANBOOT: 0 = normal, 1 = Safe Mode, 2 = Safe Mode + Network.
             try:
                 clean_boot = int(ctypes.windll.user32.GetSystemMetrics(67))
             except Exception:
@@ -13123,7 +12911,6 @@ if GUI_MODE:
             return None
 
         def _apply_special_boot_mode(self):
-            """Show the special-mode strip above the page area when needed."""
             mode = self._detect_special_boot_mode()
             self._special_boot_mode = mode[0] if mode else None
             if not mode:
@@ -13132,30 +12919,31 @@ if GUI_MODE:
             self.mode_banner_title.setText(mode[1])
             self.mode_banner_detail.setText(mode[2])
             self.mode_banner.setToolTip(
-                "NoVir запущен в специальной среде. Сетевые функции, "
-                "автообновление и часть действий оболочки Windows отключены."
+                "Режим восстановления WinRE/WinPE: сеть и часть служб Windows недоступны."
             )
             self.mode_banner_tag.setText(
                 "WINRE MODE" if mode[0] == "winre" else "СПЕЦИАЛЬНЫЙ РЕЖИМ")
             if mode[0] == "winre":
-                # Make the environment unmistakable in the title bar as well as
-                # in the strip above the page area.
                 self.setWindowTitle("NoVir — WINRE · Среда восстановления Windows")
                 if hasattr(self, "btn_minimize"):
-                    # In WinRE there is no normal taskbar; minimizing can make
-                    # the only NoVir window impossible to restore.
                     self.btn_minimize.hide()
                     self.btn_minimize.setToolTip(
                         "Свернуть окно недоступно в WinRE")
                 if hasattr(self, "btn_close"):
                     self.btn_close.setToolTip(
                         "Закрыть NoVir (среда восстановления Windows)")
+                if hasattr(self, "mode_banner_reg_btn"):
+                    self.mode_banner_reg_btn.show()
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(100, lambda: self._offline_registry_mount())
+            else:
+                if hasattr(self, "mode_banner_reg_btn"):
+                    self.mode_banner_reg_btn.hide()
             self.mode_banner.show()
 
         def init_ui(self):
             _base_px = int(getattr(self, "_display_profile", {}).get("base_px", 13))
             _compact = bool(getattr(self, "_display_profile", {}).get("compact", False))
-            # GLOBAL B&W MINIMALIST STYLESHEET
             self.setStyleSheet(('''
                 QWidget {
                     background-color: #000000;
@@ -13282,7 +13070,6 @@ if GUI_MODE:
                 }
             ''').replace("font-size: 13px;", f"font-size: {_base_px}px;", 1))
 
-            # Главный контейнер
             self.main_container = QFrame(self)
             self.main_container.setObjectName("MainContainer")
             self.setCentralWidget(self.main_container)
@@ -13291,7 +13078,6 @@ if GUI_MODE:
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            # Строгая верхняя панель (Top Bar)
             self.top_bar = QFrame()
             self.top_bar.setFixedHeight(44 if _compact else 50)
             self.top_bar.setStyleSheet("border-bottom: 1px solid #333333;")
@@ -13311,8 +13097,7 @@ if GUI_MODE:
             top_layout.addWidget(self.title_label)
             
             top_layout.addStretch()
-            
-            # Кнопка ИИ убрана по запросу пользователя
+
 
             self.btn_minimize = QPushButton("—")
             self.btn_minimize.setFixedSize(40, 30)
@@ -13328,8 +13113,6 @@ if GUI_MODE:
             top_layout.addWidget(self.btn_close)
             self.layout.addWidget(self.top_bar)
 
-            # Полоса специального режима (WinRE / безопасный режим).
-            # В обычной Windows скрыта; показывается только при загрузке в
             # среде восстановления или безопасном режиме.
             self.mode_banner = QFrame()
             self.mode_banner.setObjectName("SpecialModeBanner")
@@ -13355,6 +13138,14 @@ if GUI_MODE:
             )
             mode_layout.addWidget(self.mode_banner_detail)
             mode_layout.addStretch()
+            self.mode_banner_reg_btn = QPushButton("ПОДКЛЮЧИТЬ РЕЕСТР OFFLINE")
+            self.mode_banner_reg_btn.setToolTip("Подключить реестр установленной Windows с диска")
+            self.mode_banner_reg_btn.setStyleSheet(
+                "QPushButton { background: #000000; color: #ffffff; border: 1px solid #000000; padding: 2px 8px; font-size: 9px; font-weight: bold; font-family: monospace; letter-spacing: 1px; }"
+                "QPushButton:hover { background: #333333; }")
+            self.mode_banner_reg_btn.clicked.connect(lambda checked=False: self._offline_registry_toggle())
+            mode_layout.addWidget(self.mode_banner_reg_btn)
+            self.mode_banner_reg_btn.hide()
             self.mode_banner_tag = QLabel("СПЕЦИАЛЬНЫЙ РЕЖИМ")
             self.mode_banner_tag.setStyleSheet(
                 "font-size: 9px; font-weight: bold; color: #555555;"
@@ -13366,13 +13157,8 @@ if GUI_MODE:
             self.layout.addWidget(self.mode_banner)
             self._apply_special_boot_mode()
 
-            # Страницы
             self.main_content = QStackedWidget()
 
-            # Строим сразу только дашборд — окно открывается быстро.
-            # Остальные 8 страниц создаются лениво: по одной за тик event-loop
-            # (см. _build_next_page). Между тиками окно остаётся отзывчивым.
-            # Индексы в QStackedWidget фиксированы заранее заглушками-рамками.
             self._lazy_pages = {}          # index -> (attr_name, builder)
             self._lazy_placeholders = {}   # index -> QFrame
 
@@ -13405,7 +13191,6 @@ if GUI_MODE:
             self.log_output.hide()
             self.layout.addWidget(self.log_output)
 
-            # Нижняя панель — быстрый доступ к диагностике и вторичным действиям.
             bottom_bar = QFrame()
             bottom_bar.setFixedHeight(48 if _compact else 52)
             bottom_bar.setStyleSheet(
@@ -13457,12 +13242,14 @@ if GUI_MODE:
             update_action.triggered.connect(lambda checked=False: self.check_for_updates(manual=True))
             backup_action = quick_actions_menu.addAction(language_manager.translate("БЭКАПЫ"))
             backup_action.triggered.connect(lambda checked=False: self.show_backup_manager())
+            snowman_action = quick_actions_menu.addAction("СНЕГОВИК-ПОМОЩНИК")
+            snowman_action.triggered.connect(lambda checked=False: self._toggle_snowman())
             community_action = quick_actions_menu.addAction(language_manager.translate("СООБЩЕСТВО"))
             community_action.triggered.connect(lambda checked=False: self.switch_page(8))
-            if self._winre_ui:
-                # WinRE usually has no network stack / user profile.
+            if self._is_winre():
                 update_action.setEnabled(False)
                 update_action.setText("ОБНОВЛЕНИЕ НЕДОСТУПНО В WINRE")
+                snowman_action.setVisible(False)
                 community_action.setEnabled(False)
                 community_action.setText("СООБЩЕСТВО НЕДОСТУПНО В WINRE")
             self._quick_action_refs = {
@@ -13486,6 +13273,17 @@ if GUI_MODE:
             )
             self.btn_easter_egg.clicked.connect(lambda checked=False: self.show_easter_egg())
 
+            self.btn_snowman = QPushButton("СНЕГОВИК")
+            self.btn_snowman.setFixedHeight(32 if _compact else 36)
+            self.btn_snowman.setCursor(Qt.PointingHandCursor)
+            self.btn_snowman.setStyleSheet(
+                "QPushButton { background: transparent; color: #666; border: 1px dashed #333; "
+                "font-size: 10px; font-weight: bold; padding: 0 12px; letter-spacing: 1px; }"
+                "QPushButton:hover { color: #fff; border-color: #777; }"
+            )
+            self.btn_snowman.setToolTip("Показать или скрыть снеговика-помощника")
+            self.btn_snowman.clicked.connect(lambda checked=False: self._toggle_snowman())
+
             bottom_support_btn = QPushButton(language_manager.translate("ПОДДЕРЖАТЬ АВТОРА"))
             bottom_support_btn.setFixedHeight(32 if _compact else 36)
             bottom_support_btn.setStyleSheet(
@@ -13495,16 +13293,16 @@ if GUI_MODE:
             )
             bottom_support_btn.clicked.connect(lambda checked=False: self.show_support_dialog())
             bottom_layout.addStretch()
-            if not self._winre_ui:
+            if not self._is_winre():
+                bottom_layout.addWidget(self.btn_snowman)
                 bottom_layout.addWidget(self.btn_easter_egg)
                 bottom_layout.addWidget(bottom_support_btn)
             else:
-                # No online support / entertainment in the recovery environment.
+                self.btn_snowman.hide()
                 self.btn_easter_egg.hide()
                 bottom_support_btn.hide()
             self.layout.addWidget(bottom_bar)
 
-            # Нижняя короткая инструкция по горячим клавишам и основным действиям.
             instruction_bar = QFrame()
             instruction_bar.setFixedHeight(24 if _compact else 28)
             instruction_bar.setStyleSheet(
@@ -13520,7 +13318,6 @@ if GUI_MODE:
                 "color: #666666; font-size: 9px; font-family: 'Consolas', "
                 "'Courier New', monospace; border: none; background: transparent;"
             )
-            # QLabel does not expose elide mode; clipping happens at the frame edge.
             instruction_text.setWordWrap(False)
             instruction_text.setMinimumWidth(0)
             instruction_layout.addWidget(instruction_text, 1)
@@ -13536,25 +13333,17 @@ if GUI_MODE:
             help_button.clicked.connect(self._show_hotkeys_help)
             instruction_layout.addWidget(help_button)
             if self._winre_ui:
-                # Save vertical space on 800x600/640x480 recovery displays.
                 instruction_bar.hide()
             else:
                 self.layout.addWidget(instruction_bar)
 
-            # Подсказки для основных элементов интерфейса.
             self.btn_back.setToolTip(language_manager.translate("Назад"))
-            if hasattr(self, "btn_ai") and self.btn_ai:
-                if hasattr(self, 'btn_ai') and self.btn_ai:
-                    self.btn_ai.setToolTip(language_manager.translate("Открыть ИИ-ассистента"))
             self.btn_minimize.setToolTip(language_manager.translate("Свернуть окно"))
             self.btn_close.setToolTip(language_manager.translate("Закрыть окно"))
             self.btn_diagnostics.setToolTip(language_manager.translate("Открыть диагностику"))
             self.btn_quick_actions.setToolTip(language_manager.translate("Быстрые действия"))
             self.title_label.setToolTip(language_manager.translate("F1: справка по горячим клавишам"))
 
-            # Горячие клавиши GUI.
-            # F1 — справка, F5 — обновить автозагрузку/задачи, Ctrl+F — фокус на фильтр
-            # текущей страницы автозагрузки. Все названия выводятся в справке F1.
             self._hotkey_help_shortcut = QShortcut(QKeySequence(Qt.Key_F1), self, self._show_hotkeys_help)
             self._hotkey_refresh_shortcut = QShortcut(QKeySequence(Qt.Key_F5), self, self._hotkey_refresh_autostart)
             self._hotkey_search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self, self._hotkey_focus_autostart_filter)
@@ -13562,12 +13351,9 @@ if GUI_MODE:
             # Старт
             self.switch_page(0)
 
-        # ─── NOVIR COMMUNITY (Supabase REST + чат) ─────────────────────────
-        # Данные сервера зашифрованы XOR — как Groq-ключ в AI-чате.
         _SB_X = b'N0V1R_S3CR3T_2024'
         _SB_URL_HEX = '2644224121657c1c352b5b22255f405d55345f3a5c382d3d5f213b5e7a2c474053562f43331f3130'
         _SB_KEY_HEX = '3d520941273d3f5a303a523633576f07612558391c3969254714665d196c5f527d6e0777216e3330160b37197937'
-        # Groq-ключ для бота @novir_ai в чате (XOR, как в AI-чате)
         _AI_K = b")C=ng\x08'\x03\x0c\x06j29\x04azS$c\x0e}\x1e\tdd\x046J6ltize\x03Hbh`\x06\x05|\x16\x06z#\x08\x7f\x08\x0b\x00\x0bR\x1euf"
         _AI_X = b'N0V1R_S3CR3T_2024'
 
@@ -13608,8 +13394,6 @@ if GUI_MODE:
             req.add_header("apikey", SUPABASE_KEY)
             req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
             req.add_header("Content-Type", "application/json")
-            # Cloudflare (прокси Supabase/Groq) отдаёт "403 error code: 1010"
-            # на urllib-UX без User-Agent — шлём полноценный Chrome UA.
             req.add_header(
                 "User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -13633,11 +13417,9 @@ if GUI_MODE:
                 print(f"[PluginHub] Network error: {e}")
                 return None
 
-        # ─── NOVIR COMMUNITY (чат, аккаунты, лимит сообщений) ───────────
         GUEST_MSG_LIMIT = 5      # сообщений в час для гостей
         USER_MSG_LIMIT = 60      # сообщений в час для зарегистрированных
 
-        # Локальный кэш сообщества и аккаунтов
         def _cm_dir(self):
             d = os.path.join(os.path.expanduser("~"), ".novir", "community")
             os.makedirs(d, exist_ok=True)
@@ -13718,7 +13500,7 @@ if GUI_MODE:
             except Exception:
                 pass
 
-        # ── @novir_ai: ответ бота через Groq ──
+        # ── @novir_ai: ответ бота через NoVirGPT ──
         def _cm_build_ai_context(self, raw_text, reply=None):
             """Собирает контекст для бота: историю чата, цель ответа (⤷)
             и последнее сообщение упомянутых (@username) пользователей."""
@@ -13731,7 +13513,6 @@ if GUI_MODE:
                 body = str(m.get("body") or "").replace("\n", " ").strip()
                 if not body:
                     continue
-                # created_at (ISO) сортируется лексикографично = по времени
                 entries.append((str(m.get("created_at") or ""), who, body))
             entries.sort(key=lambda e: e[0])
             parts = []
@@ -13747,7 +13528,6 @@ if GUI_MODE:
                 if ruser or rtext:
                     parts.append(
                         f"Пользователь отвечает на сообщение {ruser}: «{rtext}».")
-            # упомянутые кроме самого бота — их последнее сообщение
             mentions = [u for u in re.findall(r"@([A-Za-z0-9_]{3,20})", raw_text or "")
                         if u.lower() != "novir_ai"]
             for u in dict.fromkeys(mentions):
@@ -13758,57 +13538,8 @@ if GUI_MODE:
             return "\n\n".join(parts)
 
         def _cm_ai_ask(self, question, context=None):
-            """Спроси у бота — вернёт короткий ответ или None при ошибке."""
-            import urllib.request
-            import urllib.error
-            api_key = ''.join(chr(b ^ self._AI_X[i % len(self._AI_X)])
-                              for i, b in enumerate(self._AI_K))
-            sys_prompt = (
-                "Ты — NOVIR AI, дружелюбный бот чата сообщества NoVir (Windows recovery утилита). "
-                "Ты видишь последние сообщения чата — можешь отвечать на них, учитывать контекст "
-                "разговора и кто что писал. Отвечай коротко, по делу и на языке вопроса, максимум 40 слов. "
-                "Без markdown-символов, без списков, без пустых строк — ответ увидят все в чате.")
-            user_content = ""
-            if context:
-                user_content += context + "\n\n"
-            user_content += "Вопрос: " + question
-            memory = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_content},
-            ]
-            req = urllib.request.Request(
-                "https://api.groq.com/openai/v1/chat/completions", method="POST")
-            req.add_header("Authorization", "Bearer " + api_key)
-            req.add_header("Content-Type", "application/json")
-            # Как в основном AI-чате: без User-Agent Cloudflare (error 1010)
-            # отклоняет запрос, из-за чего бот «не отвечает».
-            req.add_header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            data = {"model": "openai/gpt-oss-120b", "messages": memory,
-                    "max_completion_tokens": 400, "reasoning_effort": "low"}
-            try:
-                with urllib.request.urlopen(
-                        req, data=json.dumps(data).encode("utf-8"), timeout=25) as resp:
-                    res = json.loads(resp.read().decode("utf-8"))
-                    answer = str(
-                        res["choices"][0]["message"].get("content") or "").strip()[:480]
-                    # Пустой content (токены ушли в reasoning) = недоступен,
-                    # чтобы в чат не ушло пустое сообщение бота.
-                    return answer or None
-            except urllib.error.HTTPError as e:
-                body = ""
-                try:
-                    body = e.read().decode("utf-8", errors="replace")[:200]
-                except Exception:
-                    pass
-                print(f"[NOVIR_AI] HTTP {e.code}: {body}")
-                return None
-            except Exception as e:
-                # Не глушим ошибку молча — логируем, чтобы видеть причину.
-                print(f"[NOVIR_AI] Ошибка запроса к Groq: {e!r}")
-                return None
+            # Локальный ИИ-ассистент удалён из NoVir.
+            return "Локальный ИИ-ассистент удалён из NoVir."
 
         # ── @упоминания ──
         def _cm_mentions(self, body):
@@ -13855,7 +13586,6 @@ if GUI_MODE:
             main_vbox.setContentsMargins(20, 20, 20, 20)
             main_vbox.setSpacing(12)
 
-            # ── HEADER ──
             header = QFrame()
             hl = QHBoxLayout(header)
             hl.setContentsMargins(0, 0, 0, 0)
@@ -13884,7 +13614,6 @@ if GUI_MODE:
             hl.addWidget(btn_logout)
             main_vbox.addWidget(header)
 
-            # ── RATE BAR ──
             lbl_rate = QLabel()
             lbl_rate.setStyleSheet(
                 "font-size: 11px; color: #aaaaaa; background: #0a0a0a; "
@@ -13899,7 +13628,6 @@ if GUI_MODE:
             lbl_notice.hide()
             main_vbox.addWidget(lbl_notice)
 
-            # ── CHAT ──
             chat = QTextEdit()
             chat.setReadOnly(True)
             chat.setStyleSheet(
@@ -13922,7 +13650,6 @@ if GUI_MODE:
             lbl_reply.hide()
             btn_reply_cancel.hide()
 
-            # ── INPUT ──
             row = QHBoxLayout()
             inp = QLineEdit()
             inp.setPlaceholderText("Сообщение...")
@@ -13936,7 +13663,6 @@ if GUI_MODE:
             refs = {"send_w": None, "ref_w": None, "del_w": None,
                     "reply": None, "line_map": [], "seen_ids": None}
 
-            # ── обновление статуса авторизации и лимита ──
             def _update_auth_ui():
                 sess = self._cm_session()
                 if sess:
@@ -14009,7 +13735,6 @@ if GUI_MODE:
                         self.done.emit({"ok": False, "msg":
                             "Сервер отклонил сообщение. Возможно, не запущен supabase_community.sql."})
                         return
-                    # ── @novir_ai: спросил бота → бот отвечает в чат ──
                     ai_note = ""
                     low = self.text.lower()
                     if low.startswith("@novir_ai"):
@@ -14020,7 +13745,7 @@ if GUI_MODE:
                             question if question else "Поприветствуй участников чата NoVir и представься одним предложением.",
                             context=ctx)
                         if answer is None:
-                            answer = "NOVIR AI сейчас недоступен (нет связи с Groq). Попробуй позже."
+                            answer = "NoVirGPT обрабатывает запрос локально..."
                         bot_id = hashlib.sha1(("ai" + str(time.time()) + answer).encode()).hexdigest()[:16]
                         bot_body = {"id": bot_id, "username": "NOVIR_AI",
                                     "device_id": "novir_ai", "body": answer}
@@ -14061,7 +13786,6 @@ if GUI_MODE:
                         params={"id": f"eq.{self.msg_id}"})
                     self.done.emit({"ok": res is not None})
 
-            # ── уведомления об @упоминаниях (память seen) ──
             def _load_seen_mentions():
                 f = os.path.join(self._cm_dir(), "seen_mentions.json")
                 existed = os.path.exists(f)
@@ -14134,7 +13858,6 @@ if GUI_MODE:
                 chat.setPlainText("\n".join(lines))
                 chat.verticalScrollBar().setValue(chat.verticalScrollBar().maximum())
                 refs["line_map"] = line_map
-                # ── всплывающее уведомление «тебя упомянули» ──
                 if new_mentions and not refs.get("first_seen_load"):
                     who0, txt0 = new_mentions[0]
                     lbl_notice.setText(tr("⚡ ТЕБЯ УПОМЯНУЛ %s: %s") % (who0, txt0))
@@ -14458,15 +14181,12 @@ if GUI_MODE:
             timer.timeout.connect(lambda: _refresh_now())
             timer.start()
 
-            # Динамические строки (гость/пользователь, лимит) переводятся
-            # повторно при смене языка — см. change_language.
             page.retranslate_ui = _update_auth_ui
             _update_auth_ui()
             _refresh_now()
             return page
 
         def _winre_reboot_to_windows(self):
-            """Reboot out of WinRE and continue normal Windows startup."""
             reply = QMessageBox.question(
                 self,
                 "Выход из WinRE",
@@ -14496,7 +14216,6 @@ if GUI_MODE:
             layout.setAlignment(Qt.AlignCenter)
             winre = self._is_winre_mode()
             layout.setSpacing(8 if winre else 20)
-            # Сетка плиток
             grid = QGridLayout()
             grid.setSpacing(8 if winre else 14)
 
@@ -14510,27 +14229,45 @@ if GUI_MODE:
             ]
 
             if winre:
-                # Dedicated WinRE strip: visible right on the dashboard and
-                # useful without explorer.exe or a normal taskbar.
                 winre_bar = QFrame()
                 winre_bar.setObjectName("WinREBar")
-                winre_bar.setFixedHeight(40)
+                winre_bar.setFixedHeight(44)
                 winre_bar.setStyleSheet(
                     "QFrame#WinREBar { background-color: #111111;"
                     " border: 1px solid #ffffff; }"
                     "QLabel { color: #ffffff; background: transparent;"
                     " border: none; font-family: Consolas, 'Courier New', monospace; }"
+                    "QComboBox { background: #000000; color: #ffffff; border: 1px solid #ffffff; padding: 2px 6px; font-size: 10px; }"
                     "QPushButton { background: #000000; color: #ffffff;"
-                    " border: 1px solid #ffffff; padding: 4px 12px;"
+                    " border: 1px solid #ffffff; padding: 4px 10px;"
                     " font-size: 10px; font-weight: bold; letter-spacing: 1px; }"
                     "QPushButton:hover { background: #ffffff; color: #000000; }")
                 wb_lay = QHBoxLayout(winre_bar)
                 wb_lay.setContentsMargins(12, 4, 8, 4)
                 wb_lay.setSpacing(10)
-                wb_title = QLabel("WINRE · OFFLINE-РЕЖИМ")
+                wb_title = QLabel("WINRE")
                 wb_title.setStyleSheet(
                     "font-size: 12px; font-weight: bold; letter-spacing: 2px;")
                 wb_lay.addWidget(wb_title)
+
+                wb_sep = QLabel("|")
+                wb_sep.setStyleSheet("color: #444444;")
+                wb_lay.addWidget(wb_sep)
+
+                self.winre_drive_combo = QComboBox()
+                self.winre_drive_combo.setToolTip("Выберите диск с установленной Windows")
+                self._populate_winre_drives_combo()
+                wb_lay.addWidget(self.winre_drive_combo)
+
+                self.winre_mount_btn = QPushButton("ПОДКЛЮЧИТЬ РЕЕСТР")
+                self.winre_mount_btn.setToolTip("Монтирует HKLM\\OFFLINE_SYSTEM и HKLM\\OFFLINE_SOFTWARE для лечения мертвой системы")
+                self.winre_mount_btn.clicked.connect(lambda checked=False: self._offline_registry_toggle())
+                wb_lay.addWidget(self.winre_mount_btn)
+
+                self.winre_status_label = QLabel("РЕЕСТР НЕ ПОДКЛЮЧЕН")
+                self.winre_status_label.setStyleSheet("color: #888888; font-size: 10px;")
+                wb_lay.addWidget(self.winre_status_label)
+
                 wb_lay.addStretch(1)
                 wb_reboot = QPushButton("ПЕРЕЗАГРУЗИТЬСЯ В WINDOWS")
                 wb_reboot.clicked.connect(
@@ -14560,14 +14297,10 @@ if GUI_MODE:
             layout.addLayout(grid)
             layout.addSpacing(10)
 
-            # Полоса состояния дашборда: только целевая Windows (авто- или
-            # ручной выбор из настроек) — локальные данные, без опросов.
             status_row = QHBoxLayout()
             status_row.setSpacing(10)
             status_row.addStretch()
             cell = QFrame()
-            # #StatusCell — чтобы рамка ячейки не «наследовалась»
-            # текстовыми QLabel (QLabel наследует QFrame).
             cell.setObjectName("StatusCell")
             cell.setStyleSheet(
                 "QFrame#StatusCell { background-color: #000000;"
@@ -14576,7 +14309,6 @@ if GUI_MODE:
             cell_lay.setContentsMargins(14, 10, 12, 10)
             cell_lay.setSpacing(12)
 
-            # Иконка версии в рамке-контейнере
             self._status_icon = QLabel()
             self._status_icon.setFixedSize(38, 38)
             self._status_icon.setAlignment(Qt.AlignCenter)
@@ -14585,7 +14317,6 @@ if GUI_MODE:
             cell_lay.addWidget(self._status_icon)
             cell_lay.setAlignment(self._status_icon, Qt.AlignVCenter)
 
-            # Разделитель — как в нижней панели приложения
             sep_line = QFrame()
             sep_line.setFixedWidth(1)
             sep_line.setFixedHeight(30)
@@ -14611,7 +14342,6 @@ if GUI_MODE:
             cell_lay.addLayout(text_lay)
             cell_lay.setAlignment(text_lay, Qt.AlignVCenter)
 
-            # Режим выбора — пилюля справа
             self._status_mode = QLabel()
             self._status_mode.setStyleSheet(
                 "QLabel { color: #aaaaaa; background-color: #111111;"
@@ -14628,7 +14358,6 @@ if GUI_MODE:
             self._status_refresh()
             return page
 
-        # ── полоса состояния дашборда ──
 
         def _status_refresh(self):
             """Обновляет строку цели Windows на дашборде (локальные данные)."""
@@ -14644,7 +14373,6 @@ if GUI_MODE:
                 self._status_value.setText("WINDOWS %s" % ver)
                 self._status_mode.setText(
                     (tr("Авто") if auto else tr("Вручную")).upper())
-            # Гладкое масштабирование: QIcon.pixmap даёт «лесенку».
             pm = win_version_icon(ver).pixmap(80, 80)
             pm.setDevicePixelRatio(1.0)
             self._status_icon.setPixmap(
@@ -14662,13 +14390,11 @@ if GUI_MODE:
             try:
                 page = builder()
             except Exception as error:
-                # Не зацикливаемся: страница остаётся заглушкой, приложение живо.
                 print(f"[WARNING] Страница {index} не построена: {error}")
                 return
             setattr(self, attr_name, page)
             placeholder = self._lazy_placeholders.get(index)
             if placeholder is not None:
-                # Кладём реальную страницу внутрь заглушки как ребёнка.
                 lay = placeholder.layout()
                 if lay is None:
                     from PySide6.QtWidgets import QVBoxLayout as _VL
@@ -14702,7 +14428,6 @@ if GUI_MODE:
                     "Раздел сообщества недоступен в среде восстановления.",
                     "warning")
                 return
-            # Гарантированно строим нужную страницу до показа.
             self._ensure_page(index)
             self.main_content.setCurrentIndex(index)
             self._page_idx = index
@@ -14851,7 +14576,6 @@ if GUI_MODE:
             layout.setContentsMargins(24, 24, 24, 24)
             layout.setSpacing(14)
 
-            # Title
             title = QLabel(tr("ПОДДЕРЖАТЬ АВТОРА"))
             title.setStyleSheet("font-size: 18px; font-weight: bold; letter-spacing: 3px;")
             layout.addWidget(title)
@@ -14861,13 +14585,11 @@ if GUI_MODE:
             sep.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep)
 
-            # Description
             desc = QLabel(tr("Всё идёт напрямую на карту ПриватБанк."))
             desc.setStyleSheet("color: #888888; font-size: 12px;")
             desc.setWordWrap(True)
             layout.addWidget(desc)
 
-            # Currency selector
             row_curr = QHBoxLayout()
             lbl_curr = QLabel(tr("Страна:"))
             lbl_curr.setFixedWidth(100)
@@ -14878,7 +14600,6 @@ if GUI_MODE:
             row_curr.addWidget(combo_curr)
             layout.addLayout(row_curr)
 
-            # Card number display
             AUTHOR_CARD = "5168 7521 1573 8307"   # <-- ЗАМЕНИТЬ НА СВОЙ НОМЕР ПРИВАТА
 
             sep2 = QFrame()
@@ -14914,7 +14635,6 @@ if GUI_MODE:
             sep3.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep3)
 
-            # Buttons
             btn_layout = QHBoxLayout()
 
             btn_action = QPushButton(tr("ПЕРЕВОД ЧЕРЕЗ ПРИВАТБАНК  →"))
@@ -14942,7 +14662,6 @@ if GUI_MODE:
             btn_layout.addWidget(btn_cancel)
             layout.addLayout(btn_layout)
 
-            # Update logic when currency changes
             def update_suffix(curr_text):
                 lbl_copy_hint.setText(tr("Нажмите, чтобы скопировать"))
                 lbl_copy_hint.setStyleSheet("color: #555555; font-size: 10px;")
@@ -15104,15 +14823,492 @@ if GUI_MODE:
                     QCheckBox { color: #ffffff; }
                 """)
 
-        # ═══════════════════════════════════════════════════════════════
         # АВТОЗАПУСК: СНИМКИ, ДИФФ, КАРАНТИН
-        # ═══════════════════════════════════════════════════════════════
 
         def _autostart_data_dir(self):
             root = os.environ.get("APPDATA") or os.path.expanduser("~")
             path = os.path.join(root, "NoVir")
             os.makedirs(path, exist_ok=True)
             return path
+
+        def _autostart_offline_profiles(self, drive):
+            """Профили установленной Windows с файлом NTUSER.DAT."""
+            profiles = []
+            users_dir = os.path.join(str(drive or "").rstrip("\\"), "Users")
+            try:
+                entries = list(os.scandir(users_dir))
+            except OSError:
+                return profiles
+            ignored = {
+                "default", "default user", "all users", "public",
+                "defaultaccount", "wdagutilityaccount",
+            }
+            for entry in entries:
+                try:
+                    if not entry.is_dir():
+                        continue
+                    if entry.name.lower() in ignored:
+                        continue
+                    profile_file = os.path.join(entry.path, "NTUSER.DAT")
+                    if not os.path.isfile(profile_file):
+                        continue
+                    try:
+                        stamp = os.path.getmtime(profile_file)
+                    except OSError:
+                        stamp = 0
+                    profiles.append((stamp, entry.path))
+                except OSError:
+                    continue
+            profiles.sort(key=lambda item: item[0], reverse=True)
+            return [path for _stamp, path in profiles]
+
+        def _populate_winre_drives_combo(self):
+            combo = getattr(self, "winre_drive_combo", None)
+            if not combo:
+                return
+            combo.blockSignals(True)
+            combo.clear()
+            drives = self._offline_windows_drives()
+            current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+            drives = [d for d in drives if d.lower() != current.lower()]
+            if not drives:
+                drives = [d for d in self._offline_windows_drives() if d.upper() != "X:"]
+            for d in drives:
+                combo.addItem(f"Диск {d} (Windows)", d)
+            if combo.count() == 0:
+                combo.addItem("Диски Windows не найдены", "")
+            combo.blockSignals(False)
+
+        def _update_winre_reg_ui(self):
+            mounted = getattr(self, "_offline_reg_mounted", False)
+            drive = getattr(self, "_offline_reg_drive", "")
+
+            btn = getattr(self, "winre_mount_btn", None)
+            lbl = getattr(self, "winre_status_label", None)
+            if btn:
+                if mounted:
+                    btn.setText(f"ОТКЛЮЧИТЬ РЕЕСТР ({drive})")
+                    btn.setStyleSheet(
+                        "QPushButton { background: #330000; color: #ff6666; border: 1px solid #ff4444; padding: 4px 12px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }"
+                        "QPushButton:hover { background: #ff4444; color: #ffffff; }")
+                else:
+                    btn.setText("ПОДКЛЮЧИТЬ РЕЕСТР")
+                    btn.setStyleSheet(
+                        "QPushButton { background: #000000; color: #ffffff; border: 1px solid #ffffff; padding: 4px 12px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }"
+                        "QPushButton:hover { background: #ffffff; color: #000000; }")
+            if lbl:
+                if mounted:
+                    lbl.setText(f"🟢 РЕЕСТР ПОДКЛЮЧЕН: {drive}\\Windows (HKLM\\OFFLINE_SYSTEM, OFFLINE_SOFTWARE)")
+                    lbl.setStyleSheet("color: #00ff66; font-size: 11px; font-weight: bold;")
+                else:
+                    lbl.setText("⚪ РЕЕСТР НЕ ПОДКЛЮЧЕН")
+                    lbl.setStyleSheet("color: #888888; font-size: 11px;")
+
+            top_btn = getattr(self, "mode_banner_reg_btn", None)
+            if top_btn:
+                if mounted:
+                    top_btn.setText(f"🟢 РЕЕСТР {drive} ПОДКЛЮЧЕН (ОТКЛЮЧИТЬ)")
+                    top_btn.setStyleSheet(
+                        "QPushButton { background: #003311; color: #00ff66; border: 1px solid #00aa44; padding: 2px 8px; font-size: 9px; font-weight: bold; font-family: monospace; letter-spacing: 1px; }"
+                        "QPushButton:hover { background: #aa0000; color: #ffffff; }")
+                else:
+                    top_btn.setText("🔗 ПОДКЛЮЧИТЬ РЕЕСТР OFFLINE")
+                    top_btn.setStyleSheet(
+                        "QPushButton { background: #000000; color: #ffffff; border: 1px solid #000000; padding: 2px 8px; font-size: 9px; font-weight: bold; font-family: monospace; letter-spacing: 1px; }"
+                        "QPushButton:hover { background: #333333; }")
+
+            self._update_autostart_offline_info()
+            try:
+                self._reload_autostart_registry_tables()
+            except Exception:
+                pass
+
+        def _offline_registry_unmount(self):
+            import winreg as _wr
+            to_unload = list(getattr(self, "_autostart_offline_mounts", []) or []) + [
+                (_wr.HKEY_LOCAL_MACHINE, "OFFLINE_SOFTWARE"),
+                (_wr.HKEY_LOCAL_MACHINE, "OFFLINE_SYSTEM"),
+                (_wr.HKEY_USERS, "OFFLINE_USER"),
+                (_wr.HKEY_LOCAL_MACHINE, "NoVirAutoSOFTWARE"),
+                (_wr.HKEY_LOCAL_MACHINE, "NoVirAutoSYSTEM"),
+                (_wr.HKEY_USERS, "NoVirAutoUser"),
+            ]
+            for root, mount_name in reversed(to_unload):
+                try:
+                    _wr.UnloadKey(root, mount_name)
+                except Exception:
+                    pass
+
+            global _OFFLINE_REG_STATE
+            _OFFLINE_REG_STATE["mounted"] = False
+            _OFFLINE_REG_STATE["drive"] = ""
+            _OFFLINE_REG_STATE["mounts"] = []
+
+            self._offline_reg_mounted = False
+            self._offline_reg_drive = ""
+            self._autostart_offline_mounts = []
+            self._autostart_offline_mounts_drive = ""
+            self._autostart_offline_user_profile = ""
+            self._autostart_offline_user_name = ""
+            self._autostart_offline_has_software = False
+            self._autostart_offline_has_system = False
+            self._autostart_offline_has_user = False
+            self._update_winre_reg_ui()
+
+        def _autostart_offline_unload(self):
+            self._offline_registry_unmount()
+
+        def _autostart_offline_candidates(self):
+            if not self._is_winre_mode():
+                return []
+            try:
+                return self._restriction_offline_drives()
+            except Exception:
+                return []
+
+        def _offline_registry_mount(self, drive=None):
+            """Смонтировать HKLM\\OFFLINE_SYSTEM, HKLM\\OFFLINE_SOFTWARE и HKU\\OFFLINE_USER."""
+            import winreg as _wr
+            if not self._is_winre_mode():
+                return False
+            if not drive:
+                combo = getattr(self, "winre_drive_combo", None)
+                if combo and combo.currentData():
+                    drive = combo.currentData()
+            if not drive:
+                candidates = self._autostart_offline_candidates()
+                drive = candidates[0] if candidates else ""
+            drive = str(drive or "").rstrip("\\")
+            if not drive:
+                self.show_toast("[-] Диск Windows не найден", "Оффлайн-система")
+                return False
+
+            if (getattr(self, "_offline_reg_mounted", False)
+                    and getattr(self, "_offline_reg_drive", "") == drive):
+                return True
+
+            self._offline_registry_unmount()
+            enable_registry_load_privileges()
+            errors = []
+            mounted = []
+
+            def load_hive(root, mount_name, file_path):
+                if not os.path.isfile(file_path):
+                    errors.append(f"Файл не найден: {file_path}")
+                    return False
+                try:
+                    _wr.LoadKey(root, mount_name, file_path)
+                    mounted.append((root, mount_name))
+                    return True
+                except Exception:
+                    try:
+                        _wr.UnloadKey(root, mount_name)
+                    except Exception:
+                        pass
+                    try:
+                        _wr.LoadKey(root, mount_name, file_path)
+                        mounted.append((root, mount_name))
+                        return True
+                    except Exception as err:
+                        errors.append(f"{mount_name}: {err}")
+                        return False
+
+            config_dir = os.path.join(drive, "Windows", "System32", "config")
+            software_path = os.path.join(config_dir, "SOFTWARE")
+            system_path = os.path.join(config_dir, "SYSTEM")
+
+            has_software = load_hive(_wr.HKEY_LOCAL_MACHINE, "OFFLINE_SOFTWARE", software_path)
+            has_system = load_hive(_wr.HKEY_LOCAL_MACHINE, "OFFLINE_SYSTEM", system_path)
+            load_hive(_wr.HKEY_LOCAL_MACHINE, "NoVirAutoSOFTWARE", software_path)
+            load_hive(_wr.HKEY_LOCAL_MACHINE, "NoVirAutoSYSTEM", system_path)
+
+            has_user = False
+            profiles = self._autostart_offline_profiles(drive)
+            if profiles:
+                profile = profiles[0]
+                ntuser_path = os.path.join(profile, "NTUSER.DAT")
+                if load_hive(_wr.HKEY_USERS, "OFFLINE_USER", ntuser_path):
+                    has_user = True
+                    load_hive(_wr.HKEY_USERS, "NoVirAutoUser", ntuser_path)
+                    self._autostart_offline_user_profile = profile
+                    self._autostart_offline_user_name = os.path.basename(profile)
+
+            control_set = "ControlSet001"
+            if has_system:
+                try:
+                    with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE, r"OFFLINE_SYSTEM\Select", 0, _wr.KEY_READ) as sk:
+                        for vn in ("Current", "Default"):
+                            try:
+                                val, _ = _wr.QueryValueEx(sk, vn)
+                                if 0 < int(val) < 100:
+                                    control_set = "ControlSet%03d" % int(val)
+                                    break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            global _OFFLINE_REG_STATE
+            _OFFLINE_REG_STATE["mounted"] = bool(has_software or has_system)
+            _OFFLINE_REG_STATE["drive"] = drive
+            _OFFLINE_REG_STATE["control_set"] = control_set
+            _OFFLINE_REG_STATE["mounts"] = mounted
+
+            self._offline_reg_mounted = _OFFLINE_REG_STATE["mounted"]
+            self._offline_reg_drive = drive
+            self._autostart_offline_mounts = mounted
+            self._autostart_offline_mounts_drive = drive
+            self._autostart_offline_has_software = has_software
+            self._autostart_offline_has_system = has_system
+            self._autostart_offline_has_user = has_user
+            self._autostart_offline_drive = drive
+            self._autostart_offline_error = "; ".join(errors[-4:])
+
+            self._update_winre_reg_ui()
+
+            if self._offline_reg_mounted:
+                self.show_toast("ГОТОВО", f"Оффлайн-реестр Windows ({drive}) подключен: OFFLINE_SYSTEM, OFFLINE_SOFTWARE")
+                logger.log("OfflineRegistry", "success", f"Реестр {drive} подключен: OFFLINE_SYSTEM, OFFLINE_SOFTWARE ({control_set})")
+                return True
+            else:
+                self.show_toast("ОШИБКА", f"Не удалось подключить реестр: {'; '.join(errors)}")
+                return False
+
+        def _offline_registry_toggle(self, drive=None):
+            if getattr(self, "_offline_reg_mounted", False):
+                self._offline_registry_unmount()
+                self.show_toast("ИНФО", "Оффлайн-реестр отключен")
+            else:
+                self._offline_registry_mount(drive)
+
+        def _autostart_offline_ensure(self):
+            return self._offline_registry_mount(self._autostart_offline_drive)
+
+        def _autostart_registry_target(self, which):
+            """Вернуть (корень, префикс) для HKCU/HKLM или offline-куста."""
+            import winreg as _wr
+            which = str(which or "")
+            if self._is_winre_mode():
+                self._autostart_offline_ensure()
+                if which == "user":
+                    if self._autostart_offline_has_user:
+                        return _wr.HKEY_USERS, "NoVirAutoUser\\"
+                    return None
+                if which == "system":
+                    if self._autostart_offline_has_system:
+                        return _wr.HKEY_LOCAL_MACHINE, "NoVirAutoSYSTEM\\"
+                    return None
+                if self._autostart_offline_has_software:
+                    return _wr.HKEY_LOCAL_MACHINE, "NoVirAutoSOFTWARE\\"
+                return None
+            if which == "user":
+                return _wr.HKEY_CURRENT_USER, ""
+            return _wr.HKEY_LOCAL_MACHINE, ""
+
+        def _autostart_registry_open_path(self, prefix, key_path, which=""):
+            """Собрать путь внутри live- или offline-куста.
+
+            Загруженный файл SOFTWARE/SYSTEM уже является корнем
+            соответствующего раздела, поэтому первый компонент пути
+            (SOFTWARE\\ или SYSTEM\\) нужно отбросить.
+            """
+            prefix = str(prefix or "").rstrip("\\")
+            key_path = str(key_path or "").lstrip("\\")
+            if not prefix:
+                return key_path
+            rel_path = key_path
+            if (str(which or "") in ("machine", "system")
+                    or prefix.startswith("NoVirAutoSOFTWARE")
+                    or prefix.startswith("NoVirAutoSYSTEM")):
+                upper = rel_path.upper()
+                if upper.startswith("SOFTWARE\\") or upper.startswith("SYSTEM\\"):
+                    rel_path = rel_path.split("\\", 1)[1]
+            return (prefix + "\\" + rel_path).strip("\\")
+
+        def _autostart_registry_targets(self):
+            targets = []
+            for which, hive_text in (("user", "HKCU"), ("machine", "HKLM")):
+                found = self._autostart_registry_target(which)
+                if found is None:
+                    continue
+                root, prefix = found
+                targets.append({
+                    "root": root,
+                    "prefix": prefix,
+                    "hive_text": hive_text,
+                    "which": which,
+                    "live_hive": int(
+                        winreg.HKEY_CURRENT_USER if which == "user"
+                        else winreg.HKEY_LOCAL_MACHINE),
+                })
+            return targets
+
+        def _autostart_registry_read_location(self, item):
+            """Корень/путь для точечного чтения записи (в т.ч. offline)."""
+            extra = (item or {}).get("extra") or {}
+            key_path = str(extra.get("key_path") or "")
+            if not key_path:
+                return None, ""
+            target_name = str(extra.get("registry_target") or "")
+            if not target_name:
+                source = str((item or {}).get("source") or "").upper()
+                location = str((item or {}).get("location") or "").upper()
+                if key_path.upper().startswith("SYSTEM\\"):
+                    target_name = "system"
+                elif location.startswith("HKCU") or " (HKCU)" in source:
+                    target_name = "user"
+                else:
+                    target_name = "machine"
+            target = self._autostart_registry_target(target_name)
+            if target is None:
+                return None, key_path
+            root, prefix = target
+            return (root, self._autostart_registry_open_path(
+                prefix, key_path, target_name)), key_path
+
+        def _autostart_offline_info(self):
+            if not self._is_winre_mode():
+                return ""
+            if not self._autostart_offline_drive:
+                return "Установленная Windows не найдена"
+            parts = ["Диск: %s" % self._autostart_offline_drive]
+            if self._autostart_offline_user_name:
+                parts.append(
+                    "Пользователь: %s" % self._autostart_offline_user_name)
+            if self._autostart_offline_error:
+                parts.append("! %s" % self._autostart_offline_error)
+            return " · ".join(parts)
+
+        def _update_autostart_offline_info(self):
+            label = getattr(self, "_autostart_target_info", None)
+            if label is None:
+                return
+            try:
+                label.setText(self._autostart_offline_info())
+            except RuntimeError:
+                pass
+
+        def _autostart_edit_blocked_in_winre(self):
+            """В WinRE разрешаем изменение и удаление, если оффлайн-реестр подключен."""
+            if not self._is_winre_mode():
+                return False
+            if getattr(self, "_offline_reg_mounted", False) or self._autostart_offline_ensure():
+                return False
+            QMessageBox.information(
+                self,
+                "WinRE",
+                "Оффлайн-реестр Windows не подключен.\n\n"
+                "Нажмите кнопку «ПОДКЛЮЧИТЬ РЕЕСТР» вверху окна или на Дашборде, "
+                "чтобы лечить автозагрузку установленной системы.")
+            return True
+
+        def _reload_autostart_registry_tables(self):
+            for type_name in ("Run", "RunOnce", "Winlogon",
+                              "AppInit_DLLs и CmdLine"):
+                try:
+                    self.load_registry_data(type_name)
+                except Exception:
+                    pass
+            try:
+                self.load_folder_data()
+            except Exception:
+                pass
+
+        def _on_autostart_target_changed(self, _index):
+            combo = getattr(self, "_autostart_target_combo", None)
+            if combo is None:
+                return
+            drive = str(combo.currentData() or "").rstrip("\\")
+            if (drive == self._autostart_offline_drive
+                    and self._autostart_offline_mounts):
+                self._update_autostart_offline_info()
+                return
+            self._autostart_offline_drive = drive
+            self._autostart_offline_unload()
+            self._autostart_offline_ensure()
+            self._update_autostart_offline_info()
+            try:
+                self._load_pinned_autostart_state()
+            except Exception:
+                pass
+            self._reload_autostart_registry_tables()
+
+        def _refresh_autostart_targets(self):
+            if not self._is_winre_mode():
+                return
+            combo = getattr(self, "_autostart_target_combo", None)
+            if combo is None:
+                return
+            current = str(
+                self._autostart_offline_drive or combo.currentData() or "")
+            candidates = self._autostart_offline_candidates()
+            combo.blockSignals(True)
+            combo.clear()
+            for drive in candidates:
+                combo.addItem("Windows на %s" % drive, drive)
+            if not candidates:
+                combo.addItem("Установленная Windows не найдена", "")
+            index = combo.findData(current)
+            if index < 0:
+                index = 0
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+            selected = str(combo.currentData() or "").rstrip("\\")
+            if (selected != self._autostart_offline_drive
+                    or not self._autostart_offline_mounts):
+                self._autostart_offline_drive = selected
+                self._autostart_offline_ensure()
+            self._update_autostart_offline_info()
+
+        def _create_autostart_offline_bar(self, layout):
+            """WinRE-only строка выбора диска установленной Windows."""
+            if not self._is_winre_mode():
+                return
+            bar = QFrame()
+            bar.setObjectName("AutostartOfflineBar")
+            bar.setStyleSheet(
+                "QFrame#AutostartOfflineBar { background-color: #050505;"
+                " border: 1px solid #242424; }")
+            row = QHBoxLayout(bar)
+            row.setContentsMargins(12, 5, 12, 5)
+            row.setSpacing(8)
+            caption = QLabel("ДИСК WINDOWS:")
+            caption.setStyleSheet(
+                "color: #777777; font-size: 9px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            row.addWidget(caption)
+            self._autostart_target_combo = QComboBox()
+            self._autostart_target_combo.setMinimumWidth(220)
+            self._autostart_target_combo.setFixedHeight(26)
+            self._autostart_target_combo.setStyleSheet(
+                "QComboBox { background-color: #111111; color: #ffffff;"
+                " border: 1px solid #333333; padding: 2px 8px;"
+                " font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace; }"
+                " QComboBox QAbstractItemView { background-color: #111111;"
+                " color: #ffffff; selection-background-color: #ffffff;"
+                " selection-color: #000000; }")
+            self._autostart_target_combo.currentIndexChanged.connect(
+                self._on_autostart_target_changed)
+            row.addWidget(self._autostart_target_combo)
+            self._autostart_target_info = QLabel("")
+            self._autostart_target_info.setStyleSheet(
+                "color: #888888; font-size: 9px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            row.addWidget(self._autostart_target_info, 1)
+            btn_refresh = QPushButton("ОБНОВИТЬ")
+            btn_refresh.setStyleSheet(
+                "QPushButton { background-color: #111111; color: #ffffff;"
+                " border: 1px solid #333333; padding: 4px 10px;"
+                " font-size: 9px; font-weight: bold; font-family: 'Consolas',"
+                " 'Courier New', monospace; }"
+                " QPushButton:hover { background-color: #ffffff;"
+                " color: #000000; border-color: #ffffff; }")
+            btn_refresh.setFixedHeight(26)
+            btn_refresh.clicked.connect(self._refresh_autostart_targets)
+            row.addWidget(btn_refresh)
+            layout.addWidget(bar)
 
         def _autostart_snapshot_path(self):
             return os.path.join(self._autostart_data_dir(), "autostart_snapshot.json")
@@ -15164,7 +15360,6 @@ if GUI_MODE:
             )
 
         def _collect_autostart_items(self):
-            """Collect registry, folder, task and service autostart entries."""
             items = {}
 
             def add(kind, source, name, value, location="", system=False,
@@ -15183,24 +15378,27 @@ if GUI_MODE:
                     "extra": dict(extra or {}),
                 }
 
-            # Run / RunOnce в HKLM и HKCU.
+            registry_targets = self._autostart_registry_targets()
             for reg_type, key_path in (
                     ("Run", r"Software\Microsoft\Windows\CurrentVersion\Run"),
                     ("RunOnce", r"Software\Microsoft\Windows\CurrentVersion\RunOnce")):
-                for hive, hive_name in (
-                        (winreg.HKEY_CURRENT_USER, "HKCU"),
-                        (winreg.HKEY_LOCAL_MACHINE, "HKLM")):
+                for target in registry_targets:
                     try:
-                        entries = self.get_reg_startup(hive, key_path)
+                        entries = self.get_reg_startup(
+                            target["root"],
+                            self._autostart_registry_open_path(
+                                target["prefix"], key_path, target["which"]))
                     except Exception:
                         entries = []
                     for name, value in entries:
                         add(
-                            "registry", f"{reg_type} ({hive_name})", name, value,
-                            location=f"{hive_name}\\{key_path}",
+                            "registry",
+                            f"{reg_type} ({target['hive_text']})", name, value,
+                            location=f"{target['hive_text']}\\{key_path}",
                             extra={
-                                "hive": int(hive),
+                                "hive": target["live_hive"],
                                 "key_path": key_path,
+                                "registry_target": target["which"],
                                 "value_name": str(name),
                                 "value_type": int(getattr(winreg, "REG_SZ", 1)),
                             },
@@ -15208,58 +15406,71 @@ if GUI_MODE:
 
             # Winlogon: только Shell и Userinit.
             winlogon_path = r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
-            for value_name, default_value in (
-                    ("Shell", "explorer.exe"),
-                    ("Userinit", os.path.join(
-                        os.environ.get("SystemRoot") or r"C:\Windows",
-                        "system32", "userinit.exe") + ",")):
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, winlogon_path,
-                                        0, winreg.KEY_READ) as key:
-                        value, value_type = winreg.QueryValueEx(key, value_name)
-                except Exception:
-                    continue
-                value = str(value or "")
-                if not value.strip():
-                    continue
-                add(
-                    "winlogon", "Winlogon", value_name, value,
-                    location=f"HKLM\\{winlogon_path}", system=True,
-                    extra={
-                        "hive": int(winreg.HKEY_LOCAL_MACHINE),
-                        "key_path": winlogon_path,
-                        "value_name": value_name,
-                        "value_type": int(value_type),
-                        "default_value": default_value,
-                    },
-                )
+            winlogon_target = self._autostart_registry_target("machine")
+            if winlogon_target is not None:
+                winlogon_root, winlogon_prefix = winlogon_target
+                for value_name, default_value in (
+                        ("Shell", "explorer.exe"),
+                        ("Userinit", os.path.join(
+                            os.environ.get("SystemRoot") or r"C:\Windows",
+                            "system32", "userinit.exe") + ",")):
+                    try:
+                        with winreg.OpenKey(
+                                winlogon_root,
+                                self._autostart_registry_open_path(
+                                    winlogon_prefix, winlogon_path, "machine"),
+                                0, winreg.KEY_READ) as key:
+                            value, value_type = winreg.QueryValueEx(key, value_name)
+                    except Exception:
+                        continue
+                    value = str(value or "")
+                    if not value.strip():
+                        continue
+                    add(
+                        "winlogon", "Winlogon", value_name, value,
+                        location=f"HKLM\\{winlogon_path}", system=True,
+                        extra={
+                            "hive": int(winreg.HKEY_LOCAL_MACHINE),
+                            "key_path": winlogon_path,
+                            "registry_target": "machine",
+                            "value_name": value_name,
+                            "value_type": int(value_type),
+                            "default_value": default_value,
+                        },
+                    )
 
             # AppInit_DLLs (64- и 32-битный взгляды).
-            for key_path, suffix in (
-                    (r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", ""),
-                    (r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows",
-                     " (32-bit)")):
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path,
-                                        0, winreg.KEY_READ) as key:
-                        value, value_type = winreg.QueryValueEx(key, "AppInit_DLLs")
-                except Exception:
-                    continue
-                value = str(value or "")
-                if not value.strip():
-                    continue
-                add(
-                    "appinit", f"AppInit_DLLs{suffix}", "AppInit_DLLs", value,
-                    location=f"HKLM\\{key_path}", system=True,
-                    extra={
-                        "hive": int(winreg.HKEY_LOCAL_MACHINE),
-                        "key_path": key_path,
-                        "value_name": "AppInit_DLLs",
-                        "value_type": int(value_type),
-                    },
-                )
+            appinit_target = self._autostart_registry_target("machine")
+            if appinit_target is not None:
+                appinit_root, appinit_prefix = appinit_target
+                for key_path, suffix in (
+                        (r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", ""),
+                        (r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows",
+                         " (32-bit)")):
+                    try:
+                        with winreg.OpenKey(
+                                appinit_root,
+                                self._autostart_registry_open_path(
+                                    appinit_prefix, key_path, "machine"),
+                                0, winreg.KEY_READ) as key:
+                            value, value_type = winreg.QueryValueEx(key, "AppInit_DLLs")
+                    except Exception:
+                        continue
+                    value = str(value or "")
+                    if not value.strip():
+                        continue
+                    add(
+                        "appinit", f"AppInit_DLLs{suffix}", "AppInit_DLLs", value,
+                        location=f"HKLM\\{key_path}", system=True,
+                        extra={
+                            "hive": int(winreg.HKEY_LOCAL_MACHINE),
+                            "key_path": key_path,
+                            "registry_target": "machine",
+                            "value_name": "AppInit_DLLs",
+                            "value_type": int(value_type),
+                        },
+                    )
 
-            # Пользовательская и общая папки автозагрузки.
             try:
                 folder_entries = self.get_folder_startup()
             except Exception:
@@ -15331,7 +15542,6 @@ if GUI_MODE:
             return items
 
         def _compute_autostart_diff(self, baseline=None):
-            """Worker-side comparison. Returns a serializable payload."""
             first_run = False
             previous_at = ""
             if baseline is None:
@@ -15355,8 +15565,6 @@ if GUI_MODE:
 
             current = self._collect_autostart_items()
 
-            # Если целый источник не вернул ни одной записи (например,
-            # PowerShell недоступен), сохраняем прошлые записи, чтобы при
             # следующем запуске они не выглядели новыми.
             for kind in ("task", "service"):
                 if not any(item.get("kind") == kind for item in current.values()):
@@ -15414,7 +15622,6 @@ if GUI_MODE:
             }
 
         def _manual_autostart_check(self):
-            """Re-check autostart and show the changes window on demand."""
             self._autostart_dialog_dismissed.clear()
             self._autostart_manual_check = True
             self._start_autostart_diff_scan(force=True)
@@ -15427,7 +15634,6 @@ if GUI_MODE:
                 return None
 
         def _startup_autostart_scan(self):
-            """Build the startup page if needed and take the launch snapshot."""
             try:
                 self._ensure_page(1)
             except Exception:
@@ -15475,6 +15681,8 @@ if GUI_MODE:
                 new_count = len([
                     entry for entry in self._autostart_diff_changes
                     if entry.get("change") == "new"
+                    and str(entry.get("id")) not in set(
+                        getattr(self, "_pin_autostart_items", {}) or {})
                 ])
                 if new_count:
                     self.show_toast(
@@ -15496,8 +15704,1097 @@ if GUI_MODE:
             except Exception:
                 pass
 
+        def _autostart_pinned_path(self):
+            if self._is_winre_mode():
+                self._autostart_offline_ensure()
+                profile = self._autostart_offline_user_profile
+                if profile:
+                    return os.path.join(
+                        profile, "AppData", "Roaming", "NoVir",
+                        "autostart_pinned.json")
+            return os.path.join(
+                self._autostart_data_dir(), "autostart_pinned.json")
+
+        def _load_pinned_autostart_state(self):
+            path = self._autostart_pinned_path()
+            try:
+                with open(path, "r", encoding="utf-8") as pinned_file:
+                    data = json.load(pinned_file)
+            except (OSError, ValueError, TypeError):
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            entries = data.get("entries")
+            old_items_snapshot = (
+                not isinstance(entries, dict)
+                and isinstance(data.get("items"), dict))
+            if not isinstance(entries, dict):
+                entries = {}
+            pinned = {}
+            for key, value in entries.items():
+                if not isinstance(value, dict):
+                    continue
+                item_id = str(value.get("id") or key or "").strip()
+                if not item_id:
+                    continue
+                item = dict(value)
+                item["id"] = item_id
+                item.setdefault("kind", "")
+                item.setdefault("source", "")
+                item.setdefault("name", "")
+                item.setdefault("display", item.get("name") or item_id)
+                item.setdefault("value", "")
+                item.setdefault("signature", item.get("value", ""))
+                item.setdefault("location", "")
+                item.setdefault("extra", {})
+                pinned[item_id] = item
+            self._pin_autostart_items = pinned
+            self._pin_autostart_pinned_at = (
+                str(data.get("pinned_at") or "") if pinned else "")
+            self._sync_pin_ui()
+            if old_items_snapshot:
+                try:
+                    self._save_pinned_autostart_state()
+                except Exception:
+                    pass
+            return bool(pinned)
+
+        def _save_pinned_autostart_state(self):
+            payload = {
+                "version": 2,
+                "enabled": bool(self._pin_autostart_items),
+                "pinned_at": self._pin_autostart_pinned_at,
+                "entries": self._pin_autostart_items,
+            }
+            path = self._autostart_pinned_path()
+            temporary = path + ".tmp"
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(temporary, "w", encoding="utf-8") as pinned_file:
+                    json.dump(payload, pinned_file, ensure_ascii=False, indent=2)
+                os.replace(temporary, path)
+            finally:
+                try:
+                    if os.path.exists(temporary):
+                        os.remove(temporary)
+                except OSError:
+                    pass
+
+        def _sync_pin_ui(self):
+            self._pin_autostart_enabled = bool(self._pin_autostart_items)
+            button = getattr(self, "btn_pin_manage", None)
+            if button is not None:
+                try:
+                    count = len(self._pin_autostart_items)
+                    button.setText("ЗАКРЕПЛЕНО: %d" % count)
+                    button.setVisible(bool(count))
+                    button.setToolTip(
+                        "Открыть список закреплённых значений автозапуска")
+                except RuntimeError:
+                    pass
+            timer = getattr(self, "_pin_timer", None)
+            if timer is not None:
+                if self._pin_autostart_enabled:
+                    if not timer.isActive():
+                        timer.start()
+                else:
+                    timer.stop()
+
+        def _make_pin_item(self, kind, source, name, value, location,
+                           system=False, display=None, signature=None,
+                           extra=None):
+            item_id = "|".join(
+                (str(kind), str(source), str(location), str(name))).lower()
+            return {
+                "id": item_id,
+                "kind": str(kind),
+                "source": str(source),
+                "name": str(name),
+                "display": str(display if display is not None else name),
+                "value": str(value),
+                "signature": str(
+                    signature if signature is not None else value),
+                "location": str(location),
+                "system": bool(system),
+                "extra": dict(extra or {}),
+            }
+
+        def _build_registry_pin_item(self, reg_type, hive_str, name, value):
+            """Собрать запись в том же виде, что и _collect_autostart_items."""
+            import winreg as _wr
+            hive_str = str(hive_str or "HKCU").upper()
+            hive = (_wr.HKEY_CURRENT_USER if hive_str == "HKCU"
+                    else _wr.HKEY_LOCAL_MACHINE)
+            if reg_type == "Run":
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            elif reg_type == "RunOnce":
+                key_path = r"Software\Microsoft\Windows\CurrentVersion\RunOnce"
+            elif reg_type == "Winlogon":
+                key_path = (
+                    r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon")
+            else:
+                return None
+            location = "%s\\%s" % (hive_str, key_path)
+            extra = {
+                "hive": int(hive),
+                "key_path": key_path,
+                "registry_target": ("user" if hive_str == "HKCU"
+                                    else "machine"),
+                "value_name": str(name),
+                "value_type": int(getattr(_wr, "REG_SZ", 1)),
+            }
+            if reg_type == "Winlogon" and str(name) in ("Shell", "Userinit"):
+                if str(name) == "Shell":
+                    default_value = "explorer.exe"
+                else:
+                    default_value = os.path.join(
+                        os.environ.get("SystemRoot") or r"C:\Windows",
+                        "system32", "userinit.exe") + ","
+                extra["default_value"] = default_value
+                return self._make_pin_item(
+                    "winlogon", "Winlogon", name, value, location,
+                    system=True, extra=extra)
+            source = ("Winlogon (%s)" % hive_str
+                      if reg_type == "Winlogon"
+                      else "%s (%s)" % (reg_type, hive_str))
+            return self._make_pin_item(
+                "registry", source, name, value, location, extra=extra)
+
+        def _build_appinit_pin_item(self, key_path, name, value):
+            import winreg as _wr
+            key_path = str(key_path or "")
+            if not key_path:
+                return None
+            lower_path = key_path.lower()
+            if (str(name) == "AppInit_DLLs"
+                    and lower_path.endswith(
+                        r"microsoft\windows nt\currentversion\windows")):
+                suffix = (" (32-bit)"
+                          if "wow6432node" in lower_path else "")
+                return self._make_pin_item(
+                    "appinit", "AppInit_DLLs%s" % suffix, name, value,
+                    "HKLM\\%s" % key_path, system=True,
+                    extra={"hive": int(_wr.HKEY_LOCAL_MACHINE),
+                           "key_path": key_path,
+                           "registry_target": "machine",
+                           "value_name": str(name),
+                           "value_type": int(getattr(_wr, "REG_SZ", 1))})
+            return self._make_pin_item(
+                "registry", "AppInit/CmdLine (HKLM)", name, value,
+                "HKLM\\%s" % key_path,
+                extra={"hive": int(_wr.HKEY_LOCAL_MACHINE),
+                       "key_path": key_path,
+                       "registry_target": (
+                           "system" if lower_path.startswith("system\\")
+                           else "machine"),
+                       "value_name": str(name),
+                       "value_type": int(getattr(_wr, "REG_SZ", 1))})
+
+        def _build_folder_pin_item(self, target_path):
+            target_path = str(target_path or "")
+            name = os.path.basename(target_path)
+            source = ("Startup (all users)"
+                      if "programdata" in target_path.lower()
+                      else "Startup (user)")
+            return self._make_pin_item(
+                "folder", source, name, target_path, target_path,
+                extra={"path": target_path})
+
+        def _build_scheduler_pin_item(self, task_name, program_path):
+            raw = str(task_name or "").replace("/", "\\").strip().lstrip("\\")
+            if not raw:
+                return None
+            location = "\\" + raw
+            name = raw.split("\\")[-1]
+            return self._make_pin_item(
+                "task", "Task Scheduler", name, program_path, location,
+                extra={"task_path": location, "status": "Готова"})
+
+        def _find_pinned_autostart_ids(self, kinds=None, name=None,
+                                       value=None, source_prefix=None,
+                                       location=None):
+            found = []
+            for item_id, item in self._pin_autostart_items.items():
+                if kinds is not None and item.get("kind") not in kinds:
+                    continue
+                if name is not None and str(
+                        item.get("name") or "") != str(name):
+                    continue
+                if value is not None and str(
+                        item.get("value") or "") != str(value):
+                    continue
+                if source_prefix is not None and not str(
+                        item.get("source") or "").startswith(source_prefix):
+                    continue
+                if location is not None and str(
+                        item.get("location") or "") != str(location):
+                    continue
+                found.append(item_id)
+            return found
+
+        def _remove_pinned_autostart_ids(self, item_ids, notify=False):
+            removed = 0
+            for item_id in item_ids or ():
+                if item_id in self._pin_autostart_items:
+                    self._pin_autostart_items.pop(item_id, None)
+                    removed += 1
+            if removed:
+                self._pin_autostart_pinned_at = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S")
+                self._save_pinned_autostart_state()
+                self._sync_pin_ui()
+                if notify:
+                    self.show_toast(
+                        "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                        "Откреплено значений: %d" % removed)
+            return removed
+
+        def _unpin_saved_autostart_entry(self, **fields):
+            """Снять закрепление после удаления записи самим пользователем."""
+            return self._remove_pinned_autostart_ids(
+                self._find_pinned_autostart_ids(**fields))
+
+        def _read_pinned_autostart_item(self, pinned):
+            """Прочитать закреплённую запись напрямую, без полного сканирования."""
+            if not isinstance(pinned, dict):
+                return None
+            kind = str(pinned.get("kind") or "")
+            extra = pinned.get("extra") or {}
+            if kind in ("registry", "winlogon", "appinit"):
+                try:
+                    import winreg as _wr
+                    location, key_path = self._autostart_registry_read_location(
+                        pinned)
+                    value_name = extra.get("value_name")
+                    if location is None or not key_path or value_name is None:
+                        return None
+                    root, full_path = location
+                    with _wr.OpenKey(
+                            root, full_path, 0, _wr.KEY_READ) as key:
+                        value, _value_type = _wr.QueryValueEx(key, value_name)
+                except Exception:
+                    return None
+                item = dict(pinned)
+                item["value"] = str(value)
+                item["signature"] = str(value)
+                return item
+            if kind == "folder":
+                path = str(
+                    extra.get("path") or pinned.get("location") or "")
+                if not path or not os.path.exists(path):
+                    return None
+                return dict(pinned)
+            return None
+
+        def _offer_pin_autostart_entry(self, item, previous_ids=None):
+            """Предложить закрепить именно сохранённую запись автозапуска."""
+            if not isinstance(item, dict) or not item.get("id"):
+                return
+            item_id = str(item["id"])
+            already = item_id in self._pin_autostart_items
+            if previous_ids:
+                self._remove_pinned_autostart_ids(previous_ids)
+            dialog = QDialog(self)
+            dialog.setWindowTitle(
+                "ОБНОВИТЬ ЗАКРЕПЛЕНИЕ" if already else "ЗАКРЕПИТЬ ЗНАЧЕНИЕ")
+            dialog.setStyleSheet(
+                "QDialog { background-color: #000000; color: #ffffff; }"
+                " QLabel { color: #ffffff; }")
+            dialog.setMinimumWidth(560)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(10)
+
+            title = QLabel(
+                "ОБНОВИТЬ ЗАКРЕПЛЕНИЕ?" if already
+                else "ЗАКРЕПИТЬ ЭТО ЗНАЧЕНИЕ?")
+            title.setStyleSheet(
+                "color: #ffffff; font-size: 14px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(title)
+            note = QLabel(
+                "NoVir будет следить только за этой записью и сообщит, "
+                "если её значение изменят или удалят."
+                + ("\nЗапись уже закреплена — закрепление будет обновлено."
+                   if already else ""))
+            note.setWordWrap(True)
+            note.setStyleSheet(
+                "color: #999999; font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(note)
+
+            info = QGridLayout()
+            info.setHorizontalSpacing(12)
+            info.setVerticalSpacing(5)
+            rows = [
+                ("ИМЯ", str(item.get("display") or item.get("name") or "?")),
+                ("ИСТОЧНИК", str(item.get("source") or "?")),
+                ("РАСПОЛОЖЕНИЕ", str(item.get("location") or "?")),
+            ]
+            label_style = (
+                "color: #777777; font-size: 9px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            value_style = (
+                "color: #ffffff; font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            for row, (caption, value) in enumerate(rows):
+                key_label = QLabel(caption)
+                key_label.setStyleSheet(label_style)
+                value_label = QLabel(value)
+                value_label.setWordWrap(True)
+                value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                value_label.setStyleSheet(value_style)
+                info.addWidget(key_label, row, 0, Qt.AlignTop)
+                info.addWidget(value_label, row, 1)
+            value_caption = QLabel("ЗНАЧЕНИЕ")
+            value_caption.setStyleSheet(label_style)
+            info.addWidget(value_caption, len(rows), 0, Qt.AlignTop)
+            value_edit = QTextEdit()
+            value_edit.setPlainText(str(item.get("value") or ""))
+            value_edit.setReadOnly(True)
+            value_edit.setFixedHeight(64)
+            value_edit.setStyleSheet(
+                "QTextEdit { background-color: #0b0b0b; color: #ffffff;"
+                " border: 1px solid #333333; padding: 5px; font-size: 10px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }")
+            info.addWidget(value_edit, len(rows), 1)
+            layout.addLayout(info)
+            layout.addStretch(1)
+
+            buttons = QHBoxLayout()
+            buttons.setSpacing(8)
+            btn_pin = QPushButton("ОБНОВИТЬ" if already else "ЗАКРЕПИТЬ")
+            btn_skip = QPushButton("НЕ ЗАКРЕПЛЯТЬ")
+            button_style = (
+                "QPushButton { background-color: #111111; color: #ffffff;"
+                " border: 1px solid #444444; padding: 7px 16px;"
+                " font-size: 11px; font-weight: bold; font-family: 'Consolas',"
+                " 'Courier New', monospace; }"
+                " QPushButton:hover { background-color: #ffffff;"
+                " color: #000000; border-color: #ffffff; }")
+            btn_pin.setStyleSheet(button_style)
+            btn_skip.setStyleSheet(button_style)
+            btn_pin.setDefault(True)
+            buttons.addStretch(1)
+            buttons.addWidget(btn_skip)
+            buttons.addWidget(btn_pin)
+            layout.addLayout(buttons)
+
+            choice = {"pin": False}
+
+            def accept_pin():
+                choice["pin"] = True
+                dialog.accept()
+
+            btn_pin.clicked.connect(accept_pin)
+            btn_skip.clicked.connect(dialog.reject)
+            dialog.exec()
+            if choice["pin"]:
+                self._pin_autostart_items[item_id] = dict(item)
+                self._pin_autostart_pinned_at = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S")
+                self._save_pinned_autostart_state()
+                self._sync_pin_ui()
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Значение закреплено. Изменения будут обнаруживаться "
+                    "автоматически.")
+                return
+            current = self._pin_autostart_items.get(item_id)
+            if current is not None and (
+                    str(current.get("value") or "")
+                    != str(item.get("value") or "")
+                    or str(current.get("signature") or "")
+                    != str(item.get("signature") or "")):
+                self._remove_pinned_autostart_ids([item_id])
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Новое значение не закреплено.")
+            elif current is not None:
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Закрепление оставлено без изменений.")
+            else:
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Значение не закреплено.")
+
+        def _open_pinned_autostart_dialog(self):
+            """Компактный список закреплённых записей и открепление."""
+            if not self._pin_autostart_items:
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Нет закреплённых значений автозапуска.")
+                return
+            dialog = QDialog(self)
+            dialog.setWindowTitle("ЗАКРЕПЛЁННЫЕ ЗНАЧЕНИЯ АВТОЗАПУСКА")
+            dialog.setStyleSheet(
+                "QDialog { background-color: #000000; color: #ffffff; }")
+            dialog.resize(940, 470)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(16, 14, 16, 14)
+            layout.setSpacing(8)
+
+            title = QLabel("ЗАКРЕПЛЁННЫЕ ЗНАЧЕНИЯ АВТОЗАПУСКА")
+            title.setStyleSheet(
+                "color: #ffffff; font-size: 14px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(title)
+            hint = QLabel(
+                "NoVir следит только за этими записями. Если значение "
+                "изменят или запись удалят, появится окно с информацией "
+                "о провокаторе.")
+            hint.setWordWrap(True)
+            hint.setStyleSheet(
+                "color: #888888; font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(hint)
+
+            tree = QTreeWidget()
+            tree.setColumnCount(4)
+            tree.setHeaderLabels(
+                ["ИМЯ", "ИСТОЧНИК", "РАСПОЛОЖЕНИЕ", "ЗНАЧЕНИЕ"])
+            tree.setRootIsDecorated(False)
+            tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+            tree.setStyleSheet(
+                "QTreeWidget { background-color: #000000; color: #ffffff;"
+                " border: 1px solid #222222; font-size: 10px;"
+                " font-family: 'Consolas', 'Courier New', monospace;"
+                " outline: none; }"
+                " QTreeWidget::item { padding: 3px 4px; }"
+                " QTreeWidget::item:selected { background-color: #ffffff;"
+                " color: #000000; }"
+                " QHeaderView::section { background-color: #000000;"
+                " color: #999999; border: none;"
+                " border-right: 1px solid #1a1a1a;"
+                " border-bottom: 1px solid #222222; padding: 3px 6px;"
+                " font-weight: bold; font-size: 9px; letter-spacing: 1px; }")
+            header = tree.header()
+            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.Stretch)
+
+            def fill_tree():
+                tree.clear()
+                ordered = sorted(
+                    self._pin_autostart_items.items(),
+                    key=lambda pair: (
+                        str(pair[1].get("kind") or ""),
+                        str(pair[1].get("source") or "").lower(),
+                        str(pair[1].get("name") or "").lower()))
+                for item_id, item in ordered:
+                    node = QTreeWidgetItem([
+                        str(item.get("display") or item.get("name") or "?"),
+                        str(item.get("source") or ""),
+                        str(item.get("location") or ""),
+                        str(item.get("value") or ""),
+                    ])
+                    node.setData(0, Qt.UserRole, item_id)
+                    node.setToolTip(
+                        3, str(item.get("value") or ""))
+                    tree.addTopLevelItem(node)
+
+            fill_tree()
+            layout.addWidget(tree, 1)
+
+            buttons = QHBoxLayout()
+            buttons.setSpacing(8)
+            btn_unpin = QPushButton("ОТКРЕПИТЬ ВЫБРАННОЕ")
+            btn_unpin_all = QPushButton("ОТКРЕПИТЬ ВСЁ")
+            btn_close = QPushButton("ЗАКРЫТЬ")
+            button_style = (
+                "QPushButton { background-color: #111111; color: #ffffff;"
+                " border: 1px solid #444444; padding: 7px 14px;"
+                " font-size: 10px; font-weight: bold;"
+                " font-family: 'Consolas', 'Courier New', monospace; }"
+                " QPushButton:hover { background-color: #ffffff;"
+                " color: #000000; border-color: #ffffff; }")
+            for button in (btn_unpin, btn_unpin_all, btn_close):
+                button.setStyleSheet(button_style)
+            buttons.addWidget(btn_unpin)
+            buttons.addWidget(btn_unpin_all)
+            buttons.addStretch(1)
+            buttons.addWidget(btn_close)
+            layout.addLayout(buttons)
+
+            def unpin_selected():
+                selected = [
+                    str(node.data(0, Qt.UserRole))
+                    for node in tree.selectedItems()
+                    if node.data(0, Qt.UserRole)
+                ]
+                if not selected:
+                    QMessageBox.information(
+                        dialog, "ЗАКРЕПЛЕНИЕ",
+                        "Выберите записи для открепления.")
+                    return
+                removed = self._remove_pinned_autostart_ids(selected)
+                if self._pin_autostart_items:
+                    fill_tree()
+                    self.show_toast(
+                        "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                        "Откреплено значений: %d" % removed)
+                else:
+                    self.show_toast(
+                        "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                        "Все значения откреплены.")
+                    dialog.accept()
+
+            def unpin_all():
+                reply = QMessageBox.question(
+                    dialog, "ОТКРЕПИТЬ ВСЁ",
+                    "Открепить все значения автозапуска?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
+                count = len(self._pin_autostart_items)
+                self._remove_pinned_autostart_ids(
+                    list(self._pin_autostart_items))
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Откреплено значений: %d" % count)
+                dialog.accept()
+
+            btn_unpin.clicked.connect(unpin_selected)
+            btn_unpin_all.clicked.connect(unpin_all)
+            btn_close.clicked.connect(dialog.reject)
+            dialog.exec()
+
+        def _pin_compute_pinned_diff(self, baseline, current):
+            """Сравнивать только закреплённые записи, игнорируя остальные."""
+            changes = []
+            baseline = dict(baseline or {})
+            current = dict(current or {})
+            has_task_source = any(
+                item.get("kind") == "task" for item in current.values())
+            has_service_source = any(
+                item.get("kind") == "service" for item in current.values())
+            for key, old in baseline.items():
+                old = dict(old or {})
+                kind = str(old.get("kind") or "")
+                item = current.get(key)
+                if item is None:
+                    if kind in ("registry", "winlogon", "appinit"):
+                        location, _logical_path = (
+                            self._autostart_registry_read_location(old))
+                        if location is None:
+                            # Куст установленной Windows не смонтирован:
+                            continue
+                        item = self._read_pinned_autostart_item(old)
+                    elif kind == "folder":
+                        item = self._read_pinned_autostart_item(old)
+                    elif kind == "task" and not has_task_source:
+                        continue
+                    elif kind == "service" and not has_service_source:
+                        continue
+                if item is None:
+                    changes.append({
+                        "change": "removed",
+                        "id": key,
+                        "item": old,
+                        "old": old,
+                        "old_value": str(old.get("value", "")),
+                    })
+                    continue
+                old_value = str(old.get("value", ""))
+                new_value = str(item.get("value", ""))
+                old_signature = str(old.get("signature", old_value))
+                new_signature = str(item.get("signature", new_value))
+                if old_value != new_value or old_signature != new_signature:
+                    changes.append({
+                        "change": "changed",
+                        "id": key,
+                        "item": item,
+                        "old": old,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                    })
+            return changes
+
+        def _accept_pinned_changes(self, changes, current):
+            """Разрешить изменения: обновить закрепление под текущее состояние."""
+            if not changes:
+                return
+            current = dict(current or {})
+            updated = 0
+            for change in changes:
+                item_id = str(change.get("id") or "")
+                if not item_id:
+                    continue
+                if change.get("change") == "removed":
+                    if self._pin_autostart_items.pop(item_id, None) is not None:
+                        updated += 1
+                    continue
+                item = change.get("item") or {}
+                live = current.get(item_id)
+                if live is None:
+                    live = self._read_pinned_autostart_item(item)
+                if live is None:
+                    live = item
+                self._pin_autostart_items[item_id] = dict(live)
+                updated += 1
+            if updated:
+                self._pin_autostart_pinned_at = datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S")
+                self._save_pinned_autostart_state()
+                self._sync_pin_ui()
+
+        def _check_pinned_autostart(self):
+            if not getattr(self, "_pin_autostart_items", None):
+                return
+            worker = getattr(self, "_pin_worker", None)
+            if worker is not None and worker.isRunning():
+                return
+            if getattr(self, "_pin_dialog_open", False):
+                return
+            baseline = {
+                key: dict(value)
+                for key, value in self._pin_autostart_items.items()
+                if isinstance(value, dict)
+            }
+            if self._is_winre_mode():
+                baseline = {
+                    key: value for key, value in baseline.items()
+                    if value.get("kind") not in ("task", "service")
+                }
+            if not baseline:
+                return
+            parent = self
+
+            class PinnedCheckWorker(QThread):
+                result_signal = Signal(object)
+
+                def run(self):
+                    try:
+                        needs_full = any(
+                            str(item.get("kind") or "") in ("task", "service")
+                            for item in baseline.values())
+                        current = (parent._collect_autostart_items()
+                                   if needs_full else {})
+                        changes = parent._pin_compute_pinned_diff(
+                            baseline, current)
+                        payload = {
+                            "changes": changes,
+                            "current": current,
+                            "error": "",
+                        }
+                    except Exception as error:
+                        payload = {
+                            "changes": [],
+                            "current": {},
+                            "error": str(error),
+                        }
+                    self.result_signal.emit(payload)
+
+            worker = PinnedCheckWorker(self)
+            worker.result_signal.connect(self._on_pinned_check_result)
+            self._pin_worker = keep_thread(worker)
+            worker.start()
+
+        def _on_pinned_check_result(self, payload):
+            self._pin_worker = None
+            if not isinstance(payload, dict):
+                return
+            if payload.get("error"):
+                return
+            if not getattr(self, "_pin_autostart_items", None):
+                return
+            changes = payload.get("changes") or []
+            if not changes:
+                return
+            self._show_pin_provocateur_dialog(
+                changes, payload.get("current") or {})
+
+        def _pin_program_path(self, value):
+            text = str(value or "").strip()
+            if not text:
+                return ""
+            if text.startswith('"'):
+                parts = text.split('"')
+                if len(parts) >= 2:
+                    return parts[1]
+            low = text.lower()
+            for ext in (".exe", ".dll", ".sys", ".com", ".bat", ".cmd",
+                        ".ps1", ".vbs", ".js", ".scr"):
+                index = low.find(ext)
+                if index >= 0:
+                    return text[:index + len(ext)].strip('"').strip()
+            first = text.split()[0].strip('"')
+            return first
+
+        def _pin_registry_last_write(self, item):
+            try:
+                import winreg
+                location, key_path = self._autostart_registry_read_location(
+                    item)
+                if location is None or not key_path:
+                    return ""
+                root, full_path = location
+                with winreg.OpenKey(
+                        root, full_path, 0, winreg.KEY_READ) as key:
+                    info = winreg.QueryInfoKey(key)
+                    return datetime.fromtimestamp(info[2]).strftime(
+                        "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return ""
+
+        def _pin_file_owner(self, path):
+            path = str(path or "").strip()
+            if not path or not os.path.isfile(path):
+                return ""
+            try:
+                import win32security
+                descriptor = win32security.GetFileSecurity(
+                    path, win32security.OWNER_SECURITY_INFORMATION)
+                owner_sid = descriptor.GetSecurityDescriptorOwner()
+                name, domain, _account_type = win32security.LookupAccountSid(
+                    None, owner_sid)
+                return ("%s\\%s" % (domain, name)) if domain else str(name)
+            except Exception:
+                try:
+                    return getpass.getuser()
+                except Exception:
+                    return os.environ.get("USERNAME", "")
+
+        def _identify_pin_provocateur(self, changes):
+            first = (changes or [{}])[0]
+            item = first.get("item") or first.get("old") or {}
+            value = str(item.get("value") or first.get("old_value") or "")
+            program = self._pin_program_path(value)
+            try:
+                user_name = getpass.getuser()
+            except Exception:
+                user_name = os.environ.get("USERNAME", "?")
+            domain = os.environ.get("USERDOMAIN", "")
+            current_user = ("%s\\%s" % (domain, user_name)) if domain else user_name
+            file_owner = self._pin_file_owner(program)
+            processes = []
+            if program and PSUTIL_AVAILABLE and psutil is not None:
+                program_low = program.lower()
+                program_name = os.path.basename(program_low)
+                now = datetime.now().timestamp()
+                for proc in psutil.process_iter(
+                        ["pid", "name", "exe", "cmdline", "username",
+                         "create_time"]):
+                    try:
+                        info = proc.info
+                        exe = str(info.get("exe") or "")
+                        name = str(info.get("name") or "")
+                        cmdline = " ".join(info.get("cmdline") or [])
+                        matched = False
+                        if program_low and exe:
+                            if os.path.normcase(exe) == os.path.normcase(program):
+                                matched = True
+                        if program_name and name.lower() == program_name:
+                            matched = True
+                        if program_name and program_name in cmdline.lower():
+                            matched = True
+                        if not matched and program_low:
+                            continue
+                        if not matched and info.get("create_time"):
+                            if now - float(info["create_time"]) > 180:
+                                continue
+                        processes.append({
+                            "pid": int(info.get("pid") or 0),
+                            "name": name or os.path.basename(exe or program),
+                            "exe": exe or program,
+                            "user": str(info.get("username") or ""),
+                            "cmdline": cmdline,
+                            "started": datetime.fromtimestamp(
+                                float(info.get("create_time") or now)).strftime(
+                                    "%Y-%m-%d %H:%M:%S"),
+                        })
+                    except Exception:
+                        continue
+            if not processes:
+                processes.append({
+                    "pid": 0,
+                    "name": "запущенный процесс не найден",
+                    "exe": program,
+                    "user": current_user,
+                    "cmdline": "",
+                    "started": "",
+                })
+            signed = None
+            if program and os.path.isfile(program):
+                try:
+                    signed = self._driver_signature_state(program)
+                except Exception:
+                    signed = None
+            return {
+                "program": program,
+                "processes": processes[:5],
+                "signed": signed,
+                "key_time": self._pin_registry_last_write(item),
+                "user": current_user,
+                "file_owner": file_owner,
+                "item": item,
+            }
+
+        def _show_pin_provocateur_dialog(self, changes, current):
+            provocateur = self._identify_pin_provocateur(changes)
+            lines = []
+            first = changes[0]
+            action_text = {
+                "new": "ДОБАВЛЕНО НОВОЕ",
+                "changed": "ЗНАЧЕНИЕ ИЗМЕНЕНО",
+                "removed": "ЗАКРЕПЛЁННОЕ ЗНАЧЕНИЕ УДАЛЕНО",
+            }.get(first.get("change"), "ИЗМЕНЕНИЕ")
+            lines.append("ЧТО ПРОИЗОШЛО: %s" % action_text)
+            lines.append("")
+            lines.append("КТО ЭТО:")
+            process_lines = []
+            for process in provocateur["processes"]:
+                if process.get("pid"):
+                    process_lines.append(
+                        "  %s (PID %s), пользователь: %s" % (
+                            process.get("name") or "?",
+                            process.get("pid"),
+                            process.get("user") or "?"))
+                    if process.get("exe"):
+                        process_lines.append("  Путь: %s" % process["exe"])
+                    if process.get("started"):
+                        process_lines.append(
+                            "  Запущен: %s" % process["started"])
+                else:
+                    process_lines.append(
+                        "  %s, пользователь: %s" % (
+                            process.get("name") or "?",
+                            process.get("user") or "?"))
+            lines.extend(process_lines or ["  не удалось определить процесс"])
+            lines.append("  Пользователь, обнаруживший изменение: %s" % (
+                provocateur.get("user") or "?"))
+            if provocateur["program"]:
+                lines.append("  Программа: %s" % provocateur["program"])
+            if provocateur.get("file_owner"):
+                lines.append("  Владелец файла: %s" % provocateur["file_owner"])
+            if provocateur["signed"] is True:
+                lines.append("  Подпись файла: действительна")
+            elif provocateur["signed"] is False:
+                lines.append("  Подпись файла: отсутствует или недействительна")
+            lines.append("")
+            lines.append("ЧТО ЭТО:")
+            for index, change in enumerate(changes[:5], 1):
+                item = change.get("item") or change.get("old") or {}
+                old = change.get("old") or {}
+                lines.append("  %d) %s / %s" % (
+                    index, item.get("kind", "?"), item.get("source", "?")))
+                lines.append("     %s" % (
+                    item.get("display") or item.get("name") or "?"))
+                if item.get("location"):
+                    lines.append("     %s" % item["location"])
+                if change.get("change") == "removed":
+                    lines.append("     БЫЛО: %s" % change.get("old_value", ""))
+                    lines.append("     СТАЛО: запись удалена")
+                elif change.get("change") == "changed":
+                    lines.append("     БЫЛО: %s" % old.get("value", ""))
+                    lines.append("     СТАЛО: %s" % item.get("value", ""))
+                else:
+                    lines.append("     ЗНАЧЕНИЕ: %s" % item.get("value", ""))
+            if len(changes) > 5:
+                lines.append("  ... и ещё %d изменений" % (len(changes) - 5))
+            if provocateur["key_time"]:
+                lines.append("")
+                lines.append("ВРЕМЯ ИЗМЕНЕНИЯ КЛЮЧА: %s" % provocateur["key_time"])
+            lines.append("")
+            lines.append(
+                "УДАЛИТЬ ПРОВОКАТОРА? Будут удалены новые/изменённые "
+                "записи автозапуска, восстановлены закреплённые значения, "
+                "завершён найденный процесс и, если файл находится в "
+                "пользовательской папке, будет удалён сразу, без карантина.")
+            box = QMessageBox(self)
+            box.setWindowTitle("ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ — ПОПЫТКА ИЗМЕНЕНИЯ")
+            box.setIcon(QMessageBox.Warning)
+            box.setText("Обнаружена попытка изменить закреплённые значения автозапуска.")
+            brief = "\n".join(lines[:14])
+            if len(lines) > 14:
+                brief += "\n…"
+            box.setInformativeText(brief)
+            box.setDetailedText("\n".join(lines))
+            delete_button = box.addButton(
+                "УДАЛИТЬ ПРОВОКАТОРА", QMessageBox.YesRole)
+            keep_button = box.addButton(
+                "ОСТАВИТЬ (разрешить)", QMessageBox.NoRole)
+            box.setDefaultButton(delete_button)
+            self._pin_dialog_open = True
+            try:
+                box.exec()
+            finally:
+                self._pin_dialog_open = False
+            if box.clickedButton() is delete_button:
+                self._pin_remove_provocateur(changes, provocateur)
+            elif box.clickedButton() is keep_button:
+                self._accept_pinned_changes(changes, current)
+                self.show_toast(
+                    "ЗАКРЕПЛЕНИЕ ЗНАЧЕНИЙ",
+                    "Изменения разрешены и закреплены заново.")
+
+        def _pin_restore_item(self, item):
+            kind = str(item.get("kind") or "")
+            extra = item.get("extra") or {}
+            if kind in ("registry", "appinit", "winlogon"):
+                key_path = extra.get("key_path")
+                value_name = extra.get("value_name")
+                value = str(item.get("value", ""))
+                if not key_path or not value_name:
+                    return False, "нет данных для восстановления"
+                if kind == "winlogon" and not value:
+                    value = str(extra.get("default_value") or "")
+                value_type = int(extra.get("value_type") or 1)
+                location, _logical_path = self._autostart_registry_read_location(item)
+                if location is None:
+                    return False, "куст реестра недоступен"
+                root, full_path = location
+                try:
+                    import winreg
+                    with winreg.CreateKeyEx(
+                            root, full_path, 0, winreg.KEY_SET_VALUE) as key:
+                        winreg.SetValueEx(
+                            key, value_name, 0, value_type, value)
+                except Exception as error:
+                    return False, str(error)
+                return True, ""
+            if kind == "folder":
+                return False, "файл автозагрузки не восстановить автоматически"
+            if kind == "task":
+                return False, "задачу планировщика не восстановить автоматически"
+            if kind == "service":
+                return False, "службу не восстановить автоматически"
+            return False, "неизвестный тип автозапуска"
+
+        def _pin_terminate_provocateur(self):
+            provocateur = getattr(self, "_pin_current_provocateur", None) or {}
+            terminated = []
+            errors = []
+            if not (PSUTIL_AVAILABLE and psutil is not None):
+                return terminated, errors
+            protected = {"system", "smss.exe", "csrss.exe", "wininit.exe",
+                         "winlogon.exe", "services.exe", "lsass.exe",
+                         "svchost.exe", "explorer.exe"}
+            for process in provocateur.get("processes") or []:
+                pid = int(process.get("pid") or 0)
+                if not pid or pid == os.getpid() or pid in (0, 4):
+                    continue
+                name = str(process.get("name") or "").lower()
+                if name in protected:
+                    continue
+                try:
+                    proc = psutil.Process(pid)
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except Exception:
+                        proc.kill()
+                    terminated.append("%s (PID %s)" % (name or "?", pid))
+                except Exception as error:
+                    errors.append("%s (PID %s): %s" % (name or "?", pid, error))
+            return terminated, errors
+
+        def _pin_delete_program(self, path):
+            path = str(path or "").strip()
+            if not path or not os.path.exists(path):
+                return False, "файл не найден"
+            try:
+                real_path = os.path.realpath(path)
+            except Exception:
+                real_path = path
+            if not os.path.isfile(real_path):
+                return False, "не файл"
+            low = real_path.lower()
+            allowed = (
+                "\\users\\", "\\appdata\\", "\\temp\\", "\\downloads\\",
+                "\\desktop\\", "\\public\\", "\\programdata\\")
+            if not any(marker in low for marker in allowed):
+                return False, "системный/программный файл не тронут"
+            try:
+                os.remove(real_path)
+            except Exception as error:
+                return False, str(error)
+            return True, real_path
+
+        def _pin_remove_provocateur(self, changes, provocateur):
+            self._pin_current_provocateur = provocateur
+            results = []
+            unpin_ids = []
+            for change in changes:
+                item = change.get("item") or change.get("old") or {}
+                old = change.get("old") or {}
+                kind = str(item.get("kind") or "")
+                if change.get("change") == "removed":
+                    ok, message = self._pin_restore_item(item)
+                    if ok:
+                        results.append("Восстановлено: %s" % (
+                            item.get("display") or item.get("name") or "?"))
+                    else:
+                        results.append("Не восстановлено: %s (%s)" % (
+                            item.get("display") or item.get("name") or "?",
+                            message))
+                        unpin_ids.append(
+                            str(change.get("id") or item.get("id") or ""))
+                    continue
+                if change.get("change") == "changed":
+                    restore_ok, restore_message = self._pin_restore_item(old)
+                    if restore_ok:
+                        results.append("Возвращено прежнее значение: %s" % (
+                            old.get("display") or old.get("name") or "?"))
+                    else:
+                        ok, message = self._delete_autostart_item(item)
+                        results.append("Изменённая запись удалена: %s" % (
+                            item.get("display") or item.get("name") or "?")
+                            if ok else "Ошибка удаления: %s (%s)" % (
+                                item.get("display") or item.get("name") or "?",
+                                message))
+                        # Вернуть прежнее значение не удалось. Старое
+                        unpin_ids.append(
+                            str(change.get("id") or old.get("id") or
+                                item.get("id") or ""))
+                    continue
+                ok, message = self._delete_autostart_item(item)
+                if ok:
+                    results.append("Удалено: %s" % (
+                        item.get("display") or item.get("name") or "?"))
+                else:
+                    results.append("Ошибка удаления: %s (%s)" % (
+                        item.get("display") or item.get("name") or "?",
+                        message))
+
+            terminated, terminate_errors = self._pin_terminate_provocateur()
+            for name in terminated:
+                results.append("Процесс завершён: %s" % name)
+            for error in terminate_errors:
+                results.append("Не удалось завершить процесс: %s" % error)
+
+            program = str(provocateur.get("program") or "")
+            if program:
+                deleted_ok, deleted_message = self._pin_delete_program(program)
+                if deleted_ok:
+                    results.append("Файл провокатора удалён сразу, без карантина: %s" % (
+                        deleted_message))
+                else:
+                    results.append("Файл не удалён: %s (%s)" % (
+                        program, deleted_message))
+
+            if unpin_ids:
+                self._remove_pinned_autostart_ids(unpin_ids)
+            self._sync_pin_ui()
+            changed_kinds = set()
+            for change in changes:
+                item = change.get("item") or change.get("old") or {}
+                kind = item.get("kind")
+                if kind:
+                    changed_kinds.add(kind)
+            self._refresh_after_autostart_change(changed_kinds)
+            self._show_text_dialog(
+                "Провокатор удалён",
+                "NoVir удалил провокатора и восстановил закреплённые значения."
+                "\n\n" + "\n".join(results))
+
         def _maybe_show_autostart_changes_dialog(self):
-            """Open the B&W startup-changes window once per set of entries."""
             if getattr(self, "_autostart_changes_dialog", None) is not None:
                 return
             if not self.isVisible():
@@ -15511,7 +16808,12 @@ if GUI_MODE:
             worker = getattr(self, "_autostart_diff_worker", None)
             if worker is not None and worker.isRunning():
                 return
+            pinned_ids = set(getattr(self, "_pin_autostart_items", {}) or {})
             changes = getattr(self, "_autostart_diff_changes", []) or []
+            changes = [
+                entry for entry in changes
+                if str(entry.get("id")) not in pinned_ids
+            ]
             system_count = len([
                 entry for entry in changes if entry.get("system")
             ])
@@ -16051,13 +17353,17 @@ if GUI_MODE:
             kind = str(item.get("kind") or "")
             extra = item.get("extra") or {}
             if kind in ("registry", "appinit"):
-                hive = extra.get("hive")
                 key_path = extra.get("key_path")
                 value_name = extra.get("value_name")
-                if hive is None or not key_path or not value_name:
+                if not key_path or not value_name:
                     return False, tr("Не удалось удалить значение реестра:")
+                location, _logical_path = self._autostart_registry_read_location(item)
+                if location is None:
+                    return False, tr("Не удалось удалить значение реестра:")
+                root, full_path = location
                 try:
-                    with winreg.OpenKey(hive, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                    with winreg.OpenKey(
+                            root, full_path, 0, winreg.KEY_SET_VALUE) as key:
                         winreg.DeleteValue(key, value_name)
                 except Exception as error:
                     return False, f"{tr('Не удалось удалить значение реестра:')} {error}"
@@ -16121,6 +17427,17 @@ if GUI_MODE:
                     os.environ.get("ProgramData") or r"C:\ProgramData",
                     r"Microsoft\Windows\Start Menu\Programs\Startup"),
             ]
+            if self._is_winre_mode():
+                profile = self._autostart_offline_user_profile
+                drive = str(self._autostart_offline_drive or "").rstrip("\\")
+                if profile:
+                    roots.append(os.path.join(
+                        profile,
+                        r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"))
+                if drive:
+                    roots.append(os.path.join(
+                        drive,
+                        r"ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"))
             try:
                 real_path = os.path.normcase(os.path.realpath(path))
             except Exception:
@@ -16154,7 +17471,6 @@ if GUI_MODE:
             except Exception:
                 pass
 
-        # ── карантин ────────────────────────────────────────────────
 
         def _load_quarantine_manifest(self):
             path = self._autostart_quarantine_manifest_path()
@@ -16504,24 +17820,34 @@ if GUI_MODE:
                 " border-color: #ffffff; }"
                 " QPushButton:disabled { color: #555555; border-color: #222222; }")
             startup_actions = QHBoxLayout()
-            startup_actions.setContentsMargins(0, 5, 6, 0)
+            startup_actions.setContentsMargins(0, 0, 6, 0)
             startup_actions.setSpacing(6)
             self.btn_autostart_check = QPushButton(tr('Проверить изменения'))
             self.btn_autostart_check.setStyleSheet(_startup_btn_style)
             self.btn_autostart_check.setMinimumWidth(130)
+            self.btn_autostart_check.setFixedHeight(28)
             self.btn_autostart_check.clicked.connect(self._manual_autostart_check)
             startup_actions.addWidget(self.btn_autostart_check)
             self.btn_open_quarantine = QPushButton(tr('Карантин'))
             self.btn_open_quarantine.setStyleSheet(_startup_btn_style)
             self.btn_open_quarantine.setMinimumWidth(100)
+            self.btn_open_quarantine.setFixedHeight(28)
             self.btn_open_quarantine.clicked.connect(self._open_quarantine_tab)
             startup_actions.addWidget(self.btn_open_quarantine)
+            self.btn_pin_manage = QPushButton("ЗАКРЕПЛЕНО: 0")
+            self.btn_pin_manage.setStyleSheet(_startup_btn_style)
+            self.btn_pin_manage.setMinimumWidth(130)
+            self.btn_pin_manage.setFixedHeight(28)
+            self.btn_pin_manage.setVisible(
+                bool(getattr(self, "_pin_autostart_items", {})))
+            self.btn_pin_manage.clicked.connect(
+                self._open_pinned_autostart_dialog)
+            startup_actions.addWidget(self.btn_pin_manage)
             startup_corner = QWidget()
             startup_corner.setStyleSheet("background-color: transparent;")
             startup_corner.setLayout(startup_actions)
             self.startup_tabs.setCornerWidget(startup_corner, Qt.TopRightCorner)
-            # Скрытая модель вкладки «Новое»: данные нужны для окна изменений.
-            # Вкладка «Новое»: что появилось в автозапуске с прошлого запуска.
+
             diff_tab = QWidget()
             diff_layout = QVBoxLayout(diff_tab)
             diff_layout.setContentsMargins(8, 8, 8, 8)
@@ -16602,13 +17928,10 @@ if GUI_MODE:
                 " font-family: 'Consolas', 'Courier New', monospace;")
             diff_hint.setWordWrap(True)
             diff_layout.addWidget(diff_hint)
-            # Список изменений больше не занимает отдельную вкладку:
-            # он показывается в окне AutostartChangesDialog.
             diff_tab.setParent(page)
             diff_tab.hide()
             self._autostart_diff_tab = diff_tab
 
-            # Карантин больше не вкладка, а отдельное окно по кнопке.
             quarantine_tab = QWidget()
             quarantine_layout = QVBoxLayout(quarantine_tab)
             quarantine_layout.setContentsMargins(8, 8, 8, 8)
@@ -16821,7 +18144,6 @@ if GUI_MODE:
             
             self.startup_tabs.addTab(reg_tab, "Реестр")
             
-            # Вкладка Папка автозагрузки с таблицей и кнопками
             folder_tab = QWidget()
             folder_layout = QVBoxLayout(folder_tab)
             folder_layout.setContentsMargins(0, 0, 0, 0)
@@ -16836,7 +18158,6 @@ if GUI_MODE:
             folder_layout.addWidget(self.chk_block_folder)
             self.startup_tabs.addTab(folder_tab, "Папка автозагрузки")
             
-            # Вкладка Планировщик задач с таблицей и кнопками
             scheduler_tab = QWidget()
             scheduler_layout = QVBoxLayout(scheduler_tab)
             scheduler_btn_layout = QHBoxLayout()
@@ -16879,7 +18200,6 @@ if GUI_MODE:
             scheduler_btn_layout.addWidget(btn_refresh_scheduler)
             scheduler_layout.addLayout(scheduler_btn_layout)
             
-            # Дерево задач по папкам (как в планировщике Windows)
             self.scheduler_tree = QTreeWidget()
             self.scheduler_tree.setColumnCount(3)
             self.scheduler_tree.setHeaderLabels(["ИМЯ", "РАСПОЛОЖЕНИЕ", "СОСТОЯНИЕ"])
@@ -16967,6 +18287,240 @@ if GUI_MODE:
             self._scheduler_all_data = []
             self.startup_tabs.addTab(scheduler_tab, "Планировщик задач")
             
+            # Вкладка Драйверы
+            drivers_tab = QWidget()
+            drivers_layout = QVBoxLayout(drivers_tab)
+            drivers_layout.setContentsMargins(6, 6, 6, 6)
+            drivers_layout.setSpacing(6)
+
+            drivers_split = QSplitter(Qt.Horizontal)
+            drivers_split.setChildrenCollapsible(False)
+
+            drivers_left = QWidget()
+            drivers_left_layout = QVBoxLayout(drivers_left)
+            drivers_left_layout.setContentsMargins(0, 0, 0, 0)
+            drivers_left_layout.setSpacing(4)
+
+            drivers_search_row = QHBoxLayout()
+            drivers_search_row.setSpacing(6)
+            self.drivers_search = QLineEdit()
+            self.drivers_search.setPlaceholderText("Поиск драйвера...")
+            self.drivers_search.setFixedHeight(26)
+            self.drivers_search.setStyleSheet("""
+                QLineEdit {
+                    background-color: #000000;
+                    color: #ffffff;
+                    border: 1px solid #333333;
+                    border-radius: 3px;
+                    padding: 3px 8px;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QLineEdit:focus { border-color: #ffffff; }
+            """)
+            self.drivers_search.textChanged.connect(self._apply_drivers_filter)
+            drivers_search_row.addWidget(self.drivers_search, 1)
+
+            btn_refresh_drivers = QPushButton("Обновить")
+            btn_refresh_drivers.setFixedHeight(26)
+            btn_refresh_drivers.setStyleSheet(
+                "background-color: #111111; color: #ffffff; padding: 3px 10px;"
+                " border: 1px solid #333333; border-radius: 2px;"
+                " font-size: 10px; font-family: 'Consolas', 'Courier New', monospace;")
+            btn_refresh_drivers.clicked.connect(self.load_drivers_data)
+            drivers_search_row.addWidget(btn_refresh_drivers)
+            drivers_left_layout.addLayout(drivers_search_row)
+
+            self.drivers_table = QTableWidget(0, 3)
+            self.drivers_table.setHorizontalHeaderLabels(
+                ["НАЗВАНИЕ", "ОПИСАНИЕ", "ДАТА СОЗДАНИЯ"])
+            self.drivers_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.drivers_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.drivers_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.drivers_table.setWordWrap(False)
+            self.drivers_table.setTextElideMode(Qt.ElideRight)
+            self.drivers_table.setShowGrid(True)
+            self.drivers_table.setAlternatingRowColors(False)
+            self.drivers_table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.drivers_table.customContextMenuRequested.connect(
+                self._show_drivers_context_menu)
+            self.drivers_table.itemDoubleClicked.connect(
+                lambda _item: self._driver_show_properties())
+            self.drivers_table.verticalHeader().setVisible(False)
+            self.drivers_table.verticalHeader().setDefaultSectionSize(22)
+            self.drivers_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+            self.drivers_table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            _drv_header = self.drivers_table.horizontalHeader()
+            _drv_header.setFixedHeight(24)
+            _drv_header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            _drv_header.setSectionResizeMode(0, QHeaderView.Interactive)
+            _drv_header.setSectionResizeMode(1, QHeaderView.Stretch)
+            _drv_header.setSectionResizeMode(2, QHeaderView.Interactive)
+            self.drivers_table.setColumnWidth(0, 250)
+            self.drivers_table.setColumnWidth(2, 120)
+            self.drivers_table.setStyleSheet("""
+                QTableWidget {
+                    background-color: #000000;
+                    color: #ffffff;
+                    gridline-color: #161616;
+                    border: 1px solid #222222;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    outline: none;
+                }
+                QTableWidget::item {
+                    padding: 0px 4px;
+                    border: none;
+                }
+                QTableWidget::item:hover { background-color: #111111; }
+                QTableWidget::item:selected {
+                    background-color: #ffffff;
+                    color: #000000;
+                }
+                QHeaderView::section {
+                    background-color: #000000;
+                    color: #888888;
+                    border: none;
+                    border-right: 1px solid #1a1a1a;
+                    border-bottom: 1px solid #222222;
+                    padding: 2px 6px;
+                    font-weight: bold;
+                    font-size: 9px;
+                    letter-spacing: 1px;
+                }
+                QScrollBar:vertical {
+                    background: #000000;
+                    width: 8px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #262626;
+                    min-height: 16px;
+                    border-radius: 4px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #444444;
+                }
+            """)
+            drivers_left_layout.addWidget(self.drivers_table, 1)
+
+            drivers_filter_panel = QFrame()
+            drivers_filter_panel.setObjectName("DriverFilterPanel")
+            drivers_filter_panel.setMinimumWidth(170)
+            drivers_filter_panel.setMaximumWidth(340)
+            filter_layout = QVBoxLayout(drivers_filter_panel)
+            filter_layout.setContentsMargins(10, 10, 10, 10)
+            filter_layout.setSpacing(8)
+            drivers_filter_panel.setStyleSheet("""
+                QFrame#DriverFilterPanel {
+                    background-color: #000000;
+                    border: 1px solid #222222;
+                    border-radius: 4px;
+                }
+                QLabel {
+                    color: #ffffff;
+                    background: transparent;
+                    border: none;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QCheckBox {
+                    color: #cccccc;
+                    background: transparent;
+                    border: none;
+                    spacing: 5px;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QCheckBox::indicator {
+                    width: 12px;
+                    height: 12px;
+                    border: 1px solid #444444;
+                    background: #000000;
+                    border-radius: 2px;
+                }
+                QCheckBox::indicator:checked {
+                    background: #ffffff;
+                    border-color: #ffffff;
+                }
+                QPushButton {
+                    background: #0d0d0d;
+                    color: #ffffff;
+                    border: 1px solid #262626;
+                    border-radius: 3px;
+                    padding: 4px 8px;
+                    font-size: 10px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QPushButton:hover {
+                    background: #1a1a1a;
+                    border-color: #555555;
+                }
+            """)
+
+            filter_title = QLabel("ФИЛЬТРЫ")
+            filter_title.setStyleSheet(
+                "font-size: 12px; font-weight: bold; letter-spacing: 2px;")
+            filter_layout.addWidget(filter_title)
+
+            category_title = QLabel("КАТЕГОРИИ")
+            category_title.setStyleSheet(
+                "font-size: 9px; color: #888888; letter-spacing: 1px;")
+            filter_layout.addWidget(category_title)
+
+            self.driver_category_checks = {}
+            for _category in ("Boot", "System", "Auto", "Demand", "Disable"):
+                _cb = QCheckBox(_category)
+                _cb.setChecked(True)
+                _cb.setToolTip(
+                    "Снимите галочку, чтобы скрыть эту категорию драйверов")
+                _cb.toggled.connect(self._apply_drivers_filter)
+                self.driver_category_checks[_category] = _cb
+                filter_layout.addWidget(_cb)
+
+            filter_layout.addSpacing(6)
+            security_title = QLabel("ПРОВЕРКА")
+            security_title.setStyleSheet(
+                "font-size: 9px; color: #888888; letter-spacing: 1px;")
+            filter_layout.addWidget(security_title)
+
+            self.chk_driver_signature = QCheckBox("Только подписанные")
+            self.chk_driver_signature.setChecked(False)
+            self.chk_driver_signature.setToolTip(
+                "Показывать только драйверы с действительной цифровой "
+                "подписью (WinVerifyTrust). Может замедлить загрузку списка.")
+            self.chk_driver_signature.toggled.connect(self._apply_drivers_filter)
+            filter_layout.addWidget(self.chk_driver_signature)
+
+            self.chk_driver_suspicious = QCheckBox("Только подозрительные")
+            self.chk_driver_suspicious.setToolTip(
+                "Показывать драйверы без подписи, с отсутствующим файлом "
+                "или запускаемые из подозрительной папки")
+            self.chk_driver_suspicious.toggled.connect(self._apply_drivers_filter)
+            filter_layout.addWidget(self.chk_driver_suspicious)
+
+            filter_layout.addStretch(1)
+            self.driver_count_label = QLabel("")
+            self.driver_count_label.setStyleSheet(
+                "font-size: 9px; color: #888888;")
+            filter_layout.addWidget(self.driver_count_label)
+
+            btn_reset_driver_filters = QPushButton("Сбросить фильтры")
+            btn_reset_driver_filters.clicked.connect(
+                self._reset_driver_filters)
+            filter_layout.addWidget(btn_reset_driver_filters)
+
+            drivers_split.addWidget(drivers_left)
+            drivers_split.addWidget(drivers_filter_panel)
+            drivers_split.setStretchFactor(0, 4)
+            drivers_split.setStretchFactor(1, 1)
+            drivers_split.setSizes([800, 200])
+            drivers_layout.addWidget(drivers_split, 1)
+
+            self._drivers_all_data = []
+            self._driver_sig_cache = {}
+            self.startup_tabs.addTab(drivers_tab, "Драйверы")
+
             # Вкладка Меню служб с таблицей и кнопками
             services_tab = QWidget()
             services_layout = QVBoxLayout(services_tab)
@@ -17085,10 +18639,13 @@ if GUI_MODE:
             services_layout.addWidget(self.services_tree)
             self.startup_tabs.addTab(services_tab, "Меню служб")
             
+            self._create_autostart_offline_bar(layout)
             layout.addWidget(self.startup_tabs)
             self.startup_tabs.setCurrentIndex(0)
             self._startup_ui_ready = True
             self.startup_tabs.currentChanged.connect(self.on_main_startup_tab_changed)
+            self._sync_pin_ui()
+            self._refresh_autostart_targets()
             self.load_initial_startup_data()
             self.on_main_startup_tab_changed(0)
             self._refresh_autostart_diff_tab()
@@ -17114,13 +18671,14 @@ if GUI_MODE:
             if not getattr(self, "_startup_ui_ready", False):
                 return
             if index == 0:
-                # Реестр - загружаем данные в текущую подвкладку
                 self.on_sub_tab_changed(self.startup_sub_tabs.currentIndex())
             elif index == 1:
                 self.load_folder_data()
             elif index == 2:
                 self.load_scheduler_data()
             elif index == 3:
+                self.load_drivers_data()
+            elif index == 4:
                 self.load_services_data()
 
         def on_sub_tab_changed(self, index):
@@ -17143,41 +18701,76 @@ if GUI_MODE:
             table.setRowCount(0)
             data = []
             
-            if type_name == "Run":
-                data = self.get_reg_startup(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run")
-                data += self.get_reg_startup(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run")
-            elif type_name == "RunOnce":
-                data = self.get_reg_startup(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\RunOnce")
-                data += self.get_reg_startup(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\RunOnce")
+            if type_name in ("Run", "RunOnce"):
+                if type_name == "Run":
+                    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                else:
+                    key_path = r"Software\Microsoft\Windows\CurrentVersion\RunOnce"
+                targets = self._autostart_registry_targets()
+                for target in targets:
+                    try:
+                        entries = self.get_reg_startup(
+                            target["root"],
+                            self._autostart_registry_open_path(
+                                target["prefix"], key_path, target["which"]))
+                    except Exception:
+                        entries = []
+                    for name, value in entries:
+                        data.append((
+                            name, value,
+                            f"{target['hive_text']}\\{key_path}"))
+                if not targets and self._is_winre_mode():
+                    data.append((
+                        "Установленная Windows не найдена",
+                        "Выберите диск выше"))
             elif type_name == "Winlogon":
-                # Показываем ТОЛЬКО ключи автозапуска Shell и Userinit
-                import winreg as _wr
                 _key_path = r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
                 _shell_val = "(не задан)"
                 _userinit_val = "(не задан)"
-                try:
-                    with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE, _key_path) as _k:
-                        try: _shell_val = _wr.QueryValueEx(_k, "Shell")[0] or "(пусто)"
-                        except: pass
-                        try: _userinit_val = _wr.QueryValueEx(_k, "Userinit")[0] or "(пусто)"
-                        except: pass
-                except: pass
-                data = [("Shell", str(_shell_val)), ("Userinit", str(_userinit_val))]
-            elif type_name == "AppInit_DLLs и CmdLine":
-                def get_val(hk, subk, name):
+                _target = self._autostart_registry_target("machine")
+                if _target is not None:
+                    _root, _prefix = _target
                     try:
-                        with winreg.OpenKey(hk, subk) as key:
+                        with winreg.OpenKey(
+                                _root,
+                                self._autostart_registry_open_path(
+                                    _prefix, _key_path, "machine")) as _k:
+                            try: _shell_val = winreg.QueryValueEx(_k, "Shell")[0] or "(пусто)"
+                            except: pass
+                            try: _userinit_val = winreg.QueryValueEx(_k, "Userinit")[0] or "(пусто)"
+                            except: pass
+                    except: pass
+                else:
+                    _shell_val = "Установленная Windows не найдена"
+                    _userinit_val = "Выберите диск выше"
+                data = [
+                    ("Shell", str(_shell_val), _key_path),
+                    ("Userinit", str(_userinit_val), _key_path),
+                ]
+            elif type_name == "AppInit_DLLs и CmdLine":
+                _machine = self._autostart_registry_target("machine")
+                _system = self._autostart_registry_target("system")
+
+                def get_val(target, subk, name):
+                    if target is None:
+                        return "(Установленная Windows не найдена)"
+                    root, prefix = target
+                    try:
+                        open_path = self._autostart_registry_open_path(
+                            prefix, subk,
+                            "system" if subk.upper().startswith("SYSTEM\\")
+                            else "machine")
+                        with winreg.OpenKey(root, open_path) as key:
                             val, _ = winreg.QueryValueEx(key, name)
                             return str(val) if str(val).strip() else "(Пустое значение)"
-                    except Exception as _e:
-                        # Expected exception, intentionally ignored
+                    except Exception:
                         return "(Пустое значение)"
                 data = [
-                    ("AppInit_DLLs", get_val(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs"), r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows"),
-                    ("AppInit_DLLs", get_val(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs"), r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows"),
-                    ("CmdLine", get_val(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\Setup", "CmdLine"), r"SYSTEM\Setup"),
-                    ("SetupType", get_val(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\Setup", "SetupType"), r"SYSTEM\Setup"),
-                    ("EnableCursorSuppression", get_val(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableCursorSuppression"), r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System")
+                    ("AppInit_DLLs", get_val(_machine, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs"), r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows"),
+                    ("AppInit_DLLs", get_val(_machine, r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows", "AppInit_DLLs"), r"SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows"),
+                    ("CmdLine", get_val(_system, r"SYSTEM\Setup", "CmdLine"), r"SYSTEM\Setup"),
+                    ("SetupType", get_val(_system, r"SYSTEM\Setup", "SetupType"), r"SYSTEM\Setup"),
+                    ("EnableCursorSuppression", get_val(_machine, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "EnableCursorSuppression"), r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System")
                 ]
             
             table.setRowCount(len(data))
@@ -17217,23 +18810,19 @@ if GUI_MODE:
         def load_scheduler_data(self):
             """Загружаем задачи планировщика в фоне. Не запускаем повторно если уже идёт загрузка."""
             try:
-                # Если поток уже работает — не запускаем ещё один
                 if self._scheduler_loader is not None and self._scheduler_loader.isRunning():
-                    # Показываем закешированные данные если они есть
                     if hasattr(self, '_scheduler_all_data') and self._scheduler_all_data:
                         self._apply_scheduler_filter(
                             self.sched_filter_combo.currentText() if hasattr(self, 'sched_filter_combo') else "Все задачи"
                         )
                     return
 
-                # Если кеш уже есть — показываем его сразу (без повторного запроса schtasks)
                 if hasattr(self, '_scheduler_all_data') and self._scheduler_all_data:
                     self._apply_scheduler_filter(
                         self.sched_filter_combo.currentText() if hasattr(self, 'sched_filter_combo') else "Все задачи"
                     )
                     return
 
-                # Первая загрузка — показываем плейсхолдер и запускаем поток
                 self.scheduler_tree.clear()
                 placeholder = QTreeWidgetItem(["Загрузка задач планировщика...", ""])
                 placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsSelectable)
@@ -17462,8 +19051,7 @@ if GUI_MODE:
                 return item
 
             for group_key, group_title, is_driver in (
-                    ("drivers", "ДРАЙВЕРЫ", True),
-                    ("services", "СЛУЖБЫ", False)):
+                    ("services", "СЛУЖБЫ", False),):
                 bucket_map = groups["driver" if is_driver else "service"]
                 total = sum(len(rows) for rows in bucket_map.values())
                 if not total:
@@ -17500,13 +19088,625 @@ if GUI_MODE:
             if query:
                 self._filter_services_data(query)
 
+
+        @staticmethod
+        def _resolve_driver_path(raw_path):
+            text = str(raw_path or "").strip()
+            if not text:
+                return ""
+            if text.startswith('"'):
+                end = text.find('"', 1)
+                if end > 0:
+                    text = text[1:end]
+            else:
+                if " " in text and not os.path.isfile(text):
+                    for part in text.split():
+                        if part.lower().endswith(".sys"):
+                            text = part
+                            break
+            text = os.path.expandvars(text).strip()
+            low = text.lower()
+            system_root = os.environ.get("SystemRoot", r"X:\Windows")
+            if low.startswith("\\systemroot"):
+                text = system_root + text[len("\\SystemRoot"):]
+            elif low.startswith("\\??\\"):
+                text = text[4:]
+            elif low.startswith("system32\\") or low.startswith("\\system32\\"):
+                text = os.path.join(system_root, text.lstrip("\\"))
+            if text and not os.path.isabs(text) and not re.match(r"^[A-Za-z]:", text):
+                text = os.path.join(system_root, text)
+            try:
+                return os.path.normpath(text)
+            except Exception:
+                return text
+
+        @staticmethod
+        def _driver_version_description(path):
+            if not path:
+                return ""
+            try:
+                import ctypes
+                version = ctypes.windll.version
+                size = version.GetFileVersionInfoSizeW(path, None)
+                if not size:
+                    return ""
+                buf = ctypes.create_string_buffer(size)
+                if not version.GetFileVersionInfoW(path, 0, size, buf):
+                    return ""
+                ptr = ctypes.c_void_p()
+                length = ctypes.c_uint()
+                translation = "\\VarFileInfo\\Translation"
+                if not version.VerQueryValueW(
+                        buf, translation, ctypes.byref(ptr),
+                        ctypes.byref(length)) or not ptr.value:
+                    candidates = [(0x0409, 0x04B0)]
+                else:
+                    words = ctypes.cast(
+                        ptr, ctypes.POINTER(ctypes.c_ushort))
+                    candidates = [
+                        (int(words[0]), int(words[1])),
+                        (0x0409, 0x04B0),
+                        (0, 0x04B0),
+                    ]
+                for lang, codepage in candidates:
+                    query = (
+                        "\\StringFileInfo\\%04x%04x\\FileDescription"
+                        % (lang, codepage))
+                    if version.VerQueryValueW(
+                            buf, query, ctypes.byref(ptr),
+                            ctypes.byref(length)) and ptr.value:
+                        value = ctypes.wstring_at(ptr.value).strip()
+                        if value:
+                            return value
+            except Exception:
+                pass
+            return ""
+
+        @staticmethod
+        def _driver_file_date(path):
+            try:
+                stamp = os.path.getctime(path)
+                if stamp <= 0:
+                    stamp = os.path.getmtime(path)
+                return datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return "—"
+
+        @staticmethod
+        def _is_suspicious_driver(path):
+            if not path or not os.path.isfile(path):
+                return True
+            low = path.lower()
+            suspicious_parts = (
+                "\\temp\\", "\\users\\", "\\appdata\\", "\\programdata\\",
+                "\\downloads\\", "\\desktop\\", "\\$recycle.bin\\",
+            )
+            if any(part in low for part in suspicious_parts):
+                return True
+            trusted_parts = (
+                "\\windows\\system32\\drivers\\",
+                "\\windows\\system32\\driverstore\\",
+                "\\windows\\syswow64\\drivers\\",
+                "\\system32\\drivers\\",
+                "\\system32\\driverstore\\",
+            )
+            return not any(part in low for part in trusted_parts)
+
+        def _driver_signature_state(self, path):
+            if not path or not os.path.isfile(path):
+                return None
+            cache_key = os.path.normcase(path)
+            if cache_key in self._driver_sig_cache:
+                return self._driver_sig_cache[cache_key]
+            result = None
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                class _GUID(ctypes.Structure):
+                    _fields_ = [
+                        ("Data1", wintypes.DWORD),
+                        ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD),
+                        ("Data4", ctypes.c_ubyte * 8),
+                    ]
+
+                class _WINTRUST_FILE_INFO(ctypes.Structure):
+                    _fields_ = [
+                        ("cbStruct", wintypes.DWORD),
+                        ("pcwszFilePath", wintypes.LPCWSTR),
+                        ("hFile", wintypes.HANDLE),
+                        ("pgKnownSubject", ctypes.POINTER(_GUID)),
+                    ]
+
+                class _WINTRUST_DATA(ctypes.Structure):
+                    _fields_ = [
+                        ("cbStruct", wintypes.DWORD),
+                        ("pPolicyCallbackData", wintypes.LPVOID),
+                        ("pSIPClientData", wintypes.LPVOID),
+                        ("dwUIChoice", wintypes.DWORD),
+                        ("fdwRevocationChecks", wintypes.DWORD),
+                        ("dwUnionChoice", wintypes.DWORD),
+                        ("pFile", ctypes.POINTER(_WINTRUST_FILE_INFO)),
+                        ("dwStateAction", wintypes.DWORD),
+                        ("hWVTStateData", wintypes.HANDLE),
+                        ("pwszURLReference", wintypes.LPWSTR),
+                        ("dwProvFlags", wintypes.DWORD),
+                        ("dwUIContext", wintypes.DWORD),
+                        ("pSignatureSettings", wintypes.LPVOID),
+                    ]
+
+                action = _GUID()
+                action.Data1 = 0x00AAC56B
+                action.Data2 = 0xCD44
+                action.Data3 = 0x11D0
+                for index, value in enumerate(
+                        (0x8C, 0xC2, 0x00, 0xC0, 0x4F, 0xC2, 0x95, 0xEE)):
+                    action.Data4[index] = value
+
+                file_info = _WINTRUST_FILE_INFO()
+                file_info.cbStruct = ctypes.sizeof(_WINTRUST_FILE_INFO)
+                file_info.pcwszFilePath = path
+
+                trust_data = _WINTRUST_DATA()
+                trust_data.cbStruct = ctypes.sizeof(_WINTRUST_DATA)
+                trust_data.dwUIChoice = 2  # WTD_UI_NONE
+                trust_data.fdwRevocationChecks = 0
+                trust_data.dwUnionChoice = 1  # WTD_CHOICE_FILE
+                trust_data.pFile = ctypes.pointer(file_info)
+                trust_data.dwStateAction = 1  # WTD_STATEACTION_VERIFY
+                trust_data.dwProvFlags = 0x00001000  # cache only
+                trust_data.dwUIContext = 0
+
+                wintrust = ctypes.windll.wintrust
+                code = wintrust.WinVerifyTrust(
+                    None, ctypes.byref(action), ctypes.byref(trust_data))
+                result = (code == 0)
+                trust_data.dwStateAction = 2  # WTD_STATEACTION_CLOSE
+                try:
+                    wintrust.WinVerifyTrust(
+                        None, ctypes.byref(action), ctypes.byref(trust_data))
+                except Exception:
+                    pass
+            except Exception:
+                result = None
+            self._driver_sig_cache[cache_key] = result
+            return result
+
+        def _collect_drivers_data(self):
+            data = []
+            try:
+                access = winreg.KEY_READ
+                if hasattr(winreg, "KEY_WOW64_64KEY"):
+                    access |= winreg.KEY_WOW64_64KEY
+                with winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        r"SYSTEM\CurrentControlSet\Services",
+                        0, access) as root:
+                    subkey_count = winreg.QueryInfoKey(root)[0]
+                    for index in range(subkey_count):
+                        try:
+                            key_name = winreg.EnumKey(root, index)
+                        except OSError:
+                            break
+                        try:
+                            with winreg.OpenKey(root, key_name) as key:
+                                def _value(name, default=""):
+                                    try:
+                                        value, _ = winreg.QueryValueEx(key, name)
+                                        return value
+                                    except OSError:
+                                        return default
+
+                                try:
+                                    service_type = int(_value("Type", 0) or 0)
+                                except (TypeError, ValueError):
+                                    continue
+                                if not (service_type & 0x0F):
+                                    continue
+                                try:
+                                    start = int(_value("Start", 3) or 3)
+                                except (TypeError, ValueError):
+                                    start = 3
+                                raw_path = str(
+                                    _value("ImagePath", "") or "").strip()
+                                path = self._resolve_driver_path(raw_path)
+                                display_name = str(
+                                    _value("DisplayName", "") or "").strip()
+                                description = str(
+                                    _value("Description", "") or "").strip()
+                                file_description = (
+                                    self._driver_version_description(path))
+                                if not display_name or display_name.startswith("@"):
+                                    display_name = (
+                                        file_description or key_name)
+                                if not description:
+                                    description = file_description or (
+                                        "Драйвер %s" % key_name)
+                                description = " ".join(description.split())
+                                if len(description) > 240:
+                                    description = description[:237] + "..."
+                                category = {
+                                    0: "Boot",
+                                    1: "System",
+                                    2: "Auto",
+                                    3: "Demand",
+                                    4: "Disable",
+                                }.get(start, "Demand")
+                                tooltip = (
+                                    "%s\nСлужба: %s\nФайл: %s\n%s"
+                                    % (display_name, key_name,
+                                       path or raw_path or "—", description))
+                                data.append({
+                                    "name": display_name,
+                                    "desc": description,
+                                    "date": self._driver_file_date(path),
+                                    "category": category,
+                                    "key": key_name,
+                                    "path": path,
+                                    "raw_path": raw_path,
+                                    "suspicious": self._is_suspicious_driver(path),
+                                    "signed": None,
+                                    "tooltip": tooltip,
+                                })
+                        except OSError:
+                            continue
+            except Exception:
+                return []
+            data.sort(key=lambda item: item["name"].lower())
+            return data
+
+        def load_drivers_data(self):
+            if not hasattr(self, "drivers_table"):
+                return
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                self._drivers_all_data = self._collect_drivers_data()
+            except Exception:
+                self._drivers_all_data = []
+            finally:
+                QApplication.restoreOverrideCursor()
+            self._apply_drivers_filter()
+
+        def _apply_drivers_filter(self):
+            if not hasattr(self, "drivers_table"):
+                return
+            query = self.drivers_search.text().strip().lower()
+            active_categories = {
+                name for name, checkbox in self.driver_category_checks.items()
+                if checkbox.isChecked()
+            }
+            only_signed = self.chk_driver_signature.isChecked()
+            only_suspicious = self.chk_driver_suspicious.isChecked()
+            need_signature = only_signed or only_suspicious
+            visible = []
+            for entry in self._drivers_all_data:
+                if entry.get("category") not in active_categories:
+                    continue
+                search_text = " ".join((
+                    str(entry.get("name", "")),
+                    str(entry.get("desc", "")),
+                    str(entry.get("key", "")),
+                    str(entry.get("path", "")),
+                )).lower()
+                if query and query not in search_text:
+                    continue
+                if need_signature and entry.get("signed") is None:
+                    entry["signed"] = self._driver_signature_state(
+                        entry.get("path", ""))
+                suspicious = bool(entry.get("suspicious"))
+                if entry.get("signed") is False:
+                    suspicious = True
+                if only_suspicious and not suspicious:
+                    continue
+                if only_signed and entry.get("signed") is not True:
+                    continue
+                visible.append(entry)
+
+            table = self.drivers_table
+            table.setSortingEnabled(False)
+            table.setRowCount(0)
+            white = QColor(255, 255, 255)
+            gray = QColor(170, 170, 170)
+            for entry in visible:
+                row = table.rowCount()
+                table.insertRow(row)
+                for column, text in enumerate((
+                        entry.get("name", ""),
+                        entry.get("desc", ""),
+                        entry.get("date", ""))):
+                    cell = QTableWidgetItem(str(text or ""))
+                    cell.setForeground(white if column == 0 else gray)
+                    cell.setToolTip(entry.get("tooltip", ""))
+                    cell.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    if column == 0:
+                        cell.setData(Qt.UserRole, entry)
+                    table.setItem(row, column, cell)
+            total = len(self._drivers_all_data)
+            if hasattr(self, "driver_count_label"):
+                self.driver_count_label.setText(
+                    "Показано: %d / %d" % (len(visible), total))
+
+        def _reset_driver_filters(self):
+            if hasattr(self, "drivers_search"):
+                self.drivers_search.clear()
+            for checkbox in self.driver_category_checks.values():
+                checkbox.blockSignals(True)
+                checkbox.setChecked(True)
+                checkbox.blockSignals(False)
+            for checkbox in (
+                    self.chk_driver_signature, self.chk_driver_suspicious):
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+            self._apply_drivers_filter()
+
+        def _driver_selected_entry(self):
+            from PySide6.QtWidgets import QMessageBox
+            if not hasattr(self, "drivers_table"):
+                return None
+            row = self.drivers_table.currentRow()
+            if row < 0:
+                QMessageBox.information(
+                    self, "Драйверы",
+                    "Выбери запись драйвера в таблице.")
+                return None
+            item = self.drivers_table.item(row, 0)
+            if item is None or item.data(Qt.UserRole) is None:
+                QMessageBox.information(
+                    self, "Драйверы",
+                    "Для этой записи недоступны данные драйвера.")
+                return None
+            return item.data(Qt.UserRole)
+
+        def _show_drivers_context_menu(self, pos):
+            from PySide6.QtWidgets import QMenu
+            entry = self._driver_selected_entry()
+            if entry is None:
+                return
+            menu = QMenu(self.drivers_table)
+            menu.setStyleSheet(
+                "QMenu { background-color: #0c0c0c; color: #88ccff; "
+                "border: 1px solid #333333; }"
+                "QMenu::item:selected { background-color: #1a3a1a; }")
+            actions = [
+                ("Свойства", self._driver_show_properties),
+                ("Запустить драйвер", self._driver_start),
+                ("Остановить драйвер", self._driver_stop),
+                ("Включить в реестре", self._driver_enable),
+                ("Отключить в реестре", self._driver_disable),
+                ("Открыть расположение файла", self._driver_open_location),
+                ("Удалить запись из реестра", self._driver_delete),
+                ("Обновить список", self.load_drivers_data),
+            ]
+            for title, handler in actions:
+                action = menu.addAction(title)
+                action.triggered.connect(handler)
+            menu.exec(self.drivers_table.viewport().mapToGlobal(pos))
+
+        def _driver_show_properties(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            signed = entry.get("signed")
+            if signed is None:
+                try:
+                    signed = self._driver_signature_state(
+                        entry.get("path", ""))
+                except Exception:
+                    signed = None
+            suspicious = bool(entry.get("suspicious"))
+            if signed is False:
+                suspicious = True
+            signature_text = {
+                True: "валидная",
+                False: "отсутствует / недействительна",
+                None: "не проверена",
+            }.get(signed, "не проверена")
+            lines = [
+                "Имя: " + str(entry.get("name", "")),
+                "Служба / ключ: " + str(entry.get("key", "")),
+                "Категория: " + str(entry.get("category", "")),
+                "Описание: " + str(entry.get("desc", "")),
+                "Файл: " + str(entry.get("path", "")),
+                "Дата файла: " + str(entry.get("date", "")),
+                "Цифровая подпись: " + signature_text,
+                "Подозрительный путь: " + ("да" if suspicious else "нет"),
+            ]
+            self._show_text_dialog("Свойства драйвера", "\n".join(lines))
+
+        def _driver_open_location(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            path = str(entry.get("path", "")).strip()
+            if not path or not os.path.isfile(path):
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Файл драйвера не найден:\n" + path)
+                return
+            folder = os.path.dirname(path)
+            try:
+                if sys.platform == "win32":
+                    subprocess.Popen(
+                        ["explorer.exe", "/select,", path],
+                        creationflags=subprocess.CREATE_NO_WINDOW)
+                else:
+                    subprocess.Popen(["xdg-open", folder])
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось открыть расположение файла:\n" + str(error))
+
+        def _driver_start(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            key = str(entry.get("key", "")).strip()
+            if not key:
+                return
+            reply = QMessageBox.question(
+                self, "Запуск драйвера",
+                "Запустить драйвер %s?\nОперация применится к текущей системе." % key,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+            ok, stdout, stderr = _run_safe_process(
+                ["sc.exe", "start", key], 30)
+            if ok:
+                self.show_toast("Драйверы", "Драйвер %s запущен." % key, "success")
+                self.load_drivers_data()
+            else:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось запустить драйвер %s:\n%s\n%s" % (
+                        key, stdout or "", stderr or ""))
+
+        def _driver_stop(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            key = str(entry.get("key", "")).strip()
+            if not key:
+                return
+            reply = QMessageBox.question(
+                self, "Остановка драйвера",
+                "Остановить драйвер %s?\nДля загружаемых драйверов может потребоваться перезагрузка." % key,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+            ok, stdout, stderr = _run_safe_process(
+                ["sc.exe", "stop", key], 30)
+            if ok:
+                self.show_toast("Драйверы", "Драйвер %s остановлен." % key, "success")
+                self.load_drivers_data()
+            else:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось остановить драйвер %s:\n%s\n%s" % (
+                        key, stdout or "", stderr or ""))
+
+        def _driver_enable(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            key = str(entry.get("key", "")).strip()
+            if not key:
+                return
+            import winreg
+            try:
+                reg_set_value(
+                    r"SYSTEM\CurrentControlSet\Services\%s" % key,
+                    "Start", 3, value_type=winreg.REG_DWORD,
+                    hive=winreg.HKEY_LOCAL_MACHINE)
+                self.show_toast(
+                    "Драйверы", "Драйвер %s включён (автозапуск вручную)." % key,
+                    "success")
+                self.load_drivers_data()
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось включить драйвер %s:\n%s" % (key, error))
+
+        def _driver_disable(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            key = str(entry.get("key", "")).strip()
+            if not key:
+                return
+            reply = QMessageBox.question(
+                self, "Отключение драйвера",
+                "Отключить драйвер %s?\nОн не будет загружаться при следующем запуске." % key,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+            import winreg
+            try:
+                reg_set_value(
+                    r"SYSTEM\CurrentControlSet\Services\%s" % key,
+                    "Start", 4, value_type=winreg.REG_DWORD,
+                    hive=winreg.HKEY_LOCAL_MACHINE)
+                self.show_toast(
+                    "Драйверы", "Драйвер %s отключён." % key, "success")
+                self.load_drivers_data()
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось отключить драйвер %s:\n%s" % (key, error))
+
+        def _driver_delete(self):
+            from PySide6.QtWidgets import QMessageBox
+            entry = self._driver_selected_entry()
+            if not entry:
+                return
+            key = str(entry.get("key", "")).strip()
+            if not key:
+                return
+            reply = QMessageBox.question(
+                self, "Удаление драйвера",
+                "Удалить запись службы драйвера %s из реестра?\n"
+                "Сам файл %s останется на диске.\n"
+                "Перед удалением будет создана резервная копия .reg." % (
+                    key, entry.get("path", "")),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+            import datetime
+            backup_dir = os.path.join(
+                os.environ.get("APPDATA", os.path.expanduser("~")),
+                "NoVir", "driver_backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = os.path.join(
+                backup_dir, "service_%s_%s.reg" % (key, stamp))
+            backup_ok = False
+            try:
+                ok, _stdout, _stderr = _run_safe_process(
+                    ["reg.exe", "export",
+                     "HKLM\\SYSTEM\\CurrentControlSet\\Services\\" + key,
+                     backup_path, "/y"], 20)
+                backup_ok = bool(ok) and os.path.isfile(backup_path)
+            except Exception:
+                backup_ok = False
+            if not backup_ok:
+                again = QMessageBox.question(
+                    self, "Удаление драйвера",
+                    "Не удалось создать резервную копию .reg.\n"
+                    "Продолжить удаление?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if again != QMessageBox.Yes:
+                    return
+            import winreg
+            try:
+                delete_registry_key(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SYSTEM\CurrentControlSet\Services\%s" % key)
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "Драйверы",
+                    "Не удалось удалить запись драйвера %s:\n%s" % (
+                        key, error))
+                return
+            if backup_ok:
+                self.show_toast(
+                    "Драйверы",
+                    "Запись удалена. Резервная копия: %s" % backup_path,
+                    "success")
+            else:
+                self.show_toast(
+                    "Драйверы", "Запись драйвера %s удалена." % key, "success")
+            self.load_drivers_data()
+
         def load_startup_data(self, type_name):
-            # Этот метод больше не нужен, так как у нас отдельные таблицы для каждого раздела
             pass
 
-        # ═══════════════════════════════════════════════════════════════
-        # ФУНКЦИИ РЕДАКТИРОВАНИЯ АВТОЗАГРУЗКИ
-        # ═══════════════════════════════════════════════════════════════
 
         def show_table_context_menu(self, pos, table, reg_type):
             item = table.itemAt(pos)
@@ -17542,7 +19742,6 @@ if GUI_MODE:
             self.edit_registry_entry(reg_type)
 
         def _extract_registry_executable(self, value):
-            """Extract primary launched executable/DLL from a registry value."""
             raw = str(value or "").strip()
             if not raw:
                 return ""
@@ -17679,6 +19878,8 @@ if GUI_MODE:
                 )
 
         def add_registry_entry(self, reg_type):
+            if self._autostart_edit_blocked_in_winre():
+                return
             dialog = QDialog(self)
             dialog.setWindowTitle("Добавить запись в реестр")
             dialog.setStyleSheet("background-color: #000000; color: white;")
@@ -17747,6 +19948,13 @@ if GUI_MODE:
                     dialog.accept()
                     self.load_registry_data(reg_type)
                     self.show_toast("ГОТОВО", "Запись добавлена в реестр")
+                    pinned_item = self._build_registry_pin_item(
+                        reg_type, hive_str, name, value)
+                    if pinned_item is not None:
+                        from PySide6.QtCore import QTimer as _QTimer
+                        _QTimer.singleShot(
+                            0, lambda entry=pinned_item:
+                            self._offer_pin_autostart_entry(entry))
                 except Exception as e:
                     QMessageBox.critical(dialog, "Ошибка", f"Не удалось добавить запись: {e}")
                     logger.log(f"Registry_{reg_type}", "error", str(e))
@@ -17765,7 +19973,6 @@ if GUI_MODE:
                 v = os.path.expandvars(v)
             except Exception:
                 pass
-            # Если это ярлык .lnk, пытаемся получить реальный целевой exe
             if v.lower().endswith('.lnk') and os.path.isfile(v):
                 try:
                     import win32com.client
@@ -17775,7 +19982,6 @@ if GUI_MODE:
                         return os.path.basename(shortcut.Targetpath)
                 except Exception:
                     pass
-            # Извлекаем путь к exe с пробелами в пути (например "C:\Program Files\app.exe" --arg)
             m = re.match(r'([a-zA-Z]:\\[^"]+?\.exe)', v, re.IGNORECASE)
             if m:
                 return os.path.basename(m.group(1))
@@ -17811,6 +20017,8 @@ if GUI_MODE:
                 self.show_toast("ЗАБЛОКИРОВАНО", f"{exe_name} заблокирован от повторного запуска")
 
         def delete_registry_entry(self, reg_type):
+            if self._autostart_edit_blocked_in_winre():
+                return
             table_name = "appinit" if reg_type == "AppInit_DLLs и CmdLine" else reg_type.lower()
             table = getattr(self, f"table_{table_name}", None)
             if not table:
@@ -17828,6 +20036,7 @@ if GUI_MODE:
                                        QMessageBox.Yes | QMessageBox.No)
             
             if reply == QMessageBox.Yes:
+                deleted_any = False
                 try:
                     if reg_type == "AppInit_DLLs и CmdLine":
                         key_path = table.item(row, 0).data(Qt.UserRole)
@@ -17837,13 +20046,18 @@ if GUI_MODE:
                                 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE)
                                 winreg.DeleteValue(key, name)
                                 winreg.CloseKey(key)
+                                deleted_any = True
                             except Exception as ex:
                                 error = ex
                             if error:
                                 raise error
                     else:
-                        # Пытаемся удалить из HKCU и HKLM
-                        for hive in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
+                        if self._is_winre_mode():
+                            targets = self._autostart_registry_targets()
+                        else:
+                            targets = [{"root": winreg.HKEY_CURRENT_USER, "prefix": "", "which": "user"},
+                                       {"root": winreg.HKEY_LOCAL_MACHINE, "prefix": "", "which": "machine"}]
+                        for target in targets:
                             try:
                                 if reg_type == "Run":
                                     path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -17854,16 +20068,34 @@ if GUI_MODE:
                                 else:
                                     continue
                                 
-                                key = winreg.OpenKey(hive, path, 0, winreg.KEY_SET_VALUE)
+                                full_path = self._autostart_registry_open_path(
+                                    target.get("prefix", ""), path, target.get("which", "")) if self._is_winre_mode() else path
+                                key = winreg.OpenKey(target["root"], full_path, 0, winreg.KEY_SET_VALUE)
                                 winreg.DeleteValue(key, name)
                                 winreg.CloseKey(key)
+                                deleted_any = True
                             except FileNotFoundError:
                                 pass
                     
                     logger.log(f"Registry_{reg_type}", "success", f"Удалена запись: {name}")
                     self.load_registry_data(reg_type)
                     self.show_toast("ГОТОВО", "Запись удалена из реестра")
-                    # IFEO-блокировка если галочка стоит
+                    if deleted_any:
+                        if reg_type == "AppInit_DLLs и CmdLine":
+                            self._unpin_saved_autostart_entry(
+                                kinds=("appinit", "registry"),
+                                name=name,
+                                location=("HKLM\\%s" % key_path
+                                          if key_path else None))
+                        elif reg_type == "Winlogon":
+                            self._unpin_saved_autostart_entry(
+                                kinds=("winlogon", "registry"),
+                                name=name, source_prefix="Winlogon")
+                        else:
+                            self._unpin_saved_autostart_entry(
+                                kinds=("registry",), name=name,
+                                value=entry_val,
+                                source_prefix="%s (" % reg_type)
                     _chk_map = {"Run": "chk_block_run", "RunOnce": "chk_block_runonce", "Winlogon": "chk_block_winlogon"}
                     _chk_attr = _chk_map.get(reg_type)
                     if _chk_attr:
@@ -17877,6 +20109,8 @@ if GUI_MODE:
                     logger.log(f"Registry_{reg_type}", "error", str(e))
 
         def edit_registry_entry(self, reg_type):
+            if self._autostart_edit_blocked_in_winre():
+                return
             table_name = "appinit" if reg_type == "AppInit_DLLs и CmdLine" else reg_type.lower()
             table = getattr(self, f"table_{table_name}", None)
             if not table:
@@ -17929,6 +20163,7 @@ if GUI_MODE:
                     QMessageBox.warning(dialog, "Ошибка", "Заполните все поля")
                     return
                 
+                saved_entries = []
                 try:
                     if reg_type == "AppInit_DLLs и CmdLine":
                         if not key_path:
@@ -17940,9 +20175,17 @@ if GUI_MODE:
                             pass
                         winreg.SetValueEx(key, new_name, 0, winreg.REG_SZ, new_value)
                         winreg.CloseKey(key)
+                        previous_item = self._build_appinit_pin_item(
+                            key_path, old_name, old_value)
+                        pinned_item = self._build_appinit_pin_item(
+                            key_path, new_name, new_value)
+                        if pinned_item is not None:
+                            saved_entries.append((pinned_item, previous_item))
                     else:
                         # Находим и обновляем запись в HKCU и HKLM
-                        for hive in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
+                        for hive, hive_str in (
+                                (winreg.HKEY_CURRENT_USER, "HKCU"),
+                                (winreg.HKEY_LOCAL_MACHINE, "HKLM")):
                             try:
                                 if reg_type == "Run":
                                     path = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -17958,7 +20201,6 @@ if GUI_MODE:
                                     value, _ = winreg.QueryValueEx(key, old_name)
                                     winreg.CloseKey(key)
                                     
-                                    # Удаляем старую запись
                                     key = winreg.OpenKey(hive, path, 0, winreg.KEY_SET_VALUE)
                                     winreg.DeleteValue(key, old_name)
                                     winreg.CloseKey(key)
@@ -17967,16 +20209,31 @@ if GUI_MODE:
                                     key = winreg.OpenKey(hive, path, 0, winreg.KEY_SET_VALUE)
                                     winreg.SetValueEx(key, new_name, 0, winreg.REG_SZ, new_value)
                                     winreg.CloseKey(key)
+                                    previous_item = self._build_registry_pin_item(
+                                        reg_type, hive_str, old_name, str(value))
+                                    pinned_item = self._build_registry_pin_item(
+                                        reg_type, hive_str, new_name, new_value)
+                                    if pinned_item is not None:
+                                        saved_entries.append(
+                                            (pinned_item, previous_item))
                                 except FileNotFoundError:
                                     winreg.CloseKey(key)
                             except Exception as _e:
-                                # Expected exception, intentionally ignored
                                 pass
                     
                     logger.log(f"Registry_{reg_type}", "success", f"Изменена запись: {old_name} -> {new_name}")
                     dialog.accept()
                     self.load_registry_data(reg_type)
                     self.show_toast("ГОТОВО", "Запись обновлена в реестре")
+                    if saved_entries:
+                        from PySide6.QtCore import QTimer as _QTimer
+                        for pinned_item, previous_item in saved_entries:
+                            previous_ids = ([previous_item["id"]]
+                                            if previous_item else [])
+                            _QTimer.singleShot(
+                                0, lambda entry=pinned_item,
+                                prev=previous_ids:
+                                self._offer_pin_autostart_entry(entry, prev))
                 except Exception as e:
                     QMessageBox.critical(dialog, "Ошибка", f"Не удалось обновить запись: {e}")
                     logger.log(f"Registry_{reg_type}", "error", str(e))
@@ -18008,6 +20265,8 @@ if GUI_MODE:
                 QApplication.clipboard().setText(path)
 
         def add_folder_entry(self):
+            if self._autostart_edit_blocked_in_winre():
+                return
             dialog = QDialog(self)
             dialog.setWindowTitle("Добавить файл в автозагрузку")
             dialog.setStyleSheet("background-color: #000000; color: white;")
@@ -18063,13 +20322,18 @@ if GUI_MODE:
                     filename = os.path.basename(source_path)
                     target_path = os.path.join(target_folder, filename)
                     
-                    # Копируем файл в папку автозагрузки
                     shutil.copy2(source_path, target_path)
                     
                     logger.log("Folder_Startup", "success", f"Добавлен файл: {filename}")
                     dialog.accept()
                     self.load_folder_data()
                     self.show_toast("ГОТОВО", "Файл добавлен в автозагрузку")
+                    pinned_item = self._build_folder_pin_item(target_path)
+                    if pinned_item is not None:
+                        from PySide6.QtCore import QTimer as _QTimer
+                        _QTimer.singleShot(
+                            0, lambda entry=pinned_item:
+                            self._offer_pin_autostart_entry(entry))
                 except Exception as e:
                     QMessageBox.critical(dialog, "Ошибка", f"Не удалось добавить файл: {e}")
                     logger.log("Folder_Startup", "error", str(e))
@@ -18081,6 +20345,8 @@ if GUI_MODE:
             dialog.exec()
 
         def delete_folder_entry(self):
+            if self._autostart_edit_blocked_in_winre():
+                return
             row = self.table_folder.currentRow()
             if row < 0:
                 QMessageBox.warning(self, "Ошибка", "Выберите файл для удаления")
@@ -18100,7 +20366,8 @@ if GUI_MODE:
                         logger.log("Folder_Startup", "success", f"Удален файл: {filename}")
                         self.load_folder_data()
                         self.show_toast("ГОТОВО", "Файл удален из автозагрузки")
-                        # IFEO-блокировка если галочка стоит
+                        self._unpin_saved_autostart_entry(
+                            kinds=("folder",), name=filename, value=filepath)
                         if getattr(self, "chk_block_folder", None) and self.chk_block_folder.isChecked():
                             target_exe = self._extract_exe_name(filepath) or self._extract_exe_name(filename)
                             if target_exe:
@@ -18171,6 +20438,8 @@ if GUI_MODE:
                 self.enable_scheduler_entry()
 
         def add_scheduler_entry(self):
+            if self._autostart_edit_blocked_in_winre():
+                return
             dialog = QDialog(self)
             dialog.setWindowTitle("Создать задачу в планировщике")
             dialog.setStyleSheet("background-color: #000000; color: white;")
@@ -18232,7 +20501,6 @@ if GUI_MODE:
                     return
                 
                 try:
-                    # Создаем XML для задачи
                     if trigger_type == "ONLOGON":
                         trigger_xml = f'<Trigger><Logon><UserId>*</UserId></Logon></Trigger>'
                     elif trigger_type == "ONSTART":
@@ -18240,7 +20508,6 @@ if GUI_MODE:
                     else:  # DAILY
                         trigger_xml = f'<Trigger><Daily /></Trigger>'
                     
-                    # Создаем задачу через schtasks
                     result = subprocess.run(
                         ["schtasks", "/create", "/tn", task_name, "/tr", program_path,
                          "/sc", trigger_type.lower(), "/f"],
@@ -18254,6 +20521,13 @@ if GUI_MODE:
                         dialog.accept()
                         self.load_scheduler_data()
                         self.show_toast("ГОТОВО", "Задача создана в планировщике")
+                        pinned_item = self._build_scheduler_pin_item(
+                            task_name, program_path)
+                        if pinned_item is not None:
+                            from PySide6.QtCore import QTimer as _QTimer
+                            _QTimer.singleShot(
+                                0, lambda entry=pinned_item:
+                                self._offer_pin_autostart_entry(entry))
                     else:
                         QMessageBox.critical(dialog, "Ошибка", f"Не удалось создать задачу: {result.stderr}")
                         logger.log("Scheduler", "error", result.stderr)
@@ -18420,8 +20694,6 @@ if GUI_MODE:
                 return
             item = tree.currentItem()
 
-            # If a task is inside a folder, collapse exactly that folder
-            # and clear the selection to move one level up.
             parent_folder = None
             if item is not None and hasattr(item, "parent"):
                 cand = item.parent()
@@ -18438,7 +20710,6 @@ if GUI_MODE:
                 tree.setCurrentItem(None)
                 return
 
-            # Otherwise collapse the deepest expanded folder, if there is one.
             expanded_items = []
             def collect(node):
                 for i in range(node.childCount()):
@@ -18462,6 +20733,8 @@ if GUI_MODE:
             self._scheduler_back_to_root()
 
         def delete_scheduler_entry(self):
+            if self._autostart_edit_blocked_in_winre():
+                return
             task_name = self._selected_scheduler_task("удаления")
             if not task_name:
                 return
@@ -18483,6 +20756,12 @@ if GUI_MODE:
                         logger.log("Scheduler", "success", f"Удалена задача: {task_name}")
                         self.load_scheduler_data()
                         self.show_toast("ГОТОВО", "Задача удалена из планировщика")
+                        normalized = str(task_name or "").replace("/", "\\")
+                        if normalized and not normalized.startswith("\\"):
+                            normalized = "\\" + normalized
+                        if normalized:
+                            self._unpin_saved_autostart_entry(
+                                kinds=("task",), location=normalized)
                     else:
                         QMessageBox.warning(self, "Ошибка", f"Не удалось удалить задачу: {result.stderr}")
                 except Exception as e:
@@ -18647,9 +20926,7 @@ if GUI_MODE:
                 return
             
             try:
-                # Сначала останавливаем
                 self._run_sc("stop", service_name)
-                # Затем запускаем
                 result = self._run_sc("start", service_name)
                 
                 if result.returncode == 0:
@@ -18664,13 +20941,29 @@ if GUI_MODE:
 
         def get_folder_startup(self):
             entries = []
-            paths = [
-                os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup"),
-                r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-            ]
+            if self._is_winre_mode():
+                self._autostart_offline_ensure()
+                drive = str(self._autostart_offline_drive or "").rstrip("\\")
+                paths = []
+                profile = self._autostart_offline_user_profile
+                if profile:
+                    paths.append(os.path.join(
+                        profile, r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"))
+                if drive:
+                    paths.append(os.path.join(
+                        drive, r"ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"))
+            else:
+                paths = [
+                    os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup"),
+                    r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+                ]
             for p in paths:
                 if os.path.exists(p):
-                    for entry in os.scandir(p):
+                    try:
+                        folder_entries = list(os.scandir(p))
+                    except OSError:
+                        continue
+                    for entry in folder_entries:
                         disp_name = entry.name
                         if disp_name.lower().endswith(('.ini', '.lnk', '.url')):
                             disp_name = os.path.splitext(disp_name)[0]
@@ -18701,7 +20994,6 @@ if GUI_MODE:
                     "Unknown": "Неизвестно",
                 }.get(state, state or "Готова")
 
-            # 1. PowerShell Get-ScheduledTask (primary)
             try:
                 ps_script = (
                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
@@ -18751,7 +21043,6 @@ if GUI_MODE:
             except Exception:
                 pass
 
-            # 2. schtasks /query (fallback + задачи, невидимые для PowerShell)
             try:
                 result = subprocess.run(
                     ["schtasks", "/query", "/fo", "CSV", "/v", "/nh"],
@@ -18803,13 +21094,11 @@ if GUI_MODE:
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor("#ffffff"))
             path = QPainterPath()
-            # Solid white folder silhouette with a tab, readable at 14 px.
             path.moveTo(1, 4)
             path.lineTo(6, 4)
             path.lineTo(7.5, 5.5)
             path.lineTo(15, 5.5)
             if expanded:
-                # Open folder: slanted front edge.
                 path.lineTo(15, 8)
                 path.lineTo(14, 8)
                 path.lineTo(12, 14)
@@ -18825,7 +21114,6 @@ if GUI_MODE:
             return icon
 
         def _scheduler_task_icon(self):
-            """Small B&W document icon used for scheduled tasks."""
             icon = getattr(self, "_scheduler_task_icon_cache", None)
             if icon is not None:
                 return icon
@@ -19106,7 +21394,6 @@ if GUI_MODE:
                     except Exception:
                         pass
 
-            # psutil fallback — только то, чего нет в реестре
             if PSUTIL_AVAILABLE:
                 try:
                     for service in psutil.win_service_iter():
@@ -19161,7 +21448,6 @@ if GUI_MODE:
             lay.setContentsMargins(24, 20, 24, 14)
             lay.setSpacing(0)
 
-            # ─── Заголовок + счётчик ───
             header = QHBoxLayout()
             title = QLabel("СНЯТИЕ ОГРАНИЧЕНИЙ")
             title.setStyleSheet(
@@ -19182,7 +21468,45 @@ if GUI_MODE:
             lay.addWidget(line)
             lay.addSpacing(12)
 
-            # ─── Пустое состояние / таблица ───
+            target_row = QHBoxLayout()
+            target_row.setSpacing(8)
+            target_label = QLabel("ЦЕЛЬ:")
+            target_label.setStyleSheet(
+                "color: #666666; font-size: 10px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            target_row.addWidget(target_label)
+            self._restrictions_target_combo = QComboBox()
+            self._restrictions_target_combo.setMinimumWidth(330)
+            self._restrictions_target_combo.setStyleSheet(
+                "QComboBox { background: #000000; color: #ffffff;"
+                " border: 1px solid #333333; padding: 4px 8px;"
+                " font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace; }"
+                " QComboBox QAbstractItemView { background: #000000;"
+                " color: #ffffff; selection-background-color: #ffffff;"
+                " selection-color: #000000; }")
+            target_row.addWidget(self._restrictions_target_combo, 1)
+            self.btn_restrictions_refresh = QPushButton("ОБНОВИТЬ")
+            self.btn_restrictions_refresh.setStyleSheet(
+                "background: #000000; color: #ffffff; border: 1px solid"
+                " #333333; padding: 4px 12px; font-size: 10px;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            self.btn_restrictions_refresh.setCursor(Qt.PointingHandCursor)
+            self.btn_restrictions_refresh.clicked.connect(
+                self._refresh_restriction_targets)
+            target_row.addWidget(self.btn_restrictions_refresh)
+            target_hint = QLabel(
+                "В WinRE выберите диск установленной Windows — правки"
+                " пойдут в её офлайн-реестр.")
+            target_hint.setStyleSheet(
+                "color: #555555; font-size: 9px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            target_row.addWidget(target_hint)
+            lay.addLayout(target_row)
+            lay.addSpacing(8)
+            self._refresh_restriction_targets()
+
             self._restrictions_stack = QStackedWidget()
 
             empty_page = QWidget()
@@ -19233,7 +21557,6 @@ if GUI_MODE:
             self._restrictions_stack.addWidget(table_page)
             lay.addWidget(self._restrictions_stack, 1)
 
-            # ─── Нижняя панель действий ───
             self.scan_status_label = QLabel("")
             self.scan_status_label.setStyleSheet(
                 "color: #666666; font-size: 10px; font-family: 'Consolas', 'Courier New', monospace;")
@@ -19269,7 +21592,7 @@ if GUI_MODE:
             self.btn_fix_all.setStyleSheet(_bs)
             self.btn_fix_all.setCursor(Qt.PointingHandCursor)
             self.btn_fix_all.clicked.connect(self.fix_all_restrictions)
-            self.btn_fix_all.setEnabled(False)
+            self.btn_fix_all.setEnabled(True)
             bottom.addWidget(self.btn_fix_all)
 
             self.btn_run_scan = QPushButton("СКАНИРОВАТЬ")
@@ -19315,7 +21638,6 @@ if GUI_MODE:
             )
             if reply != QMessageBox.Yes:
                 return
-            # Запускаем все выбранные функции последовательно
             func_list = [f for _, f in funcs]
             def run_all():
                 results = []
@@ -19339,7 +21661,6 @@ if GUI_MODE:
 
             def worker_thread():
                 result_text = run_all()
-                # Используем invokeMethod чтобы безопасно обновить UI из потока
                 from PySide6.QtCore import QMetaObject, Qt as _Qt
                 QMetaObject.invokeMethod(
                     self, "_restrictions_show_result",
@@ -19347,7 +21668,6 @@ if GUI_MODE:
                     result_text
                 )
 
-            # Простой запуск через Worker
             def _run():
                 result_text = run_all()
                 self.append_log("[+] Выбранные действия выполнены")
@@ -19618,8 +21938,6 @@ if GUI_MODE:
                 details.setPlainText(entry_details(visible[row]))
 
             def populate():
-                # Скрываем ERROR-записи которые не являются подозрительными
-                # (доступ запрещён системой — норма для SYSTEM/svchost без SeDebugPrivilege)
                 entries = [e for e in state["entries"]
                            if e.get("suspicious") or e.get("category", "") not in ("ERROR",)]
                 state["_visible_entries"] = entries
@@ -20719,6 +23037,1335 @@ if GUI_MODE:
             scan()
             dialog.exec()
 
+        def _novir_launch_text(self):
+            if getattr(sys, "frozen", False):
+                return '"%s"' % sys.executable
+            return '"%s" "%s"' % (
+                sys.executable, os.path.abspath(__file__))
+
+        def _offline_windows_drives(self):
+            drives = []
+            current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+            for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+                root = letter + ":"
+                windows = root + "\\Windows"
+                if os.path.isfile(os.path.join(
+                        windows, "System32", "kernel32.dll")):
+                    drives.append(root)
+            if current and current not in drives and os.path.isdir(
+                    current + "\\Windows"):
+                drives.insert(0, current)
+            return drives
+
+        def _show_text_dialog(self, title, text):
+            from PySide6.QtWidgets import (
+                QDialog, QPlainTextEdit, QPushButton, QVBoxLayout)
+            dialog = QDialog(self)
+            dialog.setWindowTitle(title)
+            dialog.resize(900, 620)
+            layout = QVBoxLayout(dialog)
+            editor = QPlainTextEdit()
+            editor.setReadOnly(True)
+            editor.setPlainText(text)
+            editor.setStyleSheet(
+                "QPlainTextEdit { background: #000000; color: #66ff88;"
+                " border: 1px solid #333333; font-family: Consolas,"
+                " 'Courier New', monospace; font-size: 11px; }")
+            layout.addWidget(editor, 1)
+            close_btn = QPushButton("ЗАКРЫТЬ")
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn)
+            dialog.exec()
+
+        def _tool_gpedit_msc(self):
+            if self._is_winre_mode():
+                QMessageBox.information(
+                    self, "GpeditMsc",
+                    "В среде WinRE редактор gpedit.msc недоступен.\n\n"
+                    "Используйте «Редактор реестра» для офлайн-параметров "
+                    "установленной Windows.")
+                return
+            system32 = os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            gpedit = os.path.join(system32, "gpedit.msc")
+            if not os.path.isfile(gpedit):
+                QMessageBox.information(
+                    self, "GpeditMsc",
+                    "gpedit.msc не найден. На домашних редакциях Windows "
+                    "редактор групповых политик отсутствует.")
+                return
+            try:
+                mmc = os.path.join(system32, "mmc.exe")
+                if os.path.isfile(mmc):
+                    subprocess.Popen([mmc, gpedit])
+                else:
+                    os.startfile(gpedit)
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "GpeditMsc",
+                    "Не удалось открыть gpedit.msc:\n%s" % error)
+
+        def _tool_add_novir_to_winre(self):
+            source = sys.executable if getattr(sys, "frozen", False) else \
+                os.path.abspath(__file__)
+            if not os.path.isfile(source):
+                QMessageBox.warning(
+                    self, "NoVir в WinRE",
+                    "Не найден текущий файл NoVir:\n%s" % source)
+                return
+            if self._is_winre_mode():
+                target_dir = r"X:\Tools"
+                try:
+                    os.makedirs(target_dir, exist_ok=True)
+                    target = os.path.join(target_dir, "NoVir.exe")
+                    shutil.copy2(source, target)
+                    launcher = os.path.join(target_dir, "NoVir.cmd")
+                    with open(launcher, "w", encoding="ascii") as fh:
+                        fh.write('@echo off\r\nstart "" "%~dp0NoVir.exe"\r\n')
+                    QMessageBox.information(
+                        self, "NoVir в WinRE",
+                        "NoVir скопирован в среду WinRE:\n%s\n\n"
+                        "Запуск: %s\n"
+                        "Копия находится в RAM-диске X: и исчезнет после "
+                        "перезагрузки." % (target, launcher))
+                except Exception as error:
+                    QMessageBox.warning(
+                        self, "NoVir в WinRE",
+                        "Не удалось скопировать NoVir в X:\\Tools:\n%s"
+                        % error)
+                return
+            if not confirm_high_risk_action(
+                    "Добавить NoVir в WinRE",
+                    "Будет смонтирован образ Winre.wim, в него добавлен "
+                    "NoVir.exe и создана папка Tools. Изменения будут "
+                    "зафиксированы в образе WinRE."):
+                return
+            winre_image = ""
+            for candidate in (
+                    os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                 "System32", "Recovery", "Winre.wim"),
+                    os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                                 "System32", "Recovery", "WinRE.wim")):
+                if os.path.isfile(candidate):
+                    winre_image = candidate
+                    break
+            if not winre_image:
+                QMessageBox.information(
+                    self, "NoVir в WinRE",
+                    "Файл Winre.wim не найден в System32\\Recovery.\n"
+                    "WinRE может находиться на отдельном разделе. "
+                    "Используйте «Сохранение WinRE» или официальную "
+                    "WinPE-флешку.")
+                return
+            mount_dir = os.path.join(
+                tempfile.gettempdir(), "novir_winre_mount")
+            try:
+                if os.path.isdir(mount_dir) and os.listdir(mount_dir):
+                    QMessageBox.warning(
+                        self, "NoVir в WinRE",
+                        "Каталог монтирования уже занят:\n%s" % mount_dir)
+                    return
+                os.makedirs(mount_dir, exist_ok=True)
+                reagentc = os.path.join(
+                    os.environ.get("SystemRoot", r"C:\Windows"),
+                    "System32", "reagentc.exe")
+                ok, out, err = _run_safe_process(
+                    [reagentc, "/mountre", "/path", mount_dir], timeout=120)
+                if not ok:
+                    QMessageBox.warning(
+                        self, "NoVir в WinRE",
+                        "Не удалось смонтировать Winre.wim:\n%s"
+                        % (err or out))
+                    return
+                tools_dir = os.path.join(mount_dir, "Tools")
+                os.makedirs(tools_dir, exist_ok=True)
+                shutil.copy2(source, os.path.join(tools_dir, "NoVir.exe"))
+                with open(os.path.join(tools_dir, "NoVir.cmd"),
+                          "w", encoding="ascii") as fh:
+                    fh.write('@echo off\r\nstart "" "%~dp0NoVir.exe"\r\n')
+                ok, out, err = _run_safe_process(
+                    [reagentc, "/unmountre", "/commit"], timeout=120)
+                if ok:
+                    QMessageBox.information(
+                        self, "NoVir в WinRE",
+                        "NoVir добавлен в образ WinRE.\n"
+                        "В среде восстановления запускайте "
+                        "X:\\Tools\\NoVir.cmd")
+                else:
+                    QMessageBox.warning(
+                        self, "NoVir в WinRE",
+                        "Файлы добавлены, но образ не зафиксирован:\n%s"
+                        % (err or out))
+            except Exception as error:
+                QMessageBox.warning(
+                    self, "NoVir в WinRE",
+                    "Ошибка добавления NoVir в WinRE:\n%s" % error)
+
+        def _tool_novir_cmdline(self):
+            command = self._novir_launch_text()
+            key_path = r"SYSTEM\Setup"
+            current = ""
+            try:
+                with winreg.OpenKey(
+                        winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                        winreg.KEY_READ | getattr(
+                            winreg, "KEY_WOW64_64KEY", 0)) as key:
+                    current = str(winreg.QueryValueEx(key, "CmdLine")[0])
+            except OSError:
+                current = ""
+            except Exception:
+                current = ""
+            if current.strip().lower() == command.strip().lower():
+                reply = QMessageBox.question(
+                    self, "NoVir в CmdLine",
+                    "NoVir уже прописан в HKLM\\SYSTEM\\Setup\\CmdLine.\n\n"
+                    "Удалить эту запись?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    ok = reg_delete_value(
+                        key_path, "CmdLine", hive=winreg.HKEY_LOCAL_MACHINE)
+                    QMessageBox.information(
+                        self, "NoVir в CmdLine",
+                        "Запись удалена." if ok else "Не удалось удалить запись.")
+                return
+            if not confirm_high_risk_action(
+                    "Записать NoVir в CmdLine",
+                    "Будет изменено значение HKLM\\SYSTEM\\Setup\\CmdLine.\n"
+                    "Эта запись используется загрузчиком/установщиком Windows "
+                    "и может запускать NoVir при загрузке. Продолжайте только "
+                    "если понимаете последствия."):
+                return
+            ok = reg_set_value(
+                key_path, "CmdLine", command, winreg.REG_SZ,
+                hive=winreg.HKEY_LOCAL_MACHINE)
+            QMessageBox.information(
+                self, "NoVir в CmdLine",
+                ("Записано: %s" % command) if ok
+                else "Не удалось записать CmdLine.")
+
+        def _tool_novir_service(self):
+            command = self._novir_launch_text()
+            system32 = os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            sc = os.path.join(system32, "sc.exe")
+            if not confirm_high_risk_action(
+                    "Записать NoVir в Службы",
+                    "Будет создана служба NoVirRecovery с ручным запуском "
+                    "(start= demand). GUI-программы не поддерживаются как "
+                    "обычные службы, поэтому автозапуск не включается — "
+                    "используйте планировщик задач для автозапуска."):
+                return
+            _run_safe_process([sc, "delete", "NoVirRecovery"], timeout=20)
+            ok, out, err = _run_safe_process(
+                [sc, "create", "NoVirRecovery", "binPath=",
+                 "cmd.exe /c start \"\" " + command,
+                 "start=", "demand", "DisplayName=", "NoVir Recovery"],
+                timeout=30)
+            if ok:
+                _run_safe_process(
+                    [sc, "description", "NoVirRecovery",
+                     "NoVir recovery launcher (manual start; GUI app)"],
+                    timeout=20)
+                QMessageBox.information(
+                    self, "NoVir в Службы",
+                    "Служба NoVirRecovery создана.\n"
+                    "Тип запуска: вручную (demand).\n"
+                    "Запуск: sc start NoVirRecovery")
+            else:
+                QMessageBox.warning(
+                    self, "NoVir в Службы",
+                    "Не удалось создать службу:\n%s" % (err or out))
+
+        def _tool_novir_scheduler(self):
+            command = self._novir_launch_text()
+            system32 = os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            schtasks = os.path.join(system32, "schtasks.exe")
+            if not confirm_high_risk_action(
+                    "Записать NoVir в Планировщик задач",
+                    "Будет создана задача NoVirRecovery с запуском при входе "
+                    "пользователя от имени администратора."):
+                return
+            ok, out, err = _run_safe_process(
+                [schtasks, "/create", "/tn", "NoVirRecovery",
+                 "/tr", command, "/sc", "onlogon", "/rl", "highest", "/f"],
+                timeout=60)
+            if ok:
+                warning = ""
+                if self._is_winre_mode():
+                    warning = ("\n\nВ WinRE задача действует только до "
+                               "перезагрузки среды восстановления.")
+                QMessageBox.information(
+                    self, "NoVir в Планировщик задач",
+                    "Задача NoVirRecovery создана.%s" % warning)
+            else:
+                QMessageBox.warning(
+                    self, "NoVir в Планировщик задач",
+                    "Не удалось создать задачу:\n%s" % (err or out))
+
+        def _tool_offline_sfc(self):
+            from PySide6.QtWidgets import QComboBox, QDialog, QLabel
+            drives = self._offline_windows_drives()
+            if not drives:
+                QMessageBox.information(
+                    self, "Восстановление системных файлов",
+                    "Не найдено ни одной установленной Windows.")
+                return
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Восстановление системных файлов")
+            dialog.resize(460, 180)
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(QLabel(
+                "Диск с установленной Windows для проверки SFC:"))
+            combo = QComboBox()
+            combo.addItems(drives)
+            layout.addWidget(combo)
+            layout.addWidget(QLabel(
+                "Будет запущено: sfc /scannow /offbootdir=<диск>\\ "
+                "/offwindir=<диск>\\Windows"))
+            buttons = QHBoxLayout()
+            start_btn = QPushButton("ЗАПУСТИТЬ SFC")
+            cancel_btn = QPushButton("ОТМЕНА")
+            cancel_btn.clicked.connect(dialog.reject)
+            buttons.addWidget(start_btn)
+            buttons.addWidget(cancel_btn)
+            layout.addLayout(buttons)
+
+            def start_sfc():
+                drive = combo.currentText().rstrip("\\")
+                dialog.accept()
+                system_root = os.environ.get("SystemRoot", r"X:\Windows")
+                sfc = os.path.join(system_root, "System32", "sfc.exe")
+                if not os.path.isfile(sfc):
+                    sfc = shutil.which("sfc") or "sfc.exe"
+                current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+                if drive.lower() == current.lower() and not self._is_winre_mode():
+                    args = [sfc, "/scannow"]
+                else:
+                    args = [sfc, "/scannow",
+                            "/offbootdir=%s\\" % drive,
+                            "/offwindir=%s\\Windows" % drive]
+                try:
+                    subprocess.Popen(
+                        args, creationflags=getattr(
+                            subprocess, "CREATE_NEW_CONSOLE", 0))
+                    QMessageBox.information(
+                        self, "Восстановление системных файлов",
+                        "SFC запущен в отдельном окне.\n"
+                        "Проверка может занять 10–30 минут.")
+                except Exception as error:
+                    QMessageBox.warning(
+                        self, "Восстановление системных файлов",
+                        "Не удалось запустить SFC:\n%s" % error)
+
+            start_btn.clicked.connect(start_sfc)
+            dialog.exec()
+
+        def _boot_restore_all_drives(self):
+            drives = []
+            for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+                root = letter + ":"
+                try:
+                    if os.path.isdir(root + "\\"):
+                        drives.append(root)
+                except Exception:
+                    continue
+            return drives
+
+        def _boot_restore_firmware(self):
+            try:
+                if sys.platform == "win32":
+                    import ctypes
+                    firmware = ctypes.c_int()
+                    if ctypes.windll.kernel32.GetFirmwareType(
+                            ctypes.byref(firmware)):
+                        return "UEFI" if firmware.value == 2 else "BIOS"
+            except Exception:
+                pass
+            for root in self._boot_restore_all_drives():
+                if os.path.isdir(os.path.join(root, "EFI")):
+                    return "UEFI"
+            return "BIOS"
+
+        def _boot_restore_volume_info(self, root):
+            fs_name = ""
+            label = ""
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    fs_buffer = ctypes.create_unicode_buffer(32)
+                    label_buffer = ctypes.create_unicode_buffer(128)
+                    serial = wintypes.DWORD()
+                    max_len = wintypes.DWORD()
+                    flags = wintypes.DWORD()
+                    ok = ctypes.windll.kernel32.GetVolumeInformationW(
+                        ctypes.c_wchar_p(root.rstrip("\\") + "\\"),
+                        label_buffer, 128, ctypes.byref(serial), ctypes.byref(max_len),
+                        ctypes.byref(flags), fs_buffer, 32)
+                    if ok:
+                        fs_name = fs_buffer.value
+                        label = label_buffer.value
+                except Exception:
+                    pass
+            return fs_name, label
+
+        def _boot_restore_scan_esp(self, mount_missing=True):
+            found = []
+            seen = set()
+
+            def add_root(root, mounted=False, force=False):
+                try:
+                    root = str(root or "").rstrip("\\")
+                    if not root or root.lower() in seen:
+                        return
+                    if not os.path.isdir(root + "\\"):
+                        return
+                    efi = os.path.join(root, "EFI")
+                    efi_exists = os.path.isdir(efi)
+                    has_boot = (
+                        os.path.isfile(os.path.join(
+                            root, "EFI", "Microsoft", "Boot", "bootmgfw.efi"))
+                        or os.path.isfile(os.path.join(
+                            root, "EFI", "Boot", "bootx64.efi"))
+                        or os.path.isfile(os.path.join(
+                            root, "EFI", "Boot", "bootia32.efi"))
+                    )
+                    fs_name, label = self._boot_restore_volume_info(root)
+                    fs_upper = str(fs_name or "").upper()
+                    if not force:
+                        if not efi_exists and not has_boot:
+                            return
+                        if fs_upper and fs_upper not in (
+                                "FAT", "FAT16", "FAT32") and not has_boot:
+                            return
+                    seen.add(root.lower())
+                    text = "%s  [%s%s]%s" % (
+                        root, fs_name or "?",
+                        (" · " + label) if label else "",
+                        " · смонтирован автоматически" if mounted else "")
+                    found.append({"root": root, "label": text,
+                                  "mounted": bool(mounted)})
+                except Exception:
+                    pass
+
+            if mount_missing:
+                for letter in ("S", "T", "U", "V", "W"):
+                    root = letter + ":"
+                    if root.lower() in seen:
+                        continue
+                    try:
+                        ok, _out, _err = _run_safe_process(
+                            ["mountvol", root, "/S"], 15)
+                    except Exception:
+                        ok = False
+                    if ok:
+                        add_root(root, mounted=True, force=True)
+                    if found:
+                        break
+            for root in self._boot_restore_all_drives():
+                add_root(root)
+            return found
+
+        def _boot_restore_scan_system(self, windows_drive):
+            found = []
+            seen = set()
+
+            def add_root(root, mounted=False, force=False):
+                root = str(root or "").rstrip("\\")
+                if not root or root.lower() in seen:
+                    return
+                if not os.path.isdir(root + "\\"):
+                    return
+                if not force and not (
+                        os.path.isfile(os.path.join(root, "bootmgr"))
+                        or os.path.isdir(os.path.join(root, "Boot"))):
+                    return
+                fs_name, label = self._boot_restore_volume_info(root)
+                seen.add(root.lower())
+                found.append({
+                    "root": root,
+                    "label": "%s  [%s%s]%s" % (
+                        root, fs_name or "?",
+                        (" · " + label) if label else "",
+                        " · системный раздел" if mounted else ""),
+                    "mounted": bool(mounted),
+                })
+
+            add_root(windows_drive)
+            try:
+                ok, _out, _err = _run_safe_process(
+                    ["mountvol", "S:", "/S"], 15)
+                if ok:
+                    add_root("S:", mounted=True, force=True)
+            except Exception:
+                pass
+            for root in self._boot_restore_all_drives():
+                add_root(root)
+            return found
+
+        def _boot_restore_tool(self, windows_drive, name):
+            candidates = []
+            system_root = os.environ.get("SystemRoot", r"X:\Windows")
+            candidates.append(os.path.join(system_root, "System32", name))
+            candidates.append(os.path.join(r"X:\Windows", "System32", name))
+            if windows_drive:
+                candidates.append(os.path.join(
+                    windows_drive, "Windows", "System32", name))
+            for candidate in candidates:
+                try:
+                    if candidate and os.path.isfile(candidate):
+                        return candidate
+                except Exception:
+                    continue
+            return shutil.which(os.path.splitext(name)[0]) or ""
+
+        def _boot_restore_command(self, windows_drive, target, firmware):
+            bcdboot = self._boot_restore_tool(windows_drive, "bcdboot.exe")
+            if not bcdboot:
+                bcdboot = "bcdboot.exe"
+            windows_dir = os.path.join(windows_drive, "Windows")
+            firmware = "UEFI" if str(firmware).upper() == "UEFI" else "BIOS"
+            return [bcdboot, windows_dir, "/s", target, "/f", "ALL", "/v"], firmware
+
+        def _tool_boot_restore(self):
+            from PySide6.QtWidgets import (
+                QComboBox, QDialog, QLabel, QPlainTextEdit)
+            from PySide6.QtCore import QThread, Signal
+
+            drives = self._offline_windows_drives()
+            current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+            if self._is_winre_mode():
+                drives = [d for d in drives if d.lower() != current.lower()]
+            if not drives:
+                QMessageBox.information(
+                    self, "ВОССТАНОВИТЬ ЗАГРУЗКУ",
+                    "Не найдена установленная Windows с BCDBoot.\n\n"
+                    "В WinRE проверь, что диск с Windows подключён, и нажми "
+                    "«ОБНОВИТЬ».")
+                return
+
+            firmware = self._boot_restore_firmware()
+            dialog = QDialog(self)
+            dialog.setWindowTitle("ВОСТАНОВИТЬ ЗАГРУЗКУ — BCDBoot")
+            dialog.resize(860, 620)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(16, 14, 16, 14)
+            title = QLabel("ПЕРЕСОЗДАНИЕ ЗАГРУЗОЧНЫХ ФАЙЛОВ WINDOWS")
+            title.setStyleSheet(
+                "color: #ffffff; font-size: 16px; font-weight: bold;"
+                " letter-spacing: 1px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(title)
+            info = QLabel(
+                "Режим прошивки: %s. BCDBoot создаст BCD и загрузочные файлы "
+                "на выбранном разделе. В WinRE работа идёт с офлайн-диском "
+                "установленной Windows." % firmware)
+            info.setWordWrap(True)
+            info.setStyleSheet(
+                "color: #888888; font-size: 10px; font-family: 'Consolas',"
+                " 'Courier New', monospace;")
+            layout.addWidget(info)
+
+            windows_row = QHBoxLayout()
+            windows_row.addWidget(QLabel("Windows:"))
+            windows_combo = QComboBox()
+            for drive in drives:
+                windows_combo.addItem(
+                    "%s  (%s\\Windows)" % (drive, drive), drive)
+            windows_row.addWidget(windows_combo, 1)
+            firmware_label = QLabel(firmware)
+            firmware_label.setStyleSheet(
+                "color: #66ff88; font-size: 10px; font-weight: bold;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            windows_row.addWidget(firmware_label)
+            layout.addLayout(windows_row)
+
+            boot_row = QHBoxLayout()
+            boot_row.addWidget(QLabel("Загрузочный раздел:"))
+            boot_combo = QComboBox()
+            boot_combo.setEditable(True)
+            boot_combo.setMinimumWidth(420)
+            boot_row.addWidget(boot_combo, 1)
+            detect_btn = QPushButton("ОПРЕДЕЛИТЬ РАЗДЕЛ")
+            boot_row.addWidget(detect_btn)
+            layout.addLayout(boot_row)
+
+            command_label = QLabel("")
+            command_label.setWordWrap(True)
+            command_label.setStyleSheet(
+                "background: #050505; color: #88ccff; border: 1px solid"
+                " #222222; padding: 6px; font-size: 10px;"
+                " font-family: 'Consolas', 'Courier New', monospace;")
+            layout.addWidget(command_label)
+
+            output = QPlainTextEdit()
+            output.setReadOnly(True)
+            output.setStyleSheet(
+                "QPlainTextEdit { background: #000000; color: #66ff88;"
+                " border: 1px solid #222222; font-size: 10px;"
+                " font-family: 'Consolas', 'Courier New', monospace; }")
+            layout.addWidget(output, 1)
+
+            actions = QHBoxLayout()
+            start_btn = QPushButton("ВОССТАНОВИТЬ ЗАГРУЗКУ")
+            close_btn = QPushButton("ЗАКРЫТЬ")
+            actions.addWidget(start_btn)
+            actions.addStretch()
+            actions.addWidget(close_btn)
+            layout.addLayout(actions)
+
+            state = {"targets": [], "worker": None}
+
+            def current_windows():
+                data = windows_combo.currentData()
+                return str(data or windows_combo.currentText()).split()[0].rstrip("\\")
+
+            def selected_target():
+                text = boot_combo.currentText().strip()
+                return text.split()[0].rstrip("\\") if text else ""
+
+            def update_preview():
+                win = current_windows()
+                target = selected_target()
+                command_label.setText(
+                    "КОМАНДА: bcdboot %s\\Windows /s %s /f ALL /v" % (
+                        win, target or "<раздел>"))
+
+            def refresh_targets():
+                win = current_windows()
+                old = selected_target()
+                boot_combo.blockSignals(True)
+                boot_combo.clear()
+                if firmware == "UEFI":
+                    targets = self._boot_restore_scan_esp(mount_missing=True)
+                else:
+                    targets = self._boot_restore_scan_system(win)
+                state["targets"] = targets
+                for target in targets:
+                    boot_combo.addItem(target["label"], target["root"])
+                if not targets:
+                    boot_combo.addItem(win, win)
+                else:
+                    index = 0
+                    if old:
+                        for i, target in enumerate(targets):
+                            if target["root"].lower() == old.lower():
+                                index = i
+                                break
+                    boot_combo.setCurrentIndex(index)
+                boot_combo.blockSignals(False)
+                boot_combo.setEditText(
+                    str(boot_combo.currentData() or boot_combo.itemText(0)))
+                update_preview()
+
+            def detect_again():
+                refresh_targets()
+                output.appendPlainText(
+                    "Найдено загрузочных разделов: %d" % len(state["targets"]))
+
+            def worker_done(ok, summary, log_path):
+                start_btn.setEnabled(True)
+                output.appendPlainText("\n" + summary)
+                if log_path:
+                    output.appendPlainText("Журнал: %s" % log_path)
+                if ok:
+                    QMessageBox.information(
+                        self, "ВОСТАНОВИТЬ ЗАГРУЗКУ", summary)
+                else:
+                    QMessageBox.warning(
+                        self, "ВОСТАНОВИТЬ ЗАГРУЗКУ", summary)
+
+            class BootRestoreWorker(QThread):
+                line = Signal(str)
+                done = Signal(bool, str, str)
+
+                def __init__(self, windows_drive, target, firmware, parent=None):
+                    super().__init__(parent)
+                    self.windows_drive = windows_drive
+                    self.target = target
+                    self.firmware = firmware
+
+                @staticmethod
+                def decode(data):
+                    if data is None:
+                        return ""
+                    if isinstance(data, str):
+                        return data.strip()
+                    for encoding in ("utf-8", "cp866", "cp1251", "utf-16"):
+                        try:
+                            return data.decode(encoding).strip()
+                        except (UnicodeDecodeError, LookupError):
+                            continue
+                    return data.decode("utf-8", errors="replace").strip()
+
+                def run(self):
+                    import datetime
+                    attempts = []
+                    bcdboot = self._bcdboot_path()
+                    if not bcdboot:
+                        self.done.emit(
+                            False,
+                            "Не найден bcdboot.exe ни на целевом диске, "
+                            "ни в текущей среде WinRE.", "")
+                        return
+                    win_dir = os.path.join(self.windows_drive, "Windows")
+                    attempts.append([
+                        bcdboot, win_dir, "/s", self.target,
+                        "/f", "ALL", "/v"])
+                    attempts.append([
+                        bcdboot, win_dir, "/s", self.target,
+                        "/f", self.firmware, "/v"])
+                    if self.firmware == "UEFI":
+                        attempts.append([
+                            bcdboot, win_dir, "/s", self.target,
+                            "/f", "UEFI", "/v"])
+                    else:
+                        attempts.append([
+                            bcdboot, win_dir, "/s", self.target,
+                            "/f", "BIOS", "/v"])
+
+                    lines = []
+                    last_error = ""
+                    succeeded = False
+                    for attempt in attempts:
+                        command_text = subprocess.list2cmdline(attempt)
+                        self.line.emit("> " + command_text)
+                        lines.append("> " + command_text)
+                        try:
+                            result = subprocess.run(
+                                attempt, capture_output=True, timeout=180,
+                                creationflags=getattr(
+                                    subprocess, "CREATE_NO_WINDOW", 0))
+                        except Exception as error:
+                            last_error = str(error)
+                            self.line.emit("Ошибка запуска: " + last_error)
+                            lines.append("Ошибка запуска: " + last_error)
+                            continue
+                        out = self.decode(result.stdout)
+                        err = self.decode(result.stderr)
+                        if out:
+                            self.line.emit(out)
+                            lines.append(out)
+                        if err:
+                            self.line.emit(err)
+                            lines.append(err)
+                        lines.append("Код возврата: %d" % result.returncode)
+                        self.line.emit("Код возврата: %d" % result.returncode)
+                        if result.returncode == 0:
+                            succeeded = True
+                            break
+                        last_error = err or out or (
+                            "bcdboot вернул код %d" % result.returncode)
+
+                    bcdedit = self._bcdedit_path()
+                    efi_bcd = os.path.join(
+                        self.target, "EFI", "Microsoft", "Boot", "BCD")
+                    efi_boot = os.path.join(
+                        self.target, "EFI", "Microsoft", "Boot", "bootmgfw.efi")
+                    bios_bcd = os.path.join(self.target, "Boot", "BCD")
+                    bios_boot = os.path.join(self.target, "bootmgr")
+                    efi_ok = os.path.isfile(efi_bcd) and os.path.isfile(efi_boot)
+                    bios_ok = os.path.isfile(bios_bcd) and os.path.isfile(bios_boot)
+                    verify_ok = efi_ok or bios_ok
+                    verify_lines = []
+                    bcd_to_check = efi_bcd if efi_ok else (
+                        bios_bcd if bios_ok else "")
+                    if bcd_to_check and bcdedit:
+                        try:
+                            enum_result = subprocess.run(
+                                [bcdedit, "/store", bcd_to_check, "/enum", "all"],
+                                capture_output=True, timeout=60,
+                                creationflags=getattr(
+                                    subprocess, "CREATE_NO_WINDOW", 0))
+                            enum_out = self.decode(enum_result.stdout)
+                            enum_err = self.decode(enum_result.stderr)
+                            self.line.emit("> %s /store %s /enum all" % (
+                                bcdedit, bcd_to_check))
+                            if enum_out:
+                                self.line.emit(enum_out)
+                                verify_lines.append(enum_out)
+                            if enum_err:
+                                verify_lines.append(enum_err)
+                            if enum_result.returncode == 0:
+                                verify_ok = True
+                            else:
+                                verify_ok = False
+                        except Exception as error:
+                            verify_lines.append(
+                                "Не удалось проверить BCD: %s" % error)
+                    if verify_ok:
+                        summary = (
+                            "Загрузочные файлы созданы.\n"
+                            "Windows: %s\\Windows\n"
+                            "Раздел: %s\n"
+                            "BCD: %s" % (
+                                self.windows_drive, self.target,
+                                bcd_to_check or efi_bcd))
+                    else:
+                        summary = (
+                            "BCDBoot завершился с ошибкой или BCD не найден.\n"
+                            "Windows: %s\\Windows\n"
+                            "Раздел: %s\n"
+                            "Последняя ошибка: %s" % (
+                                self.windows_drive, self.target,
+                                last_error or "BCD/загрузочные файлы не созданы"))
+                        if verify_lines:
+                            summary += "\n\n" + "\n".join(verify_lines[-3:])
+                    log_path = ""
+                    try:
+                        log_dir = os.path.join(
+                            os.environ.get("APPDATA") or
+                            os.path.expanduser("~"), "NoVir")
+                        os.makedirs(log_dir, exist_ok=True)
+                        stamp = datetime.datetime.now().strftime(
+                            "%Y%m%d_%H%M%S")
+                        log_path = os.path.join(
+                            log_dir, "boot_restore_%s.log" % stamp)
+                        with open(log_path, "w", encoding="utf-8") as log_file:
+                            log_file.write("\n".join(lines + verify_lines))
+                    except Exception:
+                        log_path = ""
+                    self.done.emit(bool(verify_ok or succeeded) and verify_ok,
+                                   summary, log_path)
+
+                def _bcdboot_path(self):
+                    candidates = [
+                        os.path.join(os.environ.get(
+                            "SystemRoot", r"X:\Windows"), "System32",
+                            "bcdboot.exe"),
+                        os.path.join(r"X:\Windows", "System32", "bcdboot.exe"),
+                        os.path.join(self.windows_drive, "Windows", "System32",
+                                     "bcdboot.exe"),
+                    ]
+                    for candidate in candidates:
+                        if os.path.isfile(candidate):
+                            return candidate
+                    return shutil.which("bcdboot") or ""
+
+                def _bcdedit_path(self):
+                    candidates = [
+                        os.path.join(os.environ.get(
+                            "SystemRoot", r"X:\Windows"), "System32",
+                            "bcdedit.exe"),
+                        os.path.join(r"X:\Windows", "System32", "bcdedit.exe"),
+                        os.path.join(self.windows_drive, "Windows", "System32",
+                                     "bcdedit.exe"),
+                    ]
+                    for candidate in candidates:
+                        if os.path.isfile(candidate):
+                            return candidate
+                    return shutil.which("bcdedit") or ""
+
+            def start_restore():
+                win = current_windows()
+                target = selected_target()
+                if not win or not target:
+                    QMessageBox.warning(
+                        self, "ВОССТАНОВИТЬ ЗАГРУЗКУ",
+                        "Выбери Windows и загрузочный раздел.")
+                    return
+                if not os.path.isfile(os.path.join(
+                            win, "Windows", "System32", "bcdboot.exe")) \
+                        and not os.path.isfile(os.path.join(
+                            os.environ.get("SystemRoot", r"X:\Windows"),
+                            "System32", "bcdboot.exe")):
+                    QMessageBox.warning(
+                        self, "ВОССТАНОВИТЬ ЗАГРУЗКУ",
+                        "bcdboot.exe не найден.")
+                    return
+                if firmware == "UEFI":
+                    fs_name, _fs_label = self._boot_restore_volume_info(target)
+                    fs_upper = str(fs_name or "").upper()
+                    if fs_upper not in ("FAT", "FAT16", "FAT32") \
+                            and not os.path.isdir(os.path.join(target, "EFI")):
+                        QMessageBox.warning(
+                            self, "ВОССТАНОВИТЬ ЗАГРУЗКУ",
+                            "Для UEFI выбран раздел %s с файловой системой %s.\n\n"
+                            "Нужен FAT32 EFI System Partition (ESP).\n"
+                            "Нажми «ОПРЕДЕЛИТЬ РАЗДЕЛ» или укажи букву ESP "
+                            "вручную (например S:)." % (
+                                target, fs_name or "неизвестно"))
+                        return
+                if not confirm_high_risk_action(
+                        "ВОССТАНОВИТЬ ЗАГРУЗКУ",
+                        "Будут перезаписаны BCD и загрузочные файлы на "
+                        "разделе %s для Windows %s.\n\n"
+                        "Это реальная операция BCDBoot, а не справка. "
+                        "Продолжить?" % (target, win)):
+                    return
+                if state["worker"] is not None and state["worker"].isRunning():
+                    return
+                start_btn.setEnabled(False)
+                output.clear()
+                output.appendPlainText(
+                    "Запуск BCDBoot: Windows=%s, раздел=%s, режим=%s" % (
+                        win, target, firmware))
+                worker = BootRestoreWorker(win, target, firmware, dialog)
+                state["worker"] = keep_thread(worker)
+                worker.line.connect(output.appendPlainText)
+                worker.done.connect(worker_done)
+                worker.start()
+
+            windows_combo.currentIndexChanged.connect(
+                lambda _index: refresh_targets())
+            detect_btn.clicked.connect(detect_again)
+            start_btn.clicked.connect(start_restore)
+            close_btn.clicked.connect(dialog.reject)
+            refresh_targets()
+            dialog.exec()
+
+        def _tool_startup_analysis(self):
+            lines = []
+            seen = set()
+
+            def add_entry(source, name, path):
+                path = os.path.normpath(str(path or ""))
+                key = (source.lower(), path.lower(), str(name).lower())
+                if not path or key in seen:
+                    return
+                seen.add(key)
+                exists = os.path.isfile(path)
+                date = self._driver_file_date(path) if exists else "—"
+                sig = None
+                if exists and path.lower().endswith(
+                        (".exe", ".dll", ".sys", ".scr", ".com")):
+                    sig = self._driver_signature_state(path)
+                sig_text = "—" if sig is None else ("OK" if sig else "НЕТ")
+                low = path.lower()
+                suspicious = (
+                    not exists or "\\temp\\" in low or "\\users\\" in low
+                    or "\\appdata\\" in low or "\\downloads\\" in low
+                    or "\\desktop\\" in low)
+                lines.append(
+                    "%-12s | %-34s | %-19s | %-4s | %s | %s"
+                    % (source, str(name)[:34], date, sig_text,
+                       "ПОДОЗР." if suspicious else "OK", path))
+
+            startup_suffix = os.path.join(
+                "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+            roots = self._offline_windows_drives()
+            for drive in roots:
+                folder = os.path.join(
+                    drive + "\\", "ProgramData", startup_suffix)
+                candidates = [folder]
+                users_dir = os.path.join(drive + "\\", "Users")
+                try:
+                    for user in os.listdir(users_dir):
+                        candidates.append(os.path.join(
+                            users_dir, user, "AppData", "Roaming",
+                            startup_suffix))
+                except OSError:
+                    pass
+                for candidate in candidates:
+                    try:
+                        for entry in os.scandir(candidate):
+                            if entry.is_file() and entry.name.lower().endswith(
+                                    (".exe", ".lnk", ".cmd", ".bat", ".vbs",
+                                     ".js", ".ps1")):
+                                add_entry("STARTUP", entry.name, entry.path)
+                    except OSError:
+                        continue
+            if not self._is_winre_mode():
+                run_keys = (
+                    (winreg.HKEY_LOCAL_MACHINE,
+                     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+                    (winreg.HKEY_LOCAL_MACHINE,
+                     r"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"),
+                    (winreg.HKEY_LOCAL_MACHINE,
+                     r"SOFTWARE\WOW6432Node\Microsoft\Windows"
+                     r"\CurrentVersion\Run"),
+                    (winreg.HKEY_CURRENT_USER,
+                     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"),
+                    (winreg.HKEY_CURRENT_USER,
+                     r"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"),
+                )
+                for hive, key_path in run_keys:
+                    try:
+                        with winreg.OpenKey(hive, key_path) as key:
+                            index = 0
+                            while True:
+                                try:
+                                    value_name, value_data, _ = \
+                                        winreg.EnumValue(key, index)
+                                except OSError:
+                                    break
+                                index += 1
+                                exe = self._extract_registry_executable(
+                                    value_data)
+                                add_entry("RUN", value_name,
+                                          exe or str(value_data))
+                    except OSError:
+                        continue
+            header = (
+                "NoVir · Анализ файлов запуска\n"
+                "Формат: ИСТОЧНИК | ИМЯ | ДАТА | ПОДПИСЬ | ОЦЕНКА | ПУТЬ\n"
+                "В WinRE проверяются автозагрузочные папки всех найденных "
+                "установленных Windows.\n" + "-" * 120)
+            if not lines:
+                lines = ["Ничего не найдено."]
+            text = header + "\n" + "\n".join(sorted(lines))
+            self._show_text_dialog("Анализ файлов запуска", text)
+
+        def _tool_backdoor_audit(self):
+            """Аудитор бэкдоров и подмены системных файлов (sethc, utilman, osk, narrator + IFEO debugger)."""
+            from PySide6.QtWidgets import (
+                QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                QTableWidget, QTableWidgetItem, QPushButton, QHeaderView,
+                QMessageBox, QFrame
+            )
+            from PySide6.QtGui import QColor
+            from PySide6.QtCore import Qt
+            import winreg
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("NoVir · Аудит подмен и бэкдоров (IFEO & Accessibility)")
+            dialog.resize(980, 620)
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #000000;
+                    color: #ffffff;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                }
+                QLabel {
+                    color: #888888;
+                    font-family: 'Consolas', monospace;
+                }
+                QTableWidget {
+                    background: #000000;
+                    color: #cccccc;
+                    border: 1px solid #1a1a1a;
+                    border-radius: 6px;
+                    gridline-color: #111111;
+                    font-family: 'Consolas', monospace;
+                    font-size: 11px;
+                    outline: none;
+                }
+                QTableWidget::item {
+                    padding: 4px 6px;
+                }
+                QTableWidget::item:selected {
+                    background: #1a1a1a;
+                    color: #ffffff;
+                }
+                QHeaderView::section {
+                    background: #0a0a0a;
+                    color: #777777;
+                    border: none;
+                    border-bottom: 1px solid #1a1a1a;
+                    border-right: 1px solid #141414;
+                    padding: 6px 8px;
+                    font-weight: bold;
+                    font-size: 10px;
+                    letter-spacing: 1px;
+                }
+                QPushButton {
+                    background: #0a0a0a;
+                    color: #cccccc;
+                    border: 1px solid #222222;
+                    border-radius: 4px;
+                    padding: 6px 14px;
+                    font-weight: bold;
+                    font-family: 'Consolas', monospace;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background: #161616;
+                    border-color: #444444;
+                    color: #ffffff;
+                }
+                QPushButton:pressed {
+                    background: #222222;
+                }
+                QScrollBar:vertical {
+                    background: #050505;
+                    width: 10px;
+                    border: none;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #222222;
+                    min-height: 20px;
+                    border-radius: 5px;
+                }
+                QScrollBar::handle:vertical:hover {
+                    background: #444444;
+                }
+            """)
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(12)
+
+            is_offline = bool(_OFFLINE_REG_STATE.get("mounted"))
+            target_drive = _OFFLINE_REG_STATE.get("drive", "C:") if is_offline else os.environ.get("SystemDrive", "C:")
+            sys32 = os.path.join(str(target_drive).rstrip("\\"), r"Windows\System32")
+            if not os.path.isdir(sys32):
+                sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+
+            head_row = QHBoxLayout()
+            v_title = QVBoxLayout()
+            v_title.setSpacing(2)
+            lbl_title = QLabel("АУДИТОР ПОДМЕН СИСТЕМНЫХ ФАЙЛОВ И IFEO ПЕРЕХВАТЧИКОВ")
+            lbl_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff; letter-spacing: 1.5px;")
+            v_title.addWidget(lbl_title)
+
+            lbl_sub = QLabel(f"Директория проверки: {sys32} · {'[Офлайн WinRE]' if is_offline else '[Текущая Windows]'}")
+            lbl_sub.setStyleSheet("font-size: 10px; color: #666666;")
+            v_title.addWidget(lbl_sub)
+            head_row.addLayout(v_title)
+            head_row.addStretch()
+            layout.addLayout(head_row)
+
+            table = QTableWidget()
+            table.setColumnCount(5)
+            table.setHorizontalHeaderLabels(["ТИП", "ИМЯ / ЦЕЛЬ", "СОСТОЯНИЕ", "ДЕТАЛИ / ХЭШ", "ПУТЬ"])
+            table.setSelectionBehavior(QTableWidget.SelectRows)
+            table.setSelectionMode(QTableWidget.SingleSelection)
+            table.verticalHeader().setDefaultSectionSize(26)
+            table.verticalHeader().setVisible(False)
+            layout.addWidget(table, 1)
+
+            audit_results = []
+
+            def scan_backdoors():
+                audit_results.clear()
+                table.setRowCount(0)
+                import hashlib
+
+                cmd_path = os.path.join(sys32, "cmd.exe")
+                cmd_size = os.path.getsize(cmd_path) if os.path.isfile(cmd_path) else -1
+                cmd_hash = ""
+                if cmd_size > 0:
+                    try:
+                        with open(cmd_path, "rb") as f:
+                            cmd_hash = hashlib.sha256(f.read()).hexdigest()
+                    except Exception:
+                        pass
+
+                # 1. Проверка файлов доступности (Accessibility Tools)
+                acc_files = [
+                    ("sethc.exe", "Залипание клавиш (Shift 5 раз)"),
+                    ("utilman.exe", "Специальные возможности (Win+U)"),
+                    ("osk.exe", "Экранная клавиатура"),
+                    ("Narrator.exe", "Экранный диктор"),
+                    ("Magnify.exe", "Экранная лупа"),
+                    ("DisplaySwitch.exe", "Переключение экранов (Win+P)"),
+                    ("AtBroker.exe", "Вспомогательный мост авторизации"),
+                ]
+
+                for fname, desc in acc_files:
+                    fpath = os.path.join(sys32, fname)
+                    if not os.path.isfile(fpath):
+                        audit_results.append({
+                            "type": "ФАЙЛ",
+                            "name": fname,
+                            "desc": desc,
+                            "status": "ОТСУТСТВУЕТ",
+                            "is_threat": True,
+                            "details": "Файл удален или скрыт",
+                            "path": fpath,
+                            "fix_type": "sfc_file"
+                        })
+                        continue
+
+                    fsize = os.path.getsize(fpath)
+                    fhash = ""
+                    try:
+                        with open(fpath, "rb") as f:
+                            fhash = hashlib.sha256(f.read()).hexdigest()
+                    except Exception:
+                        pass
+
+                    # Проверяем подмену на cmd.exe
+                    if cmd_hash and fhash == cmd_hash:
+                        audit_results.append({
+                            "type": "ФАЙЛ",
+                            "name": fname,
+                            "desc": desc,
+                            "status": "ПОДМЕНА НА CMD.EXE!",
+                            "is_threat": True,
+                            "details": f"Бэкдор экрана входа! Размер: {fsize} б",
+                            "path": fpath,
+                            "fix_type": "restore_acc"
+                        })
+                    elif cmd_size > 0 and abs(fsize - cmd_size) < 16:
+                        audit_results.append({
+                            "type": "ФАЙЛ",
+                            "name": fname,
+                            "desc": desc,
+                            "status": "ПОДОЗРЕНИЕ НА ПОДМЕНУ",
+                            "is_threat": True,
+                            "details": f"Размер совпадает с cmd.exe ({fsize} б)",
+                            "path": fpath,
+                            "fix_type": "restore_acc"
+                        })
+                    else:
+                        audit_results.append({
+                            "type": "ФАЙЛ",
+                            "name": fname,
+                            "desc": desc,
+                            "status": "ОРИГИНАЛ (OK)",
+                            "is_threat": False,
+                            "details": f"Размер: {fsize} б, SHA256: {fhash[:12]}...",
+                            "path": fpath,
+                            "fix_type": "none"
+                        })
+
+                # 2. Проверка Image File Execution Options (IFEO Debugger бэкдоров)
+                ifeo_rel = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
+                if is_offline:
+                    ifeo_hive = winreg.HKEY_LOCAL_MACHINE
+                    ifeo_key_name = f"OFFLINE_SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options"
+                else:
+                    ifeo_hive = winreg.HKEY_LOCAL_MACHINE
+                    ifeo_key_name = ifeo_rel
+
+                try:
+                    with winreg.OpenKey(ifeo_hive, ifeo_key_name, 0, winreg.KEY_READ) as ifeo_k:
+                        sub_count = winreg.QueryInfoKey(ifeo_k)[0]
+                        for idx in range(sub_count):
+                            try:
+                                sub_name = winreg.EnumKey(ifeo_k, idx)
+                                with winreg.OpenKey(ifeo_k, sub_name, 0, winreg.KEY_READ) as target_k:
+                                    val_count = winreg.QueryInfoKey(target_k)[1]
+                                    for v_idx in range(val_count):
+                                        val_name, val_data, _ = winreg.EnumValue(target_k, v_idx)
+                                        if val_name.lower() == "debugger":
+                                            audit_results.append({
+                                                "type": "IFEO",
+                                                "name": sub_name,
+                                                "desc": f"Перехватчик Debugger для {sub_name}",
+                                                "status": "ПЕРЕХВАТЧИК (DEBUGGER)",
+                                                "is_threat": True,
+                                                "details": f"Debugger = {val_data}",
+                                                "path": f"{ifeo_rel}\\{sub_name}",
+                                                "fix_type": "delete_debugger",
+                                                "target_sub": sub_name
+                                            })
+                            except Exception:
+                                continue
+                except Exception as ex:
+                    pass
+
+                # Заполняем таблицу
+                table.setRowCount(len(audit_results))
+                for row, item in enumerate(audit_results):
+                    c_type = QTableWidgetItem(item["type"])
+                    c_name = QTableWidgetItem(f"{item['name']} ({item['desc']})")
+                    c_status = QTableWidgetItem(item["status"])
+                    c_details = QTableWidgetItem(item["details"])
+                    c_path = QTableWidgetItem(item["path"])
+
+                    if item["is_threat"]:
+                        c_status.setForeground(QColor("#ff5555"))
+                        c_name.setForeground(QColor("#ff5555"))
+                    else:
+                        c_status.setForeground(QColor("#ffffff"))
+                        c_name.setForeground(QColor("#cccccc"))
+
+                    c_type.setForeground(QColor("#888888"))
+                    c_details.setForeground(QColor("#888888"))
+                    c_path.setForeground(QColor("#666666"))
+
+                    c_type.setData(Qt.UserRole, item)
+                    for col, itm in enumerate([c_type, c_name, c_status, c_details, c_path]):
+                        itm.setFlags(itm.flags() & ~Qt.ItemIsEditable)
+                        table.setItem(row, col, itm)
+
+                table.resizeColumnToContents(0)
+                table.resizeColumnToContents(1)
+                table.resizeColumnToContents(2)
+                table.resizeColumnToContents(3)
+                table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+
+                threats_count = sum(1 for x in audit_results if x["is_threat"])
+                if threats_count > 0:
+                    lbl_counter.setText(f"ОБНАРУЖЕНО УГРОЗ / ПОДМЕН: {threats_count}")
+                    lbl_counter.setStyleSheet("color: #ff5555; font-size: 11px; font-weight: bold;")
+                else:
+                    lbl_counter.setText("Все системные средства авторизации и IFEO в порядке")
+                    lbl_counter.setStyleSheet("color: #888888; font-size: 11px;")
+
+            # Нижняя панель
+            bot_row = QHBoxLayout()
+            bot_row.setSpacing(10)
+
+            lbl_counter = QLabel("Сканирование...")
+            lbl_counter.setStyleSheet("color: #666666; font-size: 11px;")
+            bot_row.addWidget(lbl_counter)
+            bot_row.addStretch()
+
+            btn_fix_selected = QPushButton("ОЧИСТИТЬ ПЕРЕХВАТЧИК (IFEO)")
+            btn_fix_selected.setCursor(Qt.PointingHandCursor)
+
+            btn_restore_sfc = QPushButton("ВОССТАНОВИТЬ ОРИГИНАЛ (SFC)")
+            btn_restore_sfc.setCursor(Qt.PointingHandCursor)
+
+            def fix_ifeo():
+                sel = table.selectedItems()
+                if not sel:
+                    QMessageBox.information(dialog, "Выбор", "Выберите строку перехватчика IFEO в таблице.")
+                    return
+                item_data = sel[0].data(Qt.UserRole)
+                if item_data.get("type") != "IFEO":
+                    QMessageBox.information(dialog, "Информация", "Выбранный элемент не является IFEO-перехватчиком.")
+                    return
+
+                target_app = item_data.get("target_sub", "")
+                rel_path = rf"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\{target_app}"
+                try:
+                    reg_delete_value(rel_path, "Debugger")
+                    self.show_toast("БЭКДОРЫ", f"Перехватчик Debugger для {target_app} успешно удален!")
+                    scan_backdoors()
+                except Exception as e:
+                    QMessageBox.critical(dialog, "Ошибка", f"Не удалось удалить перехватчик: {e}")
+
+            def restore_file_sfc():
+                sel = table.selectedItems()
+                if not sel:
+                    QMessageBox.information(dialog, "Выбор", "Выберите файл для восстановления.")
+                    return
+                item_data = sel[0].data(Qt.UserRole)
+                fpath = item_data.get("path", "")
+                if not fpath or not os.path.exists(fpath):
+                    QMessageBox.information(dialog, "Ошибка", "Путь к файлу недоступен.")
+                    return
+
+                # Восстановление через SFC /SCANFILE
+                import subprocess
+                cmd = ["sfc", f"/scanfile={fpath}"]
+                if is_offline:
+                    cmd = ["sfc", f"/scanfile={fpath}", f"/offbootdir={target_drive}\\", f"/offwindir={target_drive}\\Windows"]
+
+                try:
+                    self.show_toast("SFC", f"Восстановление целостности {os.path.basename(fpath)}...")
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=90, creationflags=0x08000000)
+                    self.show_toast("ГОТОВО", f"SFC завершил проверку {os.path.basename(fpath)}")
+                    scan_backdoors()
+                except Exception as ex:
+                    QMessageBox.critical(dialog, "Ошибка SFC", f"Не удалось выполнить sfc: {ex}")
+
+            btn_fix_selected.clicked.connect(fix_ifeo)
+            btn_restore_sfc.clicked.connect(restore_file_sfc)
+
+            bot_row.addWidget(btn_fix_selected)
+            bot_row.addWidget(btn_restore_sfc)
+
+            btn_rescan = QPushButton("ПЕРЕСКАНИРОВАТЬ")
+            btn_rescan.setCursor(Qt.PointingHandCursor)
+            btn_rescan.clicked.connect(scan_backdoors)
+            bot_row.addWidget(btn_rescan)
+
+            btn_close = QPushButton("ЗАКРЫТЬ")
+            btn_close.setCursor(Qt.PointingHandCursor)
+            btn_close.clicked.connect(dialog.accept)
+            bot_row.addWidget(btn_close)
+
+            layout.addLayout(bot_row)
+
+            scan_backdoors()
+            dialog.exec()
+
         def create_advanced_page(self):
             from PySide6.QtWidgets import QScrollArea
             page = QFrame()
@@ -20751,7 +24398,6 @@ if GUI_MODE:
                 " font-family: 'Consolas', 'Courier New', monospace;")
             outer.addWidget(subtitle)
 
-            # Карта функций из каталога: имя -> callable
             func_map = {}
             try:
                 for _cat, _items in self.get_all_functions().items():
@@ -20768,6 +24414,58 @@ if GUI_MODE:
                         f"Функция «{label or name}» недоступна в этой сборке.")
                     return
                 self.run_task(fn)
+
+            # ── semantic keyword map: card title → extra search tokens ──────
+            _CARD_KEYWORDS = {
+                "Включить UAC":            ["блокировка", "контроль", "учетных", "запись", "уак", "uac", "политика", "разрешение"],
+                "GpeditMsc":               ["политика", "групповая", "gpedit", "блокировка", "ограничение", "запрет"],
+                "Заменить sethc и utilman":["залипание", "shift", "sethc", "utilman", "бэкдор", "backdoor", "подмена", "блокировка"],
+                "Аудит подмен и бэкдоров": ["ifeo", "debugger", "sethc", "utilman", "osk", "залипание", "бэкдор", "backdoor",
+                                             "подмена", "перехватчик", "блокировка", "реестр"],
+                "Управление ассоциациями": ["ассоциация", "exe", "lnk", "привязка", "блокировка", "открытие"],
+                "Управление пользователями":["пароль", "учетная", "аккаунт", "пользователь", "учётка"],
+                "Сброс пароля":            ["пароль", "учетная", "аккаунт", "авторизация", "вход", "логин"],
+                "ВОСТАНОВИТЬ ЗАГРУЗКУ":    ["загрузка", "bcd", "bcdboot", "mbr", "uefi", "bios", "boot", "бут", "winre"],
+                "mbrRE":                   ["mbr", "bcd", "загрузка", "boot", "bios", "uefi", "бут"],
+                "Сохранение WinRE":        ["winre", "образ", "wim", "восстановление", "загрузка", "резервная"],
+                "Войти в WinRE":           ["winre", "загрузка", "восстановление", "среда", "bcd"],
+                "Восстановить системные файлы": ["sfc", "файлы", "восстановление", "офлайн", "системные"],
+                "sfc /scannow":            ["sfc", "файлы", "восстановление", "проверка", "системные"],
+                "Анализ файлов запуска":   ["автозагрузка", "запуск", "подпись", "дата", "startup", "старт"],
+                "Корреляция Malware":      ["автозагрузка", "служба", "задача", "малварь", "malware", "запуск"],
+                "Перезапуск Explorer":     ["проводник", "explorer", "рабочий стол", "оболочка", "зависание"],
+                "Проводник":               ["проводник", "explorer", "файл", "менеджер", "папка"],
+                "Сетевые порты":           ["сеть", "интернет", "порт", "соединение", "tcp", "udp", "network"],
+                "Вернуть русский язык":    ["шрифт", "язык", "раскладка", "русский", "ru", "локаль"],
+                "Вернуть стандартную тему":["тема", "оформление", "стиль", "рабочий стол", "шрифт"],
+                "Починить шрифты":         ["шрифт", "font", "язык", "текст", "отображение"],
+                "WMI Persistence":         ["wmi", "persistence", "фильтр", "subscription", "скрытый", "автозагрузка"],
+                "NTFS ADS":                ["ads", "ntfs", "потоки", "zone", "скрытый", "метка"],
+                "Process Memory":          ["память", "rwx", "pe", "процесс", "инъекция", "dll", "unbacked"],
+                "Редактор реестра":        ["реестр", "registry", "ключ", "hklm", "ifeo", "политика"],
+                "Диспетчер задач":         ["задача", "процесс", "блокировка", "таскменеджер", "taskmgr", "заморозка"],
+                "Добавить NoVir в WinRE":  ["winre", "wim", "образ", "встроить", "загрузка"],
+                "Записать NoVir в CmdLine":["cmdline", "автозапуск", "загрузка", "реестр", "setup"],
+                "Записать NoVir в Службы": ["служба", "service", "автозапуск", "запуск"],
+                "Записать NoVir в Планировщик задач": ["планировщик", "task", "scheduler", "автозапуск", "запуск"],
+                "Экстремальное восстановление": ["оболочка", "автозагрузка", "иконки", "сброс", "восстановление", "explorer"],
+                "Очистка системы":         ["temp", "корзина", "кэш", "мусор", "очистка", "диск"],
+                "Удаление дисков":         ["диск", "раздел", "disk", "partition", "управление"],
+                "Полный доступ к файлу":   ["права", "takeown", "доступ", "файл", "разблокировка", "acl"],
+                "Выключить тестовый режим":["тестовый", "подпись", "driver", "signature", "тест", "режим"],
+                "Удобный запуск":          ["контекстное", "меню", "nov", "cmd", "запуск"],
+                "Восстановить LogonUI":    ["logonui", "экран", "вход", "логон", "запуск"],
+                "Очистка драйверов":       ["драйвер", "driver", "сторонний", "удаление"],
+                "Выйти из пользователя":   ["сеанс", "выход", "logoff", "пользователь"],
+                "Выполнить":               ["run", "win+r", "запуск", "диалог", "выполнить"],
+                "Ctrl+Alt+N":              ["быстрый", "запуск", "hotkey", "горячая", "клавиша"],
+                "Командная строка":        ["cmd", "командная", "строка", "консоль", "терминал"],
+                "Сведения о системе":      ["железо", "hardware", "система", "процессор", "ram", "cpu"],
+            }
+
+            # all_section_entries: list of (section_frame, section_title_label, card_entries)
+            # card_entries: list of (card_widget, lower_title, lower_desc, extra_keywords)
+            all_sections = []
 
             def make_card(card_title, card_desc, callback):
                 card = QPushButton()
@@ -20826,11 +24524,16 @@ if GUI_MODE:
                 grid = QGridLayout()
                 grid.setHorizontalSpacing(8)
                 grid.setVerticalSpacing(8)
+                card_entries = []
                 for idx, (ct, cd, cb) in enumerate(cards):
-                    grid.addWidget(make_card(ct, cd, cb), idx // 4, idx % 4)
+                    cw = make_card(ct, cd, cb)
+                    grid.addWidget(cw, idx // 4, idx % 4)
+                    extra_kw = _CARD_KEYWORDS.get(ct, [])
+                    card_entries.append((cw, ct.lower(), cd.lower(), extra_kw))
                 for col in range(4):
                     grid.setColumnStretch(col, 1)
                 fl.addLayout(grid)
+                all_sections.append((frame, st, sd, card_entries))
                 return frame
 
             system_cards = [
@@ -20892,8 +24595,6 @@ if GUI_MODE:
             ]
 
             if self._is_winre_mode():
-                # These actions depend on a logged-in user session, Explorer or
-                # the normal Win+R shell, none of which exist in WinRE.
                 _winre_hidden_system = {
                     "Выйти из пользователя", "Войти в WinRE", "Выполнить",
                     "Ctrl+Alt+N", "Перезапуск Explorer",
@@ -20904,6 +24605,23 @@ if GUI_MODE:
                 builtin_cards = [
                     card for card in builtin_cards
                     if card[0] != "Перезапуск Explorer"]
+
+            # ── search bar ───────────────────────────────────────────────────
+            from PySide6.QtWidgets import QLineEdit
+            search_box = QLineEdit()
+            search_box.setPlaceholderText("ПОИСК ПО НАЗВАНИЮ ИЛИ НАЗНАЧЕНИЮ...")
+            search_box.setFixedHeight(32)
+            search_box.setClearButtonEnabled(True)
+            search_box.setStyleSheet(
+                "QLineEdit {"
+                "  background: #0a0a0a; color: #ffffff; border: 1px solid #333333;"
+                "  padding: 0 10px; font-size: 10px; font-family: 'Consolas','Courier New',monospace;"
+                "  letter-spacing: 1px; border-radius: 4px;"
+                "}"
+                "QLineEdit:focus { border-color: #666666; }"
+                "QLineEdit::placeholder { color: #444444; }"
+            )
+            outer.addWidget(search_box)
 
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -20920,9 +24638,60 @@ if GUI_MODE:
                 "ВСТРОЕННОЕ ПО",
                 "СОБСТВЕННЫЕ, НЕЗАВИСИМЫЕ ОТ WINDOWS АНАЛОГИ СИСТЕМНЫХ УТИЛИТ ДЛЯ РАБОТЫ ПРИ РАЗРУШЕННОЙ ОС.",
                 builtin_cards))
+            tools_cards = [
+                ("GpeditMsc", "Открыть редактор групповых политик (в WinRE недоступен)",
+                 self._tool_gpedit_msc),
+                ("Добавить NoVir в WinRE", "Встроить NoVir.exe в образ Winre.wim или X:\\Tools",
+                 self._tool_add_novir_to_winre),
+                ("Записать NoVir в CmdLine", "Автозапуск через HKLM\\SYSTEM\\Setup\\CmdLine",
+                 self._tool_novir_cmdline),
+                ("Записать NoVir в Службы", "Создать ручную службу NoVirRecovery",
+                 self._tool_novir_service),
+                ("Записать NoVir в Планировщик задач", "Задача NoVirRecovery при входе пользователя",
+                 self._tool_novir_scheduler),
+                ("Восстановить системные файлы", "SFC /scannow по выбранному офлайн-диску",
+                 self._tool_offline_sfc),
+                ("ВОСТАНОВИТЬ ЗАГРУЗКУ", "Пересоздать BCD и загрузочные файлы найденной Windows через BCDBoot (UEFI/BIOS, WinRE)",
+                 self._tool_boot_restore),
+                ("Анализ файлов запуска", "Проверить автозагрузку, даты и цифровые подписи",
+                 self._tool_startup_analysis),
+                ("Аудит подмен и бэкдоров", "Проверка sethc/utilman на подмену и очистка IFEO Debugger",
+                 self._tool_backdoor_audit),
+            ]
+            cl.addWidget(make_section(
+                "ИНСТРУМЕНТЫ",
+                "ДОПОЛНИТЕЛЬНЫЕ СРЕДСТВА NOVIR ДЛЯ WINDOWS И WINRE. "
+                "ДУБЛИРУЮЩИЕ ФУНКЦИИ ЗДЕСЬ НЕ ДОБАВЛЕНЫ.",
+                tools_cards))
             cl.addStretch()
             scroll.setWidget(content)
             outer.addWidget(scroll, 1)
+
+            # ── filter logic ─────────────────────────────────────────────────
+            def _on_advanced_search(text):
+                q = text.strip().lower()
+                if not q:
+                    for frame, st_lbl, sd_lbl, card_entries in all_sections:
+                        frame.setVisible(True)
+                        st_lbl.setVisible(True)
+                        sd_lbl.setVisible(True)
+                        for cw, *_ in card_entries:
+                            cw.setVisible(True)
+                    return
+                # tokenize query: each space-separated token must match
+                tokens = q.split()
+                for frame, st_lbl, sd_lbl, card_entries in all_sections:
+                    any_visible = False
+                    for cw, lo_title, lo_desc, extra_kw in card_entries:
+                        haystack = lo_title + " " + lo_desc + " " + " ".join(extra_kw)
+                        match = all(tok in haystack for tok in tokens)
+                        cw.setVisible(match)
+                        if match:
+                            any_visible = True
+                    frame.setVisible(any_visible)
+
+            search_box.textChanged.connect(_on_advanced_search)
+
             return page
 
         def create_embedded_host_page(self):
@@ -21186,7 +24955,6 @@ if GUI_MODE:
             except Exception:
                 pass
             try:
-                # На вкладках реестра фильтра текста пока нет — фокус на текущую таблицу.
                 if hasattr(self, "startup_sub_tabs"):
                     idx = self.startup_sub_tabs.currentIndex()
                     tables = ["table_run", "table_runonce", "table_winlogon", "table_appinit"]
@@ -21286,8 +25054,334 @@ if GUI_MODE:
                     self),
                 "СБРОС ПАРОЛЯ")
 
+        def _restriction_checks(self):
+            return [
+                ("Диспетчер задач (Ctrl+Alt+Del)",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
+                 "DisableTaskMgr", "HKCU", 1, "Disable_TaskManager_Fix"),
+                ("Редактор реестра (regedit)",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
+                 "DisableRegistryTools", "HKCU", 1, "Disable_Regedit_Fix"),
+                ("Команда Выполнить (Win+R)",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
+                 "NoRun", "HKCU", 1, "WinR_Fix"),
+                ("Командная строка (cmd.exe)",
+                 r"Software\Policies\Microsoft\Windows\System",
+                 "DisableCMD", "HKCU", 1, "CMD_Fix"),
+                ("Панель управления",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
+                 "NoControlPanel", "HKCU", 1, "ControlPanel_Fix"),
+                ("Параметры папок (скрытые файлы)",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
+                 "NoFolderOptions", "HKCU", 1, "FolderOptions_Fix"),
+                ("Обои рабочего стола",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
+                 "Wallpaper", "HKCU", None, "Wallpaper_Fix"),
+                ("AppInit_DLLs (внедрение DLL)",
+                 r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows",
+                 "AppInit_DLLs", "HKLM", None, "AppInit_DLLs_Fix"),
+                ("DisallowRun (запрет запуска программ)",
+                 r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
+                 "DisallowRun", "HKCU", 1, "DisallowRun_Fix"),
+                ("Windows Defender отключён",
+                 r"SOFTWARE\Policies\Microsoft\Windows Defender",
+                 "DisableAntiSpyware", "HKLM", 1, "Defender_Fix"),
+                ("Windows Update заблокирован",
+                 r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU",
+                 "NoAutoUpdate", "HKLM", 1, "WindowsUpdate_Fix"),
+                ("Клавиши заблокированы (Scancode Map)",
+                 r"SYSTEM\CurrentControlSet\Control\Keyboard Layout",
+                 "Scancode Map", "HKLM", None, "Scancode_Fix"),
+            ]
+
+        def _restriction_offline_drives(self):
+            drives = []
+            current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+            for root in self._offline_windows_drives():
+                root = str(root or "").rstrip("\\")
+                if not root:
+                    continue
+                if self._is_winre_mode() and root.lower() == current.lower():
+                    continue
+                software = os.path.join(
+                    root, "Windows", "System32", "config", "SOFTWARE")
+                if os.path.isfile(software):
+                    drives.append(root)
+            return drives
+
+        def _refresh_restriction_targets(self):
+            combo = getattr(self, "_restrictions_target_combo", None)
+            if combo is None:
+                return
+            old = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            current = os.environ.get("SystemDrive", "C:").rstrip("\\")
+            if not self._is_winre_mode():
+                combo.addItem("Текущая система (%s)" % current, "")
+            for root in self._restriction_offline_drives():
+                combo.addItem("Установленная Windows: %s" % root, root)
+            if combo.count() == 0 and not self._is_winre_mode():
+                combo.addItem("Текущая система (%s)" % current, "")
+            target_index = 0
+            if old is not None:
+                found = combo.findData(old)
+                if found >= 0:
+                    target_index = found
+            combo.setCurrentIndex(target_index)
+            combo.blockSignals(False)
+            if combo.count() == 0:
+                combo.addItem("Установленная Windows не найдена", "")
+            combo.setEnabled(combo.count() > 0)
+
+        def _restriction_target_drive(self):
+            combo = getattr(self, "_restrictions_target_combo", None)
+            if combo is None:
+                return ""
+            data = combo.currentData()
+            return str(data or "").rstrip("\\")
+
+        def _restriction_open_targets(self, drive):
+            import winreg
+            targets = []
+            mounted = []
+            errors = []
+            drive = str(drive or "").rstrip("\\")
+            if not drive:
+                targets.append({
+                    "root": winreg.HKEY_CURRENT_USER,
+                    "prefix": "",
+                    "kind": "user",
+                    "label": "Текущий пользователь",
+                    "hive_text": "HKCU",
+                })
+                targets.append({
+                    "root": winreg.HKEY_LOCAL_MACHINE,
+                    "prefix": "",
+                    "kind": "machine",
+                    "label": "Локальный компьютер",
+                    "hive_text": "HKLM",
+                })
+                return targets, mounted, errors
+
+            enable_registry_load_privileges()
+
+            def load(root, mount_name, file_path, kind, label, hive_text):
+                if not os.path.isfile(file_path):
+                    errors.append("Не найден файл: %s" % file_path)
+                    return
+                try:
+                    winreg.LoadKey(root, mount_name, file_path)
+                    mounted.append((root, mount_name))
+                    targets.append({
+                        "root": root,
+                        "prefix": mount_name,
+                        "kind": kind,
+                        "label": label,
+                        "hive_text": hive_text,
+                    })
+                except Exception as error:
+                    errors.append("Не удалось загрузить %s: %s" % (
+                        file_path, error))
+
+            config_dir = os.path.join(drive, "Windows", "System32", "config")
+            load(winreg.HKEY_LOCAL_MACHINE, "NoVirOfflineSOFTWARE",
+                 os.path.join(config_dir, "SOFTWARE"),
+                 "software", "%s\\SOFTWARE" % drive, "HKLM")
+            load(winreg.HKEY_LOCAL_MACHINE, "NoVirOfflineSYSTEM",
+                 os.path.join(config_dir, "SYSTEM"),
+                 "system", "%s\\SYSTEM" % drive, "HKLM")
+            control_set = ""
+            try:
+                select_key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    "NoVirOfflineSYSTEM\\Select", 0, winreg.KEY_READ)
+                try:
+                    for value_name in ("Current", "Default"):
+                        try:
+                            current_set, _value_type = winreg.QueryValueEx(
+                                select_key, value_name)
+                            current_set = int(current_set)
+                            if 0 < current_set < 100:
+                                control_set = "ControlSet%03d" % current_set
+                                break
+                        except Exception:
+                            continue
+                finally:
+                    winreg.CloseKey(select_key)
+            except Exception:
+                pass
+            if not control_set:
+                for candidate in ("ControlSet001", "ControlSet002",
+                                  "ControlSet003", "ControlSet004"):
+                    try:
+                        test_key = winreg.OpenKey(
+                            winreg.HKEY_LOCAL_MACHINE,
+                            "NoVirOfflineSYSTEM\\" + candidate,
+                            0, winreg.KEY_READ)
+                        winreg.CloseKey(test_key)
+                        control_set = candidate
+                        break
+                    except Exception:
+                        continue
+            if control_set:
+                for target in targets:
+                    if target.get("kind") == "system":
+                        target["control_set"] = control_set
+
+            users_dir = os.path.join(drive, "Users")
+            try:
+                user_entries = list(os.scandir(users_dir))
+            except Exception as error:
+                user_entries = []
+                errors.append("Не удалось прочитать %s: %s" % (
+                    users_dir, error))
+            user_number = 0
+            for entry in user_entries:
+                try:
+                    if not entry.is_dir():
+                        continue
+                    profile = os.path.join(entry.path, "NTUSER.DAT")
+                    if not os.path.isfile(profile):
+                        continue
+                    user_number += 1
+                    load(winreg.HKEY_USERS,
+                         "NoVirOfflineUser%d" % user_number,
+                         profile, "user", "%s (%s)" % (
+                             entry.name, drive), "HKCU")
+                except Exception:
+                    continue
+            return targets, mounted, errors
+
+        def _restriction_unload_targets(self, mounted):
+            import winreg
+            for root, mount_name in reversed(list(mounted or [])):
+                try:
+                    winreg.UnloadKey(root, mount_name)
+                except Exception:
+                    pass
+
+        def _restriction_collect_matches(self, checks, targets, force_all=False):
+            import winreg
+            results = []
+            for label, key_path, value_name, hive_name, block_val, fix_func in checks:
+                top = key_path.split("\\", 1)[0].upper()
+                if hive_name == "HKCU":
+                    candidates = [t for t in targets if t["kind"] == "user"]
+                else:
+                    candidates = [t for t in targets if t["kind"] == "machine"]
+                    if not candidates:
+                        if top == "SOFTWARE":
+                            candidates = [t for t in targets
+                                          if t["kind"] == "software"]
+                        elif top == "SYSTEM":
+                            candidates = [t for t in targets
+                                          if t["kind"] == "system"]
+                        else:
+                            candidates = [t for t in targets
+                                          if t["kind"] in ("software", "system")]
+
+                matches = []
+                for target in candidates:
+                    effective_key_path = key_path
+                    if (target.get("kind") == "system"
+                            and key_path.upper().startswith(
+                                "SYSTEM\\CURRENTCONTROLSET\\")
+                            and target.get("control_set")):
+                        effective_key_path = (
+                            "SYSTEM\\" + target["control_set"]
+                            + key_path[len("SYSTEM\\CurrentControlSet"):])
+                    prefix = target.get("prefix") or ""
+                    if target.get("kind") == "machine" or not prefix:
+                        open_path = effective_key_path
+                    else:
+                        rel_path = effective_key_path
+                        if top in ("SOFTWARE", "SYSTEM"):
+                            rel_path = effective_key_path.split("\\", 1)[1]
+                        open_path = (prefix + "\\" + rel_path).strip("\\")
+                    try:
+                        key = winreg.OpenKey(
+                            target["root"], open_path, 0, winreg.KEY_READ)
+                    except Exception:
+                        continue
+                    try:
+                        if value_name is None:
+                            if force_all:
+                                matches.append({
+                                    "root": target["root"],
+                                    "open_path": open_path,
+                                    "value_name": "",
+                                    "target_label": target["label"],
+                                    "display_key": "%s\\%s" % (
+                                        target.get("hive_text", "HKLM"),
+                                        effective_key_path),
+                                    "detail": "(ключ существует)",
+                                })
+                            continue
+                        try:
+                            val, _value_type = winreg.QueryValueEx(
+                                key, value_name)
+                        except Exception:
+                            continue
+                        is_blocked = bool(force_all)
+                        if not is_blocked:
+                            if block_val == 1 and val == 1:
+                                is_blocked = True
+                            elif block_val is None and val and str(val).strip():
+                                is_blocked = True
+                        if is_blocked:
+                            display_key = "%s\\%s\\%s" % (
+                                target.get("hive_text", "HKLM"),
+                                effective_key_path, value_name)
+                            matches.append({
+                                "root": target["root"],
+                                "open_path": open_path,
+                                "value_name": value_name,
+                                "target_label": target["label"],
+                                "display_key": display_key,
+                                "detail": "= %s" % repr(val)[:60],
+                            })
+                    finally:
+                        try:
+                            winreg.CloseKey(key)
+                        except Exception:
+                            pass
+                if matches:
+                    key_text = matches[0]["display_key"]
+                    if len(matches) > 1:
+                        key_text += " (+%d)" % (len(matches) - 1)
+                    result = {
+                        "label": label,
+                        "key": key_text,
+                        "detail": matches[0]["detail"],
+                        "fix_func": fix_func,
+                        "matches": matches,
+                    }
+                    if len(matches) > 1:
+                        result["detail"] += " · найдено в %d профилях" % len(matches)
+                    results.append(result)
+            return results
+
+        def _restriction_scan_impl(self, drive=None):
+            checks = self._restriction_checks()
+            targets, mounted, errors = self._restriction_open_targets(drive)
+            self._offline_restriction_mounts = mounted
+            try:
+                found = self._restriction_collect_matches(
+                    checks, targets, force_all=False)
+            finally:
+                self._restriction_unload_targets(mounted)
+                self._offline_restriction_mounts = []
+            return {"found": found, "errors": errors, "drive": str(drive or "")}
+
         def scan_restrictions(self):
-            """Сканирует систему на наличие активных блокировок"""
+            target = self._restriction_target_drive()
+            if self._is_winre_mode() and not target:
+                QMessageBox.warning(
+                    self, "СНЯТИЕ ОГРАНИЧЕНИЙ",
+                    "В WinRE не найден диск установленной Windows.\n"
+                    "Подключи диск с Windows или нажми «ОБНОВИТЬ».")
+                return
             self.btn_run_scan.setEnabled(False)
             self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАНИЕ..."))
             self.scan_status_label.setText("СКАНИРОВАНИЕ...")
@@ -21295,148 +25389,64 @@ if GUI_MODE:
             self._found_restrictions = []
             if hasattr(self, "_restrictions_counter"):
                 self._restrictions_counter.setText("[ -- / 12 ]")
-
-            def do_scan():
-                import winreg
-                found = []
-
-                # Список проверок: (название, путь реестра, значение, ожидаемое_значение_для_блокировки, функция_снятия)
-                checks = [
-                    # Диспетчер задач
-                    ("Диспетчер задач (Ctrl+Alt+Del)",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
-                     "DisableTaskMgr", winreg.HKEY_CURRENT_USER, 1, "Disable_TaskManager_Fix"),
-                    # Regedit
-                    ("Редактор реестра (regedit)",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
-                     "DisableRegistryTools", winreg.HKEY_CURRENT_USER, 1, "Disable_Regedit_Fix"),
-                    # Win+R
-                    ("Команда Выполнить (Win+R)",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
-                     "NoRun", winreg.HKEY_CURRENT_USER, 1, "WinR_Fix"),
-                    # Cmd
-                    ("Командная строка (cmd.exe)",
-                     r"Software\Policies\Microsoft\Windows\System",
-                     "DisableCMD", winreg.HKEY_CURRENT_USER, 1, "CMD_Fix"),
-                    # Control Panel
-                    ("Панель управления",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
-                     "NoControlPanel", winreg.HKEY_CURRENT_USER, 1, "ControlPanel_Fix"),
-                    # Folder Options
-                    ("Параметры папок (скрытые файлы)",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
-                     "NoFolderOptions", winreg.HKEY_CURRENT_USER, 1, "FolderOptions_Fix"),
-                    # Wallpaper lock
-                    ("Обои рабочего стола",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
-                     "Wallpaper", winreg.HKEY_CURRENT_USER, None, "Wallpaper_Fix"),
-                    # AppInit_DLLs
-                    ("AppInit_DLLs (внедрение DLL)",
-                     r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows",
-                     "AppInit_DLLs", winreg.HKEY_LOCAL_MACHINE, None, "AppInit_DLLs_Fix"),
-                    # DisallowRun
-                    ("DisallowRun (запрет запуска программ)",
-                     r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
-                     "DisallowRun", winreg.HKEY_CURRENT_USER, 1, "DisallowRun_Fix"),
-
-                    # Windows Defender (DisableAntiSpyware)
-                    ("Windows Defender отключён",
-                     r"SOFTWARE\Policies\Microsoft\Windows Defender",
-                     "DisableAntiSpyware", winreg.HKEY_LOCAL_MACHINE, 1, "Defender_Fix"),
-                    # Windows Update
-                    ("Windows Update заблокирован",
-                     r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU",
-                     "NoAutoUpdate", winreg.HKEY_LOCAL_MACHINE, 1, "WindowsUpdate_Fix"),
-                    # Scancode Map (keyboard block)
-                    ("Клавиши заблокированы (Scancode Map)",
-                     r"SYSTEM\CurrentControlSet\Control\Keyboard Layout",
-                     "Scancode Map", winreg.HKEY_LOCAL_MACHINE, None, "Scancode_Fix"),
-                ]
-
-                for check in checks:
-                    if len(check) == 6:
-                        label, key_path, value_name, hive, block_val, fix_func = check
-                    else:
-                        continue
-
-                    try:
-                        key = winreg.OpenKey(hive, key_path, 0, winreg.KEY_READ)
-
-                        if value_name is None:
-                            # Проверяем просто существование ключа
-                            winreg.CloseKey(key)
-                            found.append({
-                                "label": label,
-                                "key": f"{'HKCU' if hive == winreg.HKEY_CURRENT_USER else 'HKLM'}\\{key_path}",
-                                "detail": "(ключ существует)",
-                                "fix_func": fix_func,
-                            })
-                            continue
-
-                        try:
-                            val, _ = winreg.QueryValueEx(key, value_name)
-                            winreg.CloseKey(key)
-
-                            is_blocked = False
-                            if block_val == 1 and val == 1:
-                                is_blocked = True
-                            elif block_val is None and val and str(val).strip():
-                                # Любое непустое значение считается блокировкой
-                                is_blocked = True
-
-                            if is_blocked:
-                                hive_str = "HKCU" if hive == winreg.HKEY_CURRENT_USER else "HKLM"
-                                found.append({
-                                    "label": label,
-                                    "key": f"{hive_str}\\{key_path}\\{value_name}",
-                                    "detail": f"= {repr(val)[:40]}",
-                                    "fix_func": fix_func,
-                                })
-                        except FileNotFoundError:
-                            winreg.CloseKey(key)
-                    except Exception:
-                        pass
-
-                return found
-
-            def on_scan_done():
-                # Вызывается из основного потока
-                pass
-
-            # Запускаем в Worker
-            def worker_func():
-                return do_scan()
+            drive = self._restriction_target_drive()
+            self._restrictions_scan_drive = drive
 
             from PySide6.QtCore import QThread, Signal
-            class ScanThread(QThread):
-                scan_finished = Signal(list)
-                def run(self):
-                    res = do_scan()
-                    self.scan_finished.emit(res)
 
-            self.scan_thread = keep_thread(ScanThread())
+            class ScanThread(QThread):
+                scan_finished = Signal(object)
+
+                def __init__(self, owner, scan_drive):
+                    super().__init__(owner)
+                    self.owner = owner
+                    self.scan_drive = scan_drive
+
+                def run(self):
+                    try:
+                        payload = self.owner._restriction_scan_impl(
+                            self.scan_drive)
+                    except Exception as error:
+                        payload = {
+                            "found": [],
+                            "errors": [str(error)],
+                            "drive": self.scan_drive,
+                        }
+                    self.scan_finished.emit(payload)
+
+            self.scan_thread = keep_thread(ScanThread(self, drive))
             self.scan_thread.scan_finished.connect(self._on_scan_done)
             self.scan_thread.start()
 
-        def _on_scan_done(self, found=None):
-            """Вызывается из основного потока когда сканирование завершено"""
-            if found is not None:
-                self._found_restrictions = found
+        def _on_scan_done(self, payload=None):
+            if isinstance(payload, dict):
+                found = payload.get("found") or []
+                errors = payload.get("errors") or []
+                drive = str(payload.get("drive") or "")
             else:
-                found = getattr(self, '_found_restrictions', [])
+                found = payload or []
+                errors = []
+                drive = str(getattr(self, "_restrictions_scan_drive", "") or "")
+            self._found_restrictions = found
             self.restrictions_scan_table.setRowCount(0)
-
             if hasattr(self, "_restrictions_stack"):
                 self._restrictions_stack.setCurrentIndex(1 if found else 0)
             if hasattr(self, "_restrictions_counter"):
-                self._restrictions_counter.setText(f"[ {len(found):02d} / 12 ]")
+                self._restrictions_counter.setText(
+                    "[ %02d / 12 ]" % len(found))
 
+            target_text = drive or "текущую систему"
             if not found:
-                self.scan_status_label.setText(language_manager.translate("ОГРАНИЧЕНИЙ НЕ НАЙДЕНО"))
-                self.btn_fix_all.setEnabled(False)
+                self.scan_status_label.setText(
+                    "ОГРАНИЧЕНИЙ НЕ НАЙДЕНО · проверено: %s" % target_text)
                 self.btn_fix_selected.setEnabled(False)
+                self.btn_fix_all.setEnabled(True)
                 self.btn_run_scan.setEnabled(True)
                 self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАТЬ"))
+                if errors:
+                    self.scan_status_label.setText(
+                        "ПРОВЕРЕНО: %s · предупреждений: %d" % (
+                            target_text, len(errors)))
                 return
 
             self.restrictions_scan_table.setRowCount(len(found))
@@ -21455,20 +25465,21 @@ if GUI_MODE:
                 self.restrictions_scan_table.setItem(i, 1, key_item)
                 self.restrictions_scan_table.setItem(i, 2, det_item)
 
-            self.scan_status_label.setText(f"{language_manager.translate('НАЙДЕНО:')} {len(found)}")
+            status = "НАЙДЕНО: %d · цель: %s" % (len(found), target_text)
+            if errors:
+                status += " · предупреждений: %d" % len(errors)
+            self.scan_status_label.setText(status)
             self.btn_fix_all.setEnabled(True)
             self.btn_fix_selected.setEnabled(True)
             self.btn_run_scan.setEnabled(True)
             self.btn_run_scan.setText(language_manager.translate("СКАНИРОВАТЬ"))
 
-            # АВТО-СНЯТИЕ: сразу применяем найденные ограничения
             auto_cb = getattr(self, "_auto_fix_cb", None)
             if auto_cb is not None and auto_cb.isChecked():
                 self._apply_restriction_fixes(found, skip_confirm=True)
 
         def fix_selected_restrictions(self):
-            """Снимает только отмеченные галочкой ограничения"""
-            found = getattr(self, '_found_restrictions', [])
+            found = getattr(self, "_found_restrictions", [])
             selected = []
             for i, item in enumerate(found):
                 table_item = self.restrictions_scan_table.item(i, 0)
@@ -21477,112 +25488,141 @@ if GUI_MODE:
             self._apply_restriction_fixes(selected)
 
         def fix_all_restrictions(self):
-            """Снимает все найденные ограничения"""
-            found = getattr(self, '_found_restrictions', [])
-            self._apply_restriction_fixes(found)
+            self._apply_restriction_fixes([], force_all=True)
 
-        def _apply_restriction_fixes(self, items_to_fix, skip_confirm=False):
-            """Показывает окно подтверждения и запускает фикс."""
-            if not items_to_fix:
-                QMessageBox.information(self, "Нет выбора", "Не выбрано ни одного ограничения.")
-                return
-
-            # Собираем список функций из get_all_functions по имени
-            catalog = self.get_all_functions()
-            all_funcs = {}
-            for cat_funcs in catalog.values():
-                for name, desc, fn in cat_funcs:
-                    all_funcs[name] = (fn, desc)
-
-            # Маппинг fix_func -> реальные имена функций в каталоге
-            FIX_MAP = {
-                "Disable_TaskManager_Fix":  "Разблокировать Диспетчер задач",
-                "Disable_Regedit_Fix":      "Разблокировать редактор реестра",
-                "WinR_Fix":                 "Разблокировать Выполнить (Win+R)",
-                "CMD_Fix":                  "Разблокировать CMD",
-                "ControlPanel_Fix":         "Разблокировать Панель управления",
-                "FolderOptions_Fix":        "Восстановить параметры папок",
-                "Wallpaper_Fix":            "Принудительная установка обоев",
-                "AppInit_DLLs_Fix":         "Очистить AppInit_DLLs и CmdLine",
-                "DisallowRun_Fix":          "Разблокировать DisallowRun",
-                "SafeBoot_Fix":             "Восстановить Безопасный режим",
-                "Defender_Fix":             "Включить Windows Defender",
-                "WindowsUpdate_Fix":        "Разблокировать Windows Update",
-                "Scancode_Fix":             "Восстановить клавиатуру (Scancode Map)",
-            }
-
-            lines = []
-            funcs_to_run = []
-            for item in items_to_fix:
-                fix_key = item["fix_func"]
-                func_name = FIX_MAP.get(fix_key, fix_key)
-                if func_name in all_funcs:
-                    fn, desc = all_funcs[func_name]
-                    funcs_to_run.append((func_name, fn))
-                    lines.append(f"  \u2022 {item['label']} -> {func_name}")
+        def _restriction_fix_impl(self, drive, items_to_fix, force_all=False):
+            import winreg
+            checks = self._restriction_checks()
+            targets, mounted, errors = self._restriction_open_targets(drive)
+            self._offline_restriction_mounts = mounted
+            results = []
+            try:
+                if force_all:
+                    selected = self._restriction_collect_matches(
+                        checks, targets, force_all=True)
                 else:
-                    lines.append(f"  \u2022 {item['label']} -> (встроенная очистка реестра)")
-
-            details_text = "\n".join(lines)
-
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Подтверждение снятия блокировок")
-            msg.setIcon(QMessageBox.Warning)
-            msg.setText(f"Будет выполнено {len(items_to_fix)} действий:\n\n{details_text}\n\nПродолжить?")
-            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            msg.setDefaultButton(QMessageBox.Yes)
-            if not skip_confirm and msg.exec() != QMessageBox.Yes:
-                return
-
-            # Запускаем прямую очистку через реестр (без зависимости от имён функций)
-            def do_fixes():
-                import winreg
-                results = []
-                for item in items_to_fix:
-                    try:
-                        label = item["label"]
-                        # Парсим ключ реестра из строки вида HKCU\path\\value
-                        key_str = item["key"]
-                        if key_str.startswith("HKCU"):
-                            hive = winreg.HKEY_CURRENT_USER
-                            rest = key_str[5:]  # после "HKCU\"
-                        else:
-                            hive = winreg.HKEY_LOCAL_MACHINE
-                            rest = key_str[5:]  # после "HKLM\"
-
-                        parts = rest.rsplit("\\", 1)
-                        if len(parts) == 2:
-                            key_path, value_name = parts
-                            key_path = key_path.replace("\\\\", "\\")
-
+                    selected = list(items_to_fix or [])
+                if not selected:
+                    results.append("Активных блокировок не найдено — удалять нечего.")
+                for item in selected:
+                    label = item.get("label", "?")
+                    matches = item.get("matches") or []
+                    if not matches:
+                        results.append("%s: нет доступных целей" % label)
+                        continue
+                    removed = 0
+                    current_errors = []
+                    for match in matches:
+                        root = match.get("root")
+                        open_path = match.get("open_path")
+                        value_name = match.get("value_name")
+                        if root is None or not open_path or not value_name:
+                            continue
+                        deleted = False
+                        last_error = ""
+                        for extra_access in (
+                                getattr(winreg, "KEY_WOW64_64KEY", 0),
+                                getattr(winreg, "KEY_WOW64_32KEY", 0)):
                             try:
-                                k = winreg.OpenKey(hive, key_path, 0, winreg.KEY_SET_VALUE)
-                                winreg.DeleteValue(k, value_name)
-                                winreg.CloseKey(k)
-                                results.append(f"{label}: снято")
+                                key = winreg.OpenKey(
+                                    root, open_path, 0,
+                                    winreg.KEY_SET_VALUE | extra_access)
+                                try:
+                                    winreg.DeleteValue(key, value_name)
+                                finally:
+                                    winreg.CloseKey(key)
+                                deleted = True
+                                break
                             except FileNotFoundError:
-                                results.append(f"{label}: уже снято")
-                            except Exception as e:
-                                results.append(f"Ошибка {label}: {e}")
+                                deleted = True
+                                break
+                            except Exception as error:
+                                last_error = str(error)
+                        if deleted:
+                            removed += 1
                         else:
-                            results.append(f"Неизвестно {label}: не удалось разобрать путь")
-                    except Exception as e:
-                        results.append(f"✗ {item.get('label','?')}: {e}")
+                            current_errors.append(
+                                "%s: %s" % (match.get("target_label", "?"),
+                                            last_error or "не удалось"))
+                    if removed:
+                        results.append("%s: снято (%d)" % (label, removed))
+                    if current_errors:
+                        results.append("%s: %s" % (
+                            label, "; ".join(current_errors[:3])))
+            finally:
+                self._restriction_unload_targets(mounted)
+                self._offline_restriction_mounts = []
+            if errors:
+                results.append("Предупреждения: " + "; ".join(errors[:5]))
+            if not results:
+                results.append("Готово.")
+            return "\n".join(results)
 
-                # Также запускаем найденные функции из каталога
-                for func_name, fn in funcs_to_run:
+        def _apply_restriction_fixes(self, items_to_fix, skip_confirm=False,
+                                     force_all=False):
+            items_to_fix = list(items_to_fix or [])
+            if not items_to_fix and not force_all:
+                QMessageBox.information(
+                    self, "Нет выбора", "Не выбрано ни одного ограничения.")
+                return
+            drive = self._restriction_target_drive()
+            if self._is_winre_mode() and not drive:
+                QMessageBox.warning(
+                    self, "СНЯТИЕ ОГРАНИЧЕНИЙ",
+                    "В WinRE не найден диск установленной Windows.\n"
+                    "Подключи диск с Windows или нажми «ОБНОВИТЬ».")
+                return
+            target_text = drive or "Текущая система"
+            if force_all:
+                action_text = "Снять все 12 блокировок"
+                details_text = "Проверяются все 12 политик и удаляются все найденные значения."
+            else:
+                action_text = "Снять выбранные блокировки"
+                details_text = "\n".join(
+                    "  • %s" % item.get("label", "?") for item in items_to_fix)
+            if not skip_confirm:
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Подтверждение снятия блокировок")
+                msg.setIcon(QMessageBox.Warning)
+                msg.setText(
+                    "%s\nЦель: %s\n\n%s\n\nПродолжить?" % (
+                        action_text, target_text, details_text))
+                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                msg.setDefaultButton(QMessageBox.Yes)
+                if msg.exec() != QMessageBox.Yes:
+                    return
+
+            from PySide6.QtCore import QThread, Signal
+
+            class RestrictionFixThread(QThread):
+                done_signal = Signal(str)
+
+                def __init__(self, owner, fix_drive, fix_items, fix_all):
+                    super().__init__(owner)
+                    self.owner = owner
+                    self.fix_drive = fix_drive
+                    self.fix_items = fix_items
+                    self.fix_all = fix_all
+
+                def run(self):
                     try:
-                        fn()
-                        results.append(f"{func_name}: выполнено")
-                    except Exception as e:
-                        results.append(f"Ошибка {func_name}: {e}")
+                        result = self.owner._restriction_fix_impl(
+                            self.fix_drive, self.fix_items, self.fix_all)
+                    except Exception as error:
+                        result = "Ошибка снятия ограничений: %s" % error
+                    self.done_signal.emit(result)
 
-                return "\n".join(results)
+            worker = RestrictionFixThread(
+                self, drive, items_to_fix, force_all)
+            worker.done_signal.connect(self._on_restriction_fixes_done)
+            self._restriction_fix_worker = keep_thread(worker)
+            worker.start()
 
-            self.run_task(do_fixes)
-            # После — запускаем повторное сканирование
+        def _on_restriction_fixes_done(self, result):
+            self._restriction_fix_worker = None
+            self._show_text_dialog("Результат снятия ограничений", str(result))
             from PySide6.QtCore import QTimer
-            QTimer.singleShot(3000, self.scan_restrictions)
+            QTimer.singleShot(250, self.scan_restrictions)
 
         def create_unlocker_page(self):
             page = QFrame()
@@ -21598,7 +25638,6 @@ if GUI_MODE:
             desc.setWordWrap(True)
             layout.addWidget(desc)
             
-            # File selection
             file_layout = QHBoxLayout()
             self.unlocker_path_edit = QLineEdit()
             self.unlocker_path_edit.setStyleSheet("background-color: #000000; color: white; border: 1px solid #222222; border-radius: 5px; padding: 5px;")
@@ -21611,13 +25650,11 @@ if GUI_MODE:
             file_layout.addWidget(btn_browse)
             layout.addLayout(file_layout)
             
-            # Scan button
             self.btn_scan_locks = QPushButton("Анализ файла")
             self.btn_scan_locks.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold; margin-top: 10px;")
             self.btn_scan_locks.clicked.connect(self.scan_locking_processes)
             layout.addWidget(self.btn_scan_locks)
             
-            # Table
             self.unlocker_table = QTableWidget(0, 2)
             self.unlocker_table.setHorizontalHeaderLabels(["PID", "Имя процесса (если доступно)"])
             self.unlocker_table.horizontalHeader().setStretchLastSection(True)
@@ -21627,7 +25664,6 @@ if GUI_MODE:
             """)
             layout.addWidget(self.unlocker_table)
             
-            # Action buttons
             action_layout = QHBoxLayout()
             self.btn_unlock_kill = QPushButton("Разблокировать (Убить процессы)")
             self.btn_unlock_kill.setStyleSheet("QPushButton { background-color: #000000; color: #ffffff; border: 1px solid #333333; padding: 4px 12px; font-size: 11px; font-weight: bold; font-family: 'Consolas', 'Courier New', monospace; }QPushButton:hover { background-color: #ffffff; color: #000000; border-color: #ffffff; }QPushButton:disabled { color: #555555; border-color: #222222; } font-weight: bold;")
@@ -21665,7 +25701,6 @@ if GUI_MODE:
             
             self.unlocker_table.setRowCount(len(self.unlocker_pids))
             
-            # Fetch processes once
             procs = []
             if 'novir_native' in globals() and hasattr(novir_native, 'get_processes_extended'):
                 try:
@@ -21679,7 +25714,6 @@ if GUI_MODE:
                 pid_item = QTableWidgetItem(str(pid))
                 name = "Неизвестно"
                 
-                # Find matching proc
                 for p_info in procs:
                     if p_info.get('pid') == pid:
                         name = str(p_info.get('name', name))
@@ -21717,11 +25751,9 @@ if GUI_MODE:
                         psutil.Process(pid).terminate()
                     killed += 1
                 except Exception:
-                    # Fallback
                     try:
                         kill_process_force(pid)
                     except Exception as _e:
-                        # Expected exception, intentionally ignored
                         pass
                     killed += 1
                     
@@ -21756,7 +25788,6 @@ if GUI_MODE:
             outer_layout.setContentsMargins(25, 20, 25, 20)
             outer_layout.setSpacing(15)
 
-            # --- Header ---
             title = QLabel(language_manager.translate("Центр диагностики системы"))
             title.setStyleSheet("font-size: 22px; font-weight: bold; color: #ffffff;")
             outer_layout.addWidget(title)
@@ -21765,7 +25796,6 @@ if GUI_MODE:
             desc.setStyleSheet("font-size: 13px; color: #888888; margin-bottom: 5px;")
             outer_layout.addWidget(desc)
 
-            # --- Beautiful Table ---
             self.diag_table = QTableWidget(0, 3)
             self.diag_table.setHorizontalHeaderLabels([
                 language_manager.translate("Компонент"), 
@@ -21773,12 +25803,10 @@ if GUI_MODE:
                 language_manager.translate("Детали")
             ])
             
-            # Setup columns
             self.diag_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
             self.diag_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
             self.diag_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
             
-            # Disable editing, selection, and remove grid lines for a cleaner look
             self.diag_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.diag_table.setSelectionMode(QAbstractItemView.NoSelection)
             self.diag_table.setFocusPolicy(Qt.NoFocus)
@@ -21786,7 +25814,6 @@ if GUI_MODE:
             self.diag_table.setAlternatingRowColors(True)
             self.diag_table.verticalHeader().setVisible(False)
             
-            # Modern Styling
             self.diag_table.setStyleSheet("""
                 QTableWidget {
                     background-color: #121212;
@@ -21813,7 +25840,6 @@ if GUI_MODE:
             """)
             outer_layout.addWidget(self.diag_table)
 
-            # --- Buttons ---
             btn_row = QHBoxLayout()
             btn_row.setSpacing(8)
             recovery_row = QHBoxLayout()
@@ -22023,9 +26049,9 @@ if GUI_MODE:
                         for item in report["findings"]
                     )
                     body = (
-                        "<!doctype html><html><meta charset='utf-8'><title>NoVir Recovery Report</title>"
+                        "<!doctype html><html><meta charset='utf-8'><title>Отчёт проверки NoVir</title>"
                         "<style>body { font-family: sans-serif; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 6px; }</style>"
-                        "<h1>NoVir Recovery Report</h1><p>Scan: {}</p>"
+                        "<h1>Отчёт проверки NoVir</h1><p>Scan: {}</p>"
                         "<p>Problems found: {} | Problems fixed: {} | Requires attention: {}</p>"
                         "<p>Recovery Point: {}</p>"
                         "<table><tr><th>Component</th><th>Status</th><th>Recovery</th><th>Details</th></tr>{}</table></html>"
@@ -22359,7 +26385,6 @@ if GUI_MODE:
                     )
 
             if self._is_winre_mode():
-                # Already inside WinRE: rebooting "into WinRE" makes no sense.
                 btn_winre = QPushButton("ПЕРЕЗАГРУЗИТЬСЯ В WINDOWS")
                 btn_winre.clicked.connect(
                     lambda checked=False: self._winre_reboot_to_windows())
@@ -22387,6 +26412,16 @@ if GUI_MODE:
                 self.recovery_outcomes = {}
                 self.incident_findings = []
             
+            self._snowman_say(
+                "thinking",
+                "Проверяю систему: службы, сеть, загрузчик и защиту...",
+                0,
+            )
+            try:
+                from PySide6.QtCore import QCoreApplication
+                QCoreApplication.processEvents()
+            except Exception:
+                pass
             components = [
                 ("services", language_manager.translate("Системные Службы (Services)"), self.check_services),
                 ("dns", language_manager.translate("Настройки DNS"), self.check_dns),
@@ -22420,14 +26455,12 @@ if GUI_MODE:
                 row = self.diag_table.rowCount()
                 self.diag_table.insertRow(row)
                 
-                # Name Item
                 name_item = QTableWidgetItem(name)
                 name_font = QFont("Segoe UI", 9)
                 name_font.setBold(True)
                 name_item.setFont(name_font)
                 self.diag_table.setItem(row, 0, name_item)
                 
-                # Status Item (Clean emojis, nice colors)
                 status_item = QTableWidgetItem(status)
                 status_item.setTextAlignment(Qt.AlignCenter)
                 font = QFont("Segoe UI", 9)
@@ -22445,7 +26478,6 @@ if GUI_MODE:
                 
                 self.diag_table.setItem(row, 1, status_item)
                 
-                # Details Item
                 details_item = QTableWidgetItem(details)
                 details_item.setForeground(QColor("#a3a3a3")) # Light gray
                 self.diag_table.setItem(row, 2, details_item)
@@ -22484,6 +26516,27 @@ if GUI_MODE:
             )
             self.current_issues_text = "\n".join(context_lines)
             self.update_recovery_controls()
+            try:
+                issues = [item for item in self.diag_results if item.get("needs_fix")]
+                if issues:
+                    names = ", ".join(
+                        str(item.get("name", "")).split(" (")[0]
+                        for item in issues[:3]
+                    )
+                    emotion = "alert" if len(issues) >= 3 else "thinking"
+                    self._snowman_say(
+                        emotion,
+                        f"Нашёл проблемы: {names}. Смотри таблицу диагностики.",
+                        9000,
+                    )
+                else:
+                    self._snowman_say(
+                        "happy",
+                        "Диагностика чистая. Система выглядит здоровой.",
+                        7000,
+                    )
+            except Exception:
+                pass
 
         def check_services(self):
             import subprocess
@@ -22493,7 +26546,6 @@ if GUI_MODE:
                 for srv, name in services.items():
                     res = subprocess.run(["sc", "query", srv], capture_output=True, text=True, creationflags=0x08000000)
                     if "1060" in res.stdout or "STOPPED" in res.stdout:
-                        # Sometimes BITS is stopped legally, but wscsvc and Winmgmt should be running. Let's just flag if they are disabled.
                         qc = subprocess.run(["sc", "qc", srv], capture_output=True, text=True, creationflags=0x08000000)
                         if "DISABLED" in qc.stdout:
                             bad_services.append(name)
@@ -22535,18 +26587,15 @@ if GUI_MODE:
         def check_tcpip(self):
             import subprocess
             try:
-                # Check Winsock catalog integrity
                 res = subprocess.run(
                     ["netsh", "winsock", "show", "catalog"],
                     capture_output=True, text=True, timeout=5, creationflags=0x08000000
                 )
                 output = res.stdout.lower()
-                # If catalog is missing or clearly broken
                 if res.returncode != 0:
                     return "i INFO", language_manager.translate("Проверка Winsock недоступна"), False
                 if len(output) < 50:
                     return "i INFO", language_manager.translate("Вывод проверки Winsock неполный; повреждение не подтверждено"), False
-                # Check for suspicious LSP (malware often injects into Winsock)
                 import winreg
                 try:
                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
@@ -22574,7 +26623,6 @@ if GUI_MODE:
                     pass
             if broken:
                 return "! WARNING", f"{language_manager.translate('Отключены компоненты:')} {', '.join(broken)}", True
-            # Also check registry key for Windows Update policy
             import winreg
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate") as k:
@@ -22707,29 +26755,6 @@ if GUI_MODE:
             except FileNotFoundError:
                 pass
             return "✓ OK", language_manager.translate("Диспетчер задач доступен"), False
-
-        def open_global_ai_chat(self):
-            try:
-                dlg = NoVirAIChatDialog("MANUAL", parent=self)
-                dlg.exec()
-            except Exception as e:
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(self, "NoVir AI", f"Не удалось открыть AI Assistant:\n{e}")
-
-        def offer_ai_help(self):
-            issues_lines = []
-            for item in getattr(self, "diag_results", []):
-                status = item.get("status", "")
-                name   = item.get("name", "")
-                detail = item.get("detail", "")
-                issues_lines.append(f"{status} {name}: {detail}")
-            issues_text = "\n".join(issues_lines) if issues_lines else "MANUAL"
-            try:
-                dlg = NoVirAIChatDialog(issues_text, parent=self)
-                dlg.exec()
-            except Exception as e:
-                from PySide6.QtWidgets import QMessageBox
-                QMessageBox.critical(self, "NoVir AI", f"Не удалось открыть AI Assistant:\n{e}")
 
         def fix_diagnostics(self):
             import os
@@ -22874,7 +26899,6 @@ if GUI_MODE:
             sep.setStyleSheet("background-color: #333333; max-height: 1px;")
             layout.addWidget(sep)
 
-            # ─── Быстрый доступ (карточки разделов) ───
             quick_frame = QFrame()
             quick_frame.setObjectName("SettingsQuickAccess")
             quick_frame.setStyleSheet(
@@ -23023,7 +27047,6 @@ if GUI_MODE:
             layout.addWidget(lbl_language)
 
             self.cb_language = NoWheelComboBox()
-            # These native names intentionally remain readable in every locale.
             self.cb_language.addItems(["English", "Українська", "Русский", "Deutsch", "Polski", "Français"])
             self.cb_language.setCurrentIndex({"en": 0, "uk": 1, "ru": 2, "de": 3, "pl": 4, "fr": 5}.get(language_manager.language, 2))
             self.cb_language.setStyleSheet(self.cb_theme.styleSheet())
@@ -23037,7 +27060,6 @@ if GUI_MODE:
             self.cb_win = NoWheelComboBox()
             _auto_ver = detect_windows_version()
             self.cb_win.setIconSize(QSize(20, 20))
-            # Порядок обязателен: 0 = автоопределение, 1..5 = WIN_VERSION_KEYS.
             self.cb_win.addItem(win_version_icon(_auto_ver),
                                 "Автоопределение (" + _auto_ver + ")")
             for _vkey, _vlabel in zip(WIN_VERSION_KEYS, WIN_VERSION_LABELS):
@@ -23114,8 +27136,6 @@ if GUI_MODE:
                 self._always_on_top_enabled = enabled
                 save_app_setting("always_on_top", enabled)
             except Exception as error:
-                # Keep the checkbox aligned with the actual state if the OS
-                # rejects the z-order update; do not hide/recreate the window.
                 self.cb_always_on_top.blockSignals(True)
                 self.cb_always_on_top.setChecked(not enabled)
                 self.cb_always_on_top.blockSignals(False)
@@ -23135,7 +27155,6 @@ if GUI_MODE:
                 save_app_setting("winre_backup_dir", self.winre_backup_path)
 
         def disable_easy_launcher(self):
-            """Remove only NoVir's exact context-menu entries; never alter UAC."""
             from PySide6.QtWidgets import QMessageBox
 
             answer = QMessageBox.question(
@@ -23162,9 +27181,6 @@ if GUI_MODE:
                         removed_any = True
                     except FileNotFoundError:
                         continue
-                # The installer copies itself to %WINDIR%\nov.exe for Win+R.
-                # Remove it only when its bytes exactly match this running build;
-                # never delete an unrelated file that happens to share the name.
                 import hashlib
                 import sys
                 launcher_copy = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "nov.exe")
@@ -23196,8 +27212,6 @@ if GUI_MODE:
 
         def change_language(self, index):
             language_manager.set_language(("en", "uk", "ru", "de", "pl", "fr")[index])
-            # Re-use the retained source strings, so changing the language does
-            # not require an application restart.
             localize_widget_tree(self)
             for key, source_text in {
                 "fix_all": "ПОЧИНИТЬ ВСЁ",
@@ -23216,20 +27230,16 @@ if GUI_MODE:
                 getattr(self, "page_program", None), "retranslate_ui", None)
             if callable(settings_retrans):
                 settings_retrans()
-            # Динамические строки сообщества (лимит, гость/пользователь).
             community_retrans = getattr(
                 getattr(self, "page_community", None), "retranslate_ui", None)
             if callable(community_retrans):
                 community_retrans()
-            # Заголовок текущей страницы задаётся кодом, а не виджетом.
             if hasattr(self, "title_label") and hasattr(self, "_page_idx"):
                 self._apply_page_title()
             if hasattr(self, "_status_value"):
-                # Перевести строку цели на дашборде.
                 self._status_refresh()
 
         def change_win_version(self, index):
-            # 0 = автоопределение, 1..5 = "11","10","8.1","8","7"
             if index == 0:
                 set_win_target("auto")
             else:
@@ -23271,7 +27281,6 @@ if GUI_MODE:
             title.setStyleSheet("font-size: 22px; font-weight: bold; color: #fff;")
             layout.addWidget(title)
 
-            # Language
             lang_label = QLabel(language_manager.translate("Язык интерфейса:"))
             self.lang_combo = NoWheelComboBox()
             self.lang_combo.addItems(["English", "Українська", "Русский", "Deutsch", "Polski", "Français"])
@@ -23282,7 +27291,6 @@ if GUI_MODE:
             layout.addWidget(lang_label)
             layout.addWidget(self.lang_combo)
 
-            # Theme
             theme_label = QLabel(language_manager.translate("Оформление (Тема):"))
             self.theme_combo = NoWheelComboBox()
             self.theme_combo.addItems([language_manager.translate("Темная базовая"), language_manager.translate("Матовая"), language_manager.translate("Прозрачная")])
@@ -23290,13 +27298,11 @@ if GUI_MODE:
             layout.addWidget(theme_label)
             layout.addWidget(self.theme_combo)
 
-            # Safety
             self.chk_backup = QCheckBox(language_manager.translate("Создавать бэкап перед опасными операциями"))
             self.chk_backup.setChecked(True)
             self.chk_backup.setStyleSheet("color: #fff;")
             layout.addWidget(self.chk_backup)
 
-            # Mode
             mode_label = QLabel(language_manager.translate("Режим использования:"))
             self.mode_combo = NoWheelComboBox()
             self.mode_combo.addItems([
@@ -23312,7 +27318,6 @@ if GUI_MODE:
 
             layout.addStretch()
             
-            # Apply Button
             apply_btn = QPushButton(language_manager.translate("Применить и сохранить"))
             apply_btn.setFixedHeight(40)
             apply_btn.setStyleSheet("QPushButton { background-color: #0055ff; color: #ffffff; font-weight: bold; border-radius: 5px; } QPushButton:hover { background-color: #0077ff; }")
@@ -23860,6 +27865,172 @@ if GUI_MODE:
                 pass
             self._reposition_toasts()
 
+        def _ensure_snowman(self):
+            if self._is_winre():
+                return None
+            if self._snowman is None:
+                self._snowman = SnowmanCompanion(self.main_container)
+                self._snowman.closed.connect(self._on_snowman_closed)
+                self._snowman.moved.connect(self._save_snowman_position)
+            return self._snowman
+
+        def _position_snowman(self):
+            if self._snowman is None:
+                return
+            parent = self._snowman.parentWidget()
+            if parent is None:
+                return
+            width = self._snowman.width()
+            height = self._snowman.height()
+            x = y = None
+            try:
+                settings = load_app_settings()
+                saved_x = settings.get("snowman_x")
+                saved_y = settings.get("snowman_y")
+                if isinstance(saved_x, (int, float)) and isinstance(saved_y, (int, float)):
+                    x = int(saved_x)
+                    y = int(saved_y)
+            except Exception:
+                pass
+            if x is None or y is None:
+                x = parent.width() - width - 22
+                y = parent.height() - height - 88
+            max_x = max(0, parent.width() - width)
+            max_y = max(0, parent.height() - height)
+            self._snowman.move(max(0, min(x, max_x)), max(0, min(y, max_y)))
+            self._snowman.raise_()
+
+        def _clamp_snowman(self):
+            snowman = getattr(self, "_snowman", None)
+            if snowman is None or not snowman.isVisible():
+                return
+            parent = snowman.parentWidget()
+            if parent is None:
+                return
+            max_x = max(0, parent.width() - snowman.width())
+            max_y = max(0, parent.height() - snowman.height())
+            snowman.move(
+                max(0, min(snowman.x(), max_x)),
+                max(0, min(snowman.y(), max_y)),
+            )
+
+        def _save_snowman_position(self, x, y):
+            try:
+                save_app_setting("snowman_x", int(x))
+                save_app_setting("snowman_y", int(y))
+            except Exception:
+                pass
+
+        def _is_winre(self):
+            if getattr(self, "_winre_ui", False):
+                return True
+            if sys.platform != "win32":
+                return False
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SYSTEM\CurrentControlSet\Control\MiniNT",
+                ):
+                    pass
+                return True
+            except OSError:
+                pass
+            except Exception:
+                pass
+            try:
+                system_drive = str(os.environ.get("SystemDrive", "")).upper()
+                system_root = str(os.environ.get("SystemRoot", "")).upper()
+                if system_drive == "X:" or system_root.startswith("X:"):
+                    return True
+                if os.path.isdir(r"X:\Windows\System32"):
+                    return True
+            except Exception:
+                pass
+            return False
+
+        def _maybe_show_snowman(self):
+            if self._winre_ui or self._is_winre():
+                return
+            try:
+                enabled = bool(load_app_settings().get("snowman_enabled", True))
+            except Exception:
+                enabled = True
+            if not enabled:
+                return
+            snowman = self._ensure_snowman()
+            snowman.show()
+            snowman.raise_()
+            self._position_snowman()
+            snowman.say(
+                "happy",
+                "Привет! Я снеговик NoVir. Если что-то сломается — подскажу, что чинить.",
+                9000,
+            )
+            self._update_snowman_button()
+
+        def _toggle_snowman(self):
+            if self._winre_ui or self._is_winre():
+                return
+            snowman = self._ensure_snowman()
+            if snowman.isVisible():
+                snowman.close()
+                return
+            try:
+                save_app_setting("snowman_enabled", True)
+            except Exception:
+                pass
+            snowman.show()
+            snowman.raise_()
+            self._position_snowman()
+            snowman.say("happy", "Я вернулся! Жми «СОВЕТ», если нужна подсказка.", 7000)
+            self._update_snowman_button()
+
+        def _on_snowman_closed(self):
+            try:
+                save_app_setting("snowman_enabled", False)
+            except Exception:
+                pass
+            self._update_snowman_button()
+
+        def _update_snowman_button(self):
+            button = getattr(self, "btn_snowman", None)
+            if button is None:
+                return
+            visible = bool(self._snowman is not None and self._snowman.isVisible())
+            button.setText("СНЕГОВИК ✓" if visible else "СНЕГОВИК")
+            button.setToolTip(
+                "Скрыть снеговика-помощника" if visible
+                else "Показать снеговика-помощника")
+
+        def _snowman_say(self, emotion, text, duration=7000):
+            snowman = getattr(self, "_snowman", None)
+            if snowman is not None and snowman.isVisible():
+                try:
+                    snowman.say(emotion, text, duration)
+                except Exception:
+                    pass
+
+        def _snowman_react(self, kind, title, message=""):
+            snowman = getattr(self, "_snowman", None)
+            if snowman is None or not snowman.isVisible():
+                return
+            kind = (kind or "").lower()
+            if kind == "error":
+                emotion = "sad"
+            elif kind in ("warning", "warn"):
+                emotion = "thinking"
+            elif kind == "success":
+                emotion = "happy"
+            else:
+                return
+            text = title or ""
+            if message:
+                text = f"{text}: {message}" if text else message
+            text = " ".join(str(text).split())
+            if len(text) > 120:
+                text = text[:117].rstrip() + "..."
+            self._snowman_say(emotion, text, 6500)
+
         def show_toast(self, title, message="", kind="success", duration=4200):
             """Показать B&W-уведомление, плавно выезжающее из левого верхнего угла."""
             if not hasattr(self, "main_container"):
@@ -23876,7 +28047,6 @@ if GUI_MODE:
                 self._reposition_toasts()
                 y = self._toast_top() + sum(t.height() + 8 for t in toasts)
                 title_text = language_manager.translate(title) if title else language_manager.translate("ГОТОВО")
-                # Translate only exact UI strings; arbitrary task output must stay untouched.
                 message_text = message
                 if message and message in getattr(language_manager, "TRANSLATIONS", {}):
                     message_text = language_manager.translate(message)
@@ -23885,6 +28055,8 @@ if GUI_MODE:
                 toast.closed.connect(lambda t=toast: self._remove_toast(t))
                 toast.start(y)
                 toast.raise_()
+                if kind in ("success", "error", "warning", "warn"):
+                    self._snowman_react(kind, title_text, message_text)
             except Exception as error:
                 print(f"[TOAST] Не удалось показать уведомление: {error}")
 
@@ -23895,10 +28067,12 @@ if GUI_MODE:
                     self._reposition_toasts()
             except Exception:
                 pass
+            try:
+                self._clamp_snowman()
+            except Exception:
+                pass
 
         def run_task(self, func):
-            # Destructive sweeps are interactive in the GUI: let the user review
-            # every object before anything is removed.
             function_name = getattr(func, "__name__", "")
             if function_name == "WMI_Persistence_Sweep":
                 self.show_wmi_persistence_sweeper()
@@ -23909,7 +28083,6 @@ if GUI_MODE:
             if function_name == "Process_Hollowing_Scan":
                 self.show_process_memory_inspector()
                 return
-            # These functions must run on the main thread (they open QFileDialog)
             if function_name in ("File_Full_Access", "Easy_Launcher"):
                 try:
                     result = func()
@@ -24151,10 +28324,15 @@ if GUI_MODE:
             dlg.exec()
 
         def run_fix_all(self):
-            """One-click safe recovery mode: runs a curated set of non-destructive fixes."""
             from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar, QPushButton
             from PySide6.QtCore import Qt, QTimer
             tr = language_manager.translate
+            self._snowman_say(
+                "thinking",
+                "Запускаю комплексное лечение. Иду по шагам, не закрывай окно.",
+                0,
+            )
+            completed = {"done": False}
 
             dlg = QDialog(self)
             dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -24205,8 +28383,14 @@ if GUI_MODE:
                 if step_idx[0] >= len(STEPS):
                     bar.setValue(100)
                     lbl_step.setText(tr("Готово! Все безопасные исправления применены."))
-                    lbl_log.setText(tr("Рекомендуется перезагрузить компьютер."))
+                    lbl_log.setText(tr("Лучше перезагрузить комп."))
                     btn_close.setEnabled(True)
+                    completed["done"] = True
+                    self._snowman_say(
+                        "happy",
+                        "Все безопасные исправления применены. Перезагрузи компьютер.",
+                        10000,
+                    )
                     return
                 
                 i = step_idx[0]
@@ -24230,9 +28414,14 @@ if GUI_MODE:
 
             QTimer.singleShot(400, next_step)
             dlg.exec()
+            if not completed["done"]:
+                self._snowman_say(
+                    "idle",
+                    "Лечение остановлено. Я рядом, если нужна подсказка.",
+                    6000,
+                )
 
         def show_audit_log(self):
-            """Show the audit log file in an in-app dialog."""
             import os
             from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QApplication
             from PySide6.QtCore import Qt
@@ -24303,7 +28492,6 @@ if GUI_MODE:
             dlg.exec()
 
         def show_rollback_dialog(self):
-            """Offer to rollback registry changes made this session."""
             from PySide6.QtWidgets import QMessageBox
             
             if not rollback_mgr._snapshots:
@@ -24429,7 +28617,6 @@ if GUI_MODE:
                 for d in reversed(sorted(os.listdir(app_data))):
                     path = os.path.join(app_data, d)
                     if os.path.isdir(path):
-                        # Count reg files
                         regs = [f for f in os.listdir(path) if f.endswith('.reg')]
                         size = sum(os.path.getsize(os.path.join(path, f)) for f in regs) / (1024*1024)
                         list_widget.addItem(f"● {d.replace('_', ' ')} | Компонентов: {len(regs)} ({size:.1f} MB)")
@@ -24506,7 +28693,20 @@ if GUI_MODE:
 
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""
-            # Список всех возможных потоков
+            try:
+                if getattr(self, "_snowman", None) is not None:
+                    self._snowman.shutdown()
+            except Exception:
+                pass
+            try:
+                self._restriction_unload_targets(
+                    getattr(self, "_offline_restriction_mounts", []))
+            except Exception:
+                pass
+            try:
+                self._offline_registry_unmount()
+            except Exception:
+                pass
             threads_to_stop = []
             if hasattr(self, '_scheduler_loader') and self._scheduler_loader is not None:
                 threads_to_stop.append(self._scheduler_loader)
@@ -24516,8 +28716,12 @@ if GUI_MODE:
                 threads_to_stop.append(self._services_loader)
             if hasattr(self, '_autostart_diff_worker') and self._autostart_diff_worker is not None:
                 threads_to_stop.append(self._autostart_diff_worker)
-            # Потоки из общего реестра keep_thread(): community-чат, AI,
-            # сканеры, диалоги входа — всё, что не перечислено выше.
+            if hasattr(self, '_pin_worker') and self._pin_worker is not None:
+                threads_to_stop.append(self._pin_worker)
+            try:
+                self._pin_timer.stop()
+            except Exception:
+                pass
             for _t in list(_LIVE_QTHREADS):
                 if _t not in threads_to_stop:
                     threads_to_stop.append(_t)
@@ -24557,7 +28761,6 @@ if GUI_MODE:
             super().mouseReleaseEvent(event)
 
 def _configure_display_scaling():
-    """Enable larger logical UI scale on large monitors with 100% Windows scaling."""
     if sys.platform != "win32" or _IS_WINPE:
         return
     if os.environ.get("QT_SCALE_FACTOR") or os.environ.get("QT_SCREEN_SCALE_FACTORS"):
@@ -24575,7 +28778,6 @@ def _configure_display_scaling():
             dpi = 96
         if dpi >= 120:
             return
-        # Only true UHD panels are considered 4K.
         if width >= 3600:
             os.environ["QT_SCALE_FACTOR"] = "1.5"
         elif width >= 3000:
@@ -24593,11 +28795,7 @@ def main():
     except OSError as error:
         _novir_boot("chdir_failed", repr(error))
 
-    # NoVir is GUI-only.  There is no console fallback anymore: if Qt cannot
-    # start, the user gets a native Windows message box with diagnostics.
     try:
-        # В среде WinRE (диск X:\) процессы всегда запускаются с правами SYSTEM,
-        # а вызов ShellExecuteW("runas") там не поддерживается и вызывает молчаливый выход.
         is_admin = check_admin_status() or _IS_WINPE
         if os.environ.get("NOVIR_NO_ELEVATION") == "1":
             is_admin = True
@@ -24620,7 +28818,6 @@ def main():
                     0x10 | 0x10000)
             sys.exit(0)
     except Exception as _e:
-        # Expected exception, intentionally ignored
         pass
 
     _novir_boot("before_qapplication")
@@ -24664,7 +28861,6 @@ def main():
     app._novir_translation_filter = TranslationEventFilter(app)
     app.installEventFilter(app._novir_translation_filter)
     if language_manager.first_run:
-        # Первый запуск: язык определяется автоматически по локали системы
         try:
             from PySide6.QtCore import QLocale
             _sys_locale = QLocale.system().name()[:2]
@@ -24695,7 +28891,6 @@ def main():
     sys.exit(app.exec())
 
 
-# ─── Глобальный ловитель ВСЕХ программных ошибок ─────────────────────
 def _novir_global_exception_handler(exctype, value, tb):
     """Перехватывает любые необработанные исключения приложения."""
     import traceback
@@ -24707,7 +28902,6 @@ def _novir_global_exception_handler(exctype, value, tb):
     except Exception:
         pass
 
-    # Сохраняем крашлог рядом с EXE (на C:\ или X:\), чтобы он не удалялся вместе с _MEIPASS
     log_targets = []
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(sys.executable)
@@ -24726,7 +28920,6 @@ def _novir_global_exception_handler(exctype, value, tb):
         except Exception:
             continue
 
-    # Гарантированное системное окно через Win32 API — работает даже если Qt/PySide6 вообще не загрузились!
     try:
         import ctypes
         error_msg = f"{exctype.__name__}: {value}\n\nПодробности записаны в novir_crash.log"

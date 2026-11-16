@@ -145,7 +145,7 @@ import hashlib
 from datetime import datetime
 from functools import lru_cache
 
-CURRENT_VERSION = "2.5.6"
+CURRENT_VERSION = "2.5.8"
 PROGRAM_WEBSITE_URL = "https://artemcik907.github.io"
 
 PSUTIL_AVAILABLE = False
@@ -937,6 +937,11 @@ class LanguageManager:
     LANGUAGES = ("en", "uk", "ru", "de", "pl", "fr")
 
     TRANSLATIONS = {
+        'Аудит подмен и бэкдоров': ('Backdoor and hijack audit', 'Аудит підмін та бекдорів', 'Backdoor- und Hijack-Audit', 'Audyt podmian i backdoorów', 'Audit des backdoors et détournements'),
+        'Проверка sethc/utilman на подмену и очистка IFEO Debugger': ('Check sethc/utilman for hijacking and clean IFEO Debugger', 'Перевірка sethc/utilman на підміну та очищення IFEO Debugger', 'sethc/utilman auf Manipulation prüfen und IFEO-Debugger bereinigen', 'Sprawdź sethc/utilman pod kątem podmiany i wyczyść IFEO Debugger', 'Vérifier le détournement de sethc/utilman et nettoyer IFEO Debugger'),
+        'ПОДМЕНА ОБНАРУЖЕНА!': ('HIJACK DETECTED!', 'ПІДМІНУ ВИЯВЛЕНО!', 'MANIPULATION ENTDECKT!', 'WYKRYTO PODMIANĘ!', 'DÉTOURNEMENT DÉTECTÉ !'),
+        'ОРИГИНАЛ (OK)': ('ORIGINAL (OK)', 'ОРИГІНАЛ (OK)', 'ORIGINAL (OK)', 'ORYGINAŁ (OK)', 'ORIGINAL (OK)'),
+        'ПЕРЕХВАТЧИК (DEBUGGER)': ('HIJACKER (DEBUGGER)', 'ПЕРЕХОПЛЮВАЧ (DEBUGGER)', 'HIJACKER (DEBUGGER)', 'PRZECHWYTYWACZ (DEBUGGER)', 'DÉTOURNEUR (DEBUGGER)'),
         "Версия винды": ('Windows version', 'Версія Windows', 'Windows-Version', 'Wersja Windows', 'Version de Windows'),
         "Авто": ('Auto', 'Авто', 'Auto', 'Auto', 'Auto'),
         "Вручную": ('Manual', 'Вручну', 'Manuell', 'Ręcznie', 'Manuel'),
@@ -9868,6 +9873,46 @@ if GUI_MODE:
             except Exception:
                 self.data_signal.emit([])
 
+    class DriversLoader(QThread):
+        """Фоновый сбор драйверов чтобы UI не зависал."""
+        data_signal = Signal(list)
+
+        def __init__(self, loader_func):
+            super().__init__()
+            self.loader_func = loader_func
+
+        def run(self):
+            try:
+                data = self.loader_func()
+                self.data_signal.emit(data or [])
+            except Exception:
+                self.data_signal.emit([])
+
+    class DriverSignatureLoader(QThread):
+        """Проверка подписей драйверов вне UI-потока."""
+        data_signal = Signal(dict)
+
+        def __init__(self, entries, checker):
+            super().__init__()
+            self.entries = list(entries)
+            self.checker = checker
+
+        def run(self):
+            results = {}
+            try:
+                for entry in self.entries:
+                    if self.isInterruptionRequested():
+                        break
+                    path = str(entry.get("path", "") or "")
+                    if not path:
+                        continue
+                    try:
+                        results[path] = self.checker(path)
+                    except Exception:
+                        results[path] = None
+            finally:
+                self.data_signal.emit(results)
+
     class AutostartDiffWorker(QThread):
         """Считает снимок автозапуска и сравнивает его с прошлым запуском."""
         result_signal = Signal(object)
@@ -11575,250 +11620,6 @@ if GUI_MODE:
         def closeEvent(self, event):
             self.process.kill()
             super().closeEvent(event)
-            self.setStyleSheet("""
-                QDialog {
-                    background-color: #0d0d0d;
-                    color: #ffffff;
-                }
-                QFrame#topbar {
-                    background-color: #111111;
-                    border-bottom: 1px solid #1e1e1e;
-                }
-                QFrame#bottombar {
-                    background-color: #111111;
-                    border-top: 1px solid #1e1e1e;
-                }
-                QTextEdit {
-                    background-color: #0a0a0a;
-                    color: #00e87a;
-                    font-family: 'Consolas', 'Courier New', monospace;
-                    font-size: 13px;
-                    border: none;
-                    selection-background-color: #1a4a2a;
-                }
-                QLineEdit#cmd_input {
-                    background-color: #141414;
-                    color: #e0e0e0;
-                    font-family: 'Consolas', 'Courier New', monospace;
-                    font-size: 13px;
-                    border: 1px solid #2a2a2a;
-                    border-radius: 5px;
-                    padding: 7px 12px;
-                }
-                QLineEdit#cmd_input:focus {
-                    border: 1px solid #00e87a;
-                }
-                QPushButton#btn_enter {
-                    background-color: #00e87a;
-                    color: #000000;
-                    font-weight: bold;
-                    font-size: 12px;
-                    padding: 7px 20px;
-                    border-radius: 5px;
-                    border: none;
-                    min-width: 70px;
-                }
-                QPushButton#btn_enter:hover {
-                    background-color: #00ff99;
-                }
-                QPushButton#btn_enter:pressed {
-                    background-color: #00c060;
-                }
-                QPushButton#btn_clear {
-                    background-color: transparent;
-                    color: #888888;
-                    font-size: 11px;
-                    padding: 5px 12px;
-                    border-radius: 4px;
-                    border: 1px solid #2a2a2a;
-                }
-                QPushButton#btn_clear:hover {
-                    background-color: #1e1e1e;
-                    color: #ffffff;
-                    border-color: #444444;
-                }
-                QPushButton.quickbtn {
-                    background-color: #151515;
-                    color: #aaaaaa;
-                    font-size: 11px;
-                    padding: 4px 10px;
-                    border-radius: 4px;
-                    border: 1px solid #222222;
-                }
-                QPushButton.quickbtn:hover {
-                    background-color: #1e2e1e;
-                    color: #00e87a;
-                    border-color: #00e87a;
-                }
-                QLabel#lbl_path {
-                    color: #00e87a;
-                    font-family: 'Consolas', monospace;
-                    font-size: 11px;
-                    padding: 0 4px;
-                }
-                QLabel#lbl_method {
-                    color: #555555;
-                    font-size: 10px;
-                    padding: 0 4px;
-                }
-                QLabel#lbl_title {
-                    color: #ffffff;
-                    font-size: 13px;
-                    font-weight: bold;
-                    padding: 0 4px;
-                }
-            """)
-
-            root = QVBoxLayout(self)
-            root.setContentsMargins(0, 0, 0, 0)
-            root.setSpacing(0)
-
-            topbar = QFrame()
-            topbar.setObjectName("topbar")
-            topbar.setFixedHeight(42)
-            top_layout = QHBoxLayout(topbar)
-            top_layout.setContentsMargins(12, 0, 12, 0)
-            top_layout.setSpacing(8)
-
-            lbl_title = QLabel(language_manager.translate("Командная строка NoVir"))
-            lbl_title.setObjectName("lbl_title")
-
-            self.lbl_method = QLabel("")
-            self.lbl_method.setObjectName("lbl_method")
-
-            top_layout.addWidget(lbl_title)
-            top_layout.addStretch()
-            top_layout.addWidget(self.lbl_method)
-            root.addWidget(topbar)
-
-            quick_bar = QFrame()
-            quick_bar.setStyleSheet("background-color: #0f0f0f; border-bottom: 1px solid #1a1a1a;")
-            quick_layout = QHBoxLayout(quick_bar)
-            quick_layout.setContentsMargins(10, 5, 10, 5)
-            quick_layout.setSpacing(6)
-
-            quick_cmds = [
-                ("ipconfig", "ipconfig /all"),
-                ("netstat", "netstat -ano"),
-                ("tasklist", "tasklist"),
-                ("sfc", "sfc /scannow"),
-                ("regedit", "regedit"),
-                ("gpupdate", "gpupdate /force"),
-                ("cls", "cls"),
-            ]
-            for label, cmd in quick_cmds:
-                btn = QPushButton(label)
-                btn.setProperty("class", "quickbtn")
-                btn.setObjectName("quickbtn")
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #151515; color: #aaaaaa;
-                        font-size: 11px; font-family: Consolas;
-                        padding: 3px 9px; border-radius: 4px; border: 1px solid #222222;
-                    }
-                    QPushButton:hover { background-color: #1e2e1e; color: #00e87a; border-color: #00e87a; }
-                """)
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.clicked.connect(lambda checked=False, c=cmd: self._quick_cmd(c))
-                quick_layout.addWidget(btn)
-
-            quick_layout.addStretch()
-
-            btn_clear = QPushButton("ОЧИСТИТЬ")
-            btn_clear.setObjectName("btn_clear")
-            btn_clear.setCursor(Qt.PointingHandCursor)
-            btn_clear.clicked.connect(lambda: self.output_area.clear())
-            quick_layout.addWidget(btn_clear)
-            root.addWidget(quick_bar)
-
-            self.output_area = QTextEdit()
-            self.output_area.setReadOnly(True)
-            self.output_area.setFont(QFont("Consolas", 10))
-            self.output_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            root.addWidget(self.output_area)
-
-            bottombar = QFrame()
-            bottombar.setObjectName("bottombar")
-            bottombar.setFixedHeight(52)
-            bottom_layout = QHBoxLayout(bottombar)
-            bottom_layout.setContentsMargins(10, 6, 10, 6)
-            bottom_layout.setSpacing(8)
-
-            prompt = QLabel("›")
-            prompt.setStyleSheet("color: #00e87a; font-size: 18px; font-weight: bold; padding: 0 4px;")
-
-            self.input_field = QLineEdit()
-            self.input_field.setObjectName("cmd_input")
-            self.input_field.setPlaceholderText("Введите команду...")
-            self.input_field.returnPressed.connect(self.run_command)
-
-            self.btn_run = QPushButton("ENTER")
-            self.btn_run.setObjectName("btn_enter")
-            self.btn_run.setCursor(Qt.PointingHandCursor)
-            self.btn_run.clicked.connect(self.run_command)
-
-            bottom_layout.addWidget(prompt)
-            bottom_layout.addWidget(self.input_field)
-            bottom_layout.addWidget(self.btn_run)
-            root.addWidget(bottombar)
-
-            self.process = QProcess(self)
-            self.process.setProcessChannelMode(QProcess.MergedChannels)
-            self.process.readyReadStandardOutput.connect(self.handle_output)
-
-            windir      = os.environ.get('WINDIR', r'C:\Windows')
-            temp_dir    = os.environ.get('TEMP', r'C:\Windows\Temp')
-            s32         = os.path.join(windir, 'System32')
-            s64         = os.path.join(windir, 'SysNative')
-            syswow64    = os.path.join(windir, 'SysWOW64')
-            original_cmd = os.path.join(s32, 'cmd.exe')
-            if not os.path.exists(original_cmd):
-                original_cmd = os.path.join(syswow64, 'cmd.exe')
-
-            sysnative_cmd = os.path.join(s64, 'cmd.exe')
-            use_sysnative = bool(os.environ.get('PROCESSOR_ARCHITEW6432')) and os.path.exists(sysnative_cmd)
-            cmd_path = sysnative_cmd if use_sysnative else original_cmd
-            self.process.start(cmd_path, [])
-            if self.process.waitForStarted(1500):
-                self.lbl_method.setText("CMD: OK")
-            else:
-                self.lbl_method.setText("CMD: НЕ ЗАПУЩЕН")
-                self.output_area.setPlainText(
-                    "Невозможно запустить командную строку.\n"
-                    "Штатный cmd.exe не запустился. Проверьте системную политику,\n"
-                    "путь к Windows и права доступа. NoVir не пытается обходить блокировку."
-                )
-
-        def _quick_cmd(self, cmd):
-            self.input_field.setText(cmd)
-            self.run_command()
-
-        def handle_output(self):
-            data = self.process.readAllStandardOutput()
-            text = None
-            for enc in ('cp866', 'cp1251', 'utf-8'):
-                try:
-                    text = data.data().decode(enc)
-                    break
-                except UnicodeDecodeError:
-                    pass
-            if text is None:
-                text = data.data().decode('utf-8', errors='replace')
-            self.output_area.insertPlainText(text)
-            self.output_area.verticalScrollBar().setValue(
-                self.output_area.verticalScrollBar().maximum()
-            )
-
-        def run_command(self):
-            cmd = self.input_field.text()
-            if cmd.strip():
-                self.output_area.insertPlainText(f"\n> {cmd}\n")
-                self.process.write((cmd + '\n').encode('cp866', errors='replace'))
-                self.input_field.clear()
-
-        def closeEvent(self, event):
-            self.process.kill()
-            super().closeEvent(event)
 
 
     class NoVirToast(QFrame):
@@ -12555,6 +12356,9 @@ if GUI_MODE:
         def __init__(self, parent=None):
             super().__init__(parent)
             from PySide6.QtCore import QTimer
+            self.speech = None
+            self.view = None
+            self._drag_label = None
             self._silent_close = False
             self._drag_pos = None
             self._dragged = False
@@ -12605,7 +12409,7 @@ if GUI_MODE:
             self.view.set_emotion("idle")
 
         def next_tip(self):
-            if not self.TIPS:
+            if not self.isVisible() or not self.TIPS:
                 return
             import random
             index = random.randrange(len(self.TIPS))
@@ -12613,7 +12417,8 @@ if GUI_MODE:
                 index = (index + 1) % len(self.TIPS)
             self._last_tip = index
             self.say("happy", self.TIPS[index], 9000)
-            self._tip_timer.start()
+            if not self._tip_timer.isActive():
+                self._tip_timer.start(50000)
 
         def pet(self):
             self.view.set_emotion("happy")
@@ -12623,6 +12428,22 @@ if GUI_MODE:
             if not self.isVisible() or self._revert_timer.isActive():
                 return
             self.next_tip()
+
+        def hideEvent(self, event):
+            try:
+                self._tip_timer.stop()
+                self._revert_timer.stop()
+            except Exception:
+                pass
+            super().hideEvent(event)
+
+        def showEvent(self, event):
+            try:
+                if not self._tip_timer.isActive():
+                    self._tip_timer.start(50000)
+            except Exception:
+                pass
+            super().showEvent(event)
 
         def _start_drag(self, event):
             if event.button() != Qt.LeftButton:
@@ -12681,20 +12502,23 @@ if GUI_MODE:
             super().mouseReleaseEvent(event)
 
         def eventFilter(self, obj, event):
-            drag_objects = (
-                getattr(self, "speech", None),
-                getattr(self, "view", None),
-            )
-            if obj in drag_objects and obj is not None:
-                if event.type() == QEvent.MouseButtonPress:
-                    if self._start_drag(event):
-                        return True
-                elif event.type() == QEvent.MouseMove:
-                    if self._drag_to(event):
-                        return True
-                elif event.type() == QEvent.MouseButtonRelease:
-                    if self._end_drag(event):
-                        return True
+            try:
+                drag_objects = (
+                    getattr(self, "speech", None),
+                    getattr(self, "view", None),
+                )
+                if obj in drag_objects and obj is not None:
+                    if event.type() == QEvent.MouseButtonPress:
+                        if self._start_drag(event):
+                            return True
+                    elif event.type() == QEvent.MouseMove:
+                        if self._drag_to(event):
+                            return True
+                    elif event.type() == QEvent.MouseButtonRelease:
+                        if self._end_drag(event):
+                            return True
+            except Exception:
+                pass
             return super().eventFilter(obj, event)
 
         def contextMenuEvent(self, event):
@@ -12744,6 +12568,15 @@ if GUI_MODE:
             self.setAttribute(Qt.WA_TranslucentBackground, not self._winre_ui)
             # Инициализируем ссылки на фоновые потоки
             self._scheduler_loader = None
+            self._scheduler_data_ready = False
+            self._scheduler_reload_pending = False
+            self._drivers_loader = None
+            self._drivers_data_ready = False
+            self._drivers_reload_pending = False
+            self._driver_sig_loader = None
+            self._driver_sig_attempted = set()
+            self._services_data_ready = False
+            self._closing = False
             self._autostart_diff_worker = None
             self._autostart_diff_changes = []
             self._autostart_diff_first_run = False
@@ -17467,7 +17300,7 @@ if GUI_MODE:
                     self._scheduler_all_data = []
                     self.refresh_scheduler_data()
                 if "service" in kinds and hasattr(self, "services_tree"):
-                    self.load_services_data()
+                    self.load_services_data(force=True)
             except Exception:
                 pass
 
@@ -18327,7 +18160,7 @@ if GUI_MODE:
                 "background-color: #111111; color: #ffffff; padding: 3px 10px;"
                 " border: 1px solid #333333; border-radius: 2px;"
                 " font-size: 10px; font-family: 'Consolas', 'Courier New', monospace;")
-            btn_refresh_drivers.clicked.connect(self.load_drivers_data)
+            btn_refresh_drivers.clicked.connect(self.refresh_drivers_data)
             drivers_search_row.addWidget(btn_refresh_drivers)
             drivers_left_layout.addLayout(drivers_search_row)
 
@@ -18808,19 +18641,13 @@ if GUI_MODE:
                 self.table_folder.setItem(i, 1, item_val)
 
         def load_scheduler_data(self):
-            """Загружаем задачи планировщика в фоне. Не запускаем повторно если уже идёт загрузка."""
+            """Загружаем задачи планировщика в фоне без блокировки интерфейса."""
             try:
-                if self._scheduler_loader is not None and self._scheduler_loader.isRunning():
-                    if hasattr(self, '_scheduler_all_data') and self._scheduler_all_data:
-                        self._apply_scheduler_filter(
-                            self.sched_filter_combo.currentText() if hasattr(self, 'sched_filter_combo') else "Все задачи"
-                        )
+                if getattr(self, "_closing", False):
                     return
-
-                if hasattr(self, '_scheduler_all_data') and self._scheduler_all_data:
-                    self._apply_scheduler_filter(
-                        self.sched_filter_combo.currentText() if hasattr(self, 'sched_filter_combo') else "Все задачи"
-                    )
+                if getattr(self, "_scheduler_data_ready", False):
+                    return
+                if self._scheduler_loader is not None and self._scheduler_loader.isRunning():
                     return
 
                 self.scheduler_tree.clear()
@@ -18834,24 +18661,33 @@ if GUI_MODE:
                     self._on_scheduler_loaded, Qt.QueuedConnection
                 )
                 self._scheduler_loader.finished.connect(
-                    lambda: None  # держим ссылку живой до finish
+                    self._on_scheduler_finished, Qt.QueuedConnection
                 )
                 self._scheduler_loader.start()
 
-            except Exception as e:
+            except Exception:
                 pass
 
         def refresh_scheduler_data(self):
-            """Принудительное обновление — очищает кеш и перезагружает данные."""
+            """Принудительное обновление без ожидания и убийства потока."""
             self._scheduler_all_data = []
+            self._scheduler_data_ready = False
             if self._scheduler_loader is not None and self._scheduler_loader.isRunning():
-                self._scheduler_loader.quit()
-                self._scheduler_loader.wait(2000)
-                if self._scheduler_loader.isRunning():
-                    self._scheduler_loader.terminate()
-                    self._scheduler_loader.wait(500)
+                self._scheduler_reload_pending = True
+                return
             self._scheduler_loader = None
             self.load_scheduler_data()
+
+        def _on_scheduler_finished(self):
+            loader = self.sender()
+            if self._scheduler_loader is loader:
+                self._scheduler_loader = None
+            if getattr(self, "_closing", False):
+                return
+            if getattr(self, "_scheduler_reload_pending", False):
+                self._scheduler_reload_pending = False
+                self._scheduler_data_ready = False
+                self.load_scheduler_data()
 
         def _on_scheduler_loaded(self, data):
             try:
@@ -18869,6 +18705,7 @@ if GUI_MODE:
                     else:
                         continue
                 self._scheduler_all_data = normalized
+                self._scheduler_data_ready = True
                 self._apply_scheduler_filter(
                     self.sched_filter_combo.currentText() if hasattr(self, 'sched_filter_combo') else "Все задачи"
                 )
@@ -18956,8 +18793,12 @@ if GUI_MODE:
                 self.services_tree.clearSelection()
                 self.services_tree.setCurrentItem(None)
 
-        def load_services_data(self):
+        def load_services_data(self, force=False):
             if not hasattr(self, "services_tree"):
+                return
+            if getattr(self, "_closing", False):
+                return
+            if getattr(self, "_services_data_ready", False) and not force:
                 return
             try:
                 if hasattr(self, "services_search") and self.services_search:
@@ -18982,111 +18823,116 @@ if GUI_MODE:
                     _collect(self.services_tree.topLevelItem(i))
                 self._services_expanded = expanded
 
-            self.services_tree.clear()
-            data = self.get_services_startup()
-            if not data:
-                empty = QTreeWidgetItem([language_manager.translate("НЕТ ДАННЫХ"), "", ""])
-                empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable)
-                empty.setForeground(0, QColor(120, 120, 120))
-                self.services_tree.addTopLevelItem(empty)
-                if query:
-                    self._filter_services_data(query)
-                return
+            self.services_tree.setUpdatesEnabled(False)
+            try:
+                self.services_tree.clear()
+                data = self.get_services_startup()
+                self._services_data_ready = True
+                if not data:
+                    empty = QTreeWidgetItem([language_manager.translate("НЕТ ДАННЫХ"), "", ""])
+                    empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable)
+                    empty.setForeground(0, QColor(120, 120, 120))
+                    self.services_tree.addTopLevelItem(empty)
+                    if query:
+                        self._filter_services_data(query)
+                    return
 
-            category_order = [
-                ("load", "ЗАГРУЗКА"),
-                ("system", "СИСТЕМА"),
-                ("auto", "АВТОЗАПУСК"),
-                ("manual", "ВРУЧНУЮ"),
-                ("disabled", "ОТКЛЮЧЕНО"),
-                ("other", "ПРОЧИЕ"),
-            ]
-            groups = {
-                "driver": {key: [] for key, _title in category_order},
-                "service": {key: [] for key, _title in category_order},
-            }
+                category_order = [
+                    ("load", "ЗАГРУЗКА"),
+                    ("system", "СИСТЕМА"),
+                    ("auto", "АВТОЗАПУСК"),
+                    ("manual", "ВРУЧНУЮ"),
+                    ("disabled", "ОТКЛЮЧЕНО"),
+                    ("other", "ПРОЧИЕ"),
+                ]
+                groups = {
+                    "driver": {key: [] for key, _title in category_order},
+                    "service": {key: [] for key, _title in category_order},
+                }
 
-            for entry in data:
-                name = str(entry[0]) if len(entry) > 0 else ""
-                type_str = str(entry[1]) if len(entry) > 1 else ""
-                key_name = str(entry[2]) if len(entry) > 2 else ""
-                start_str = str(entry[3]) if len(entry) > 3 else ""
-                path = str(entry[4]) if len(entry) > 4 else ""
-                is_driver = type_str == "Драйвер"
-                low = start_str.lower()
-                if "загруз" in low or "boot" in low:
-                    bucket = "load"
-                elif "систем" in low or "system" in low:
-                    bucket = "system"
-                elif "авто" in low or "auto" in low or "delayed" in low:
-                    bucket = "auto"
-                elif "вруч" in low or "manual" in low:
-                    bucket = "manual"
-                elif "отключ" in low or "disabled" in low:
-                    bucket = "disabled"
-                else:
-                    bucket = "other"
-                groups["driver" if is_driver else "service"][bucket].append(
-                    (name, type_str, key_name, start_str, path))
+                for entry in data:
+                    name = str(entry[0]) if len(entry) > 0 else ""
+                    type_str = str(entry[1]) if len(entry) > 1 else ""
+                    key_name = str(entry[2]) if len(entry) > 2 else ""
+                    start_str = str(entry[3]) if len(entry) > 3 else ""
+                    path = str(entry[4]) if len(entry) > 4 else ""
+                    is_driver = type_str == "Драйвер"
+                    low = start_str.lower()
+                    if "загруз" in low or "boot" in low:
+                        bucket = "load"
+                    elif "систем" in low or "system" in low:
+                        bucket = "system"
+                    elif "авто" in low or "auto" in low or "delayed" in low:
+                        bucket = "auto"
+                    elif "вруч" in low or "manual" in low:
+                        bucket = "manual"
+                    elif "отключ" in low or "disabled" in low:
+                        bucket = "disabled"
+                    else:
+                        bucket = "other"
+                    groups["driver" if is_driver else "service"][bucket].append(
+                        (name, type_str, key_name, start_str, path))
 
-            def _add_folder(parent, title, key, count, is_top=False):
-                is_expanded = str(key) in self._services_expanded
-                title_text = language_manager.translate(title)
-                item = QTreeWidgetItem(["", "", ""])
-                item.setData(0, Qt.UserRole, key)
-                item.setData(0, Qt.UserRole + 1, title_text)
-                item.setData(0, Qt.UserRole + 2, count)
-                item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-                font = item.font(0)
-                font.setBold(bool(is_top))
-                item.setFont(0, font)
-                item.setForeground(0, QColor(255, 255, 255) if is_top else QColor(180, 180, 180))
-                item.setForeground(1, QColor(120, 120, 120))
-                if parent is None:
-                    self.services_tree.addTopLevelItem(item)
-                else:
-                    parent.addChild(item)
-                item.setExpanded(is_expanded)
-                self._update_service_folder_label(item)
-                return item
+                def _add_folder(parent, title, key, count, is_top=False):
+                    is_expanded = str(key) in self._services_expanded
+                    title_text = language_manager.translate(title)
+                    item = QTreeWidgetItem(["", "", ""])
+                    item.setData(0, Qt.UserRole, key)
+                    item.setData(0, Qt.UserRole + 1, title_text)
+                    item.setData(0, Qt.UserRole + 2, count)
+                    item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                    font = item.font(0)
+                    font.setBold(bool(is_top))
+                    item.setFont(0, font)
+                    item.setForeground(0, QColor(255, 255, 255) if is_top else QColor(180, 180, 180))
+                    item.setForeground(1, QColor(120, 120, 120))
+                    if parent is None:
+                        self.services_tree.addTopLevelItem(item)
+                    else:
+                        parent.addChild(item)
+                    item.setExpanded(is_expanded)
+                    self._update_service_folder_label(item)
+                    return item
 
-            for group_key, group_title, is_driver in (
-                    ("services", "СЛУЖБЫ", False),):
-                bucket_map = groups["driver" if is_driver else "service"]
-                total = sum(len(rows) for rows in bucket_map.values())
-                if not total:
-                    continue
-                top = _add_folder(None, group_title, f"folder:{group_key}", total, is_top=True)
-                for category_key, category_title in category_order:
-                    rows = bucket_map[category_key]
-                    if not rows:
+                for group_key, group_title, is_driver in (
+                        ("services", "СЛУЖБЫ", False),):
+                    bucket_map = groups["driver" if is_driver else "service"]
+                    total = sum(len(rows) for rows in bucket_map.values())
+                    if not total:
                         continue
-                    sub = _add_folder(
-                        top, category_title,
-                        f"folder:{group_key}/{category_key}", len(rows))
-                    rows.sort(key=lambda item: item[0].lower())
-                    for name, type_str, key_name, start_str, path in rows:
-                        service_item = QTreeWidgetItem([
-                            name,
-                            type_str + (f" / {start_str}" if start_str else ""),
-                            path,
-                        ])
-                        service_item.setData(0, Qt.UserRole, key_name or name)
-                        service_item.setToolTip(0, f"{name} ({key_name})")
-                        service_item.setToolTip(2, path)
-                        if is_driver:
-                            service_font = service_item.font(0)
-                            service_font.setBold(True)
-                            service_item.setFont(0, service_font)
-                        color = QColor(255, 255, 255) if is_driver else QColor(170, 170, 170)
-                        service_item.setForeground(0, color)
-                        service_item.setForeground(1, color)
-                        service_item.setForeground(2, color)
-                        sub.addChild(service_item)
+                    top = _add_folder(None, group_title, f"folder:{group_key}", total, is_top=True)
+                    for category_key, category_title in category_order:
+                        rows = bucket_map[category_key]
+                        if not rows:
+                            continue
+                        sub = _add_folder(
+                            top, category_title,
+                            f"folder:{group_key}/{category_key}", len(rows))
+                        rows.sort(key=lambda item: item[0].lower())
+                        for name, type_str, key_name, start_str, path in rows:
+                            service_item = QTreeWidgetItem([
+                                name,
+                                type_str + (f" / {start_str}" if start_str else ""),
+                                path,
+                            ])
+                            service_item.setData(0, Qt.UserRole, key_name or name)
+                            service_item.setToolTip(0, f"{name} ({key_name})")
+                            service_item.setToolTip(2, path)
+                            if is_driver:
+                                service_font = service_item.font(0)
+                                service_font.setBold(True)
+                                service_item.setFont(0, service_font)
+                            color = QColor(255, 255, 255) if is_driver else QColor(170, 170, 170)
+                            service_item.setForeground(0, color)
+                            service_item.setForeground(1, color)
+                            service_item.setForeground(2, color)
+                            sub.addChild(service_item)
 
-            self.services_tree.setCurrentItem(None)
-            if query:
-                self._filter_services_data(query)
+                    self.services_tree.setCurrentItem(None)
+                    if query:
+                        self._filter_services_data(query)
+            finally:
+                self.services_tree.setUpdatesEnabled(True)
 
 
         @staticmethod
@@ -19359,14 +19205,90 @@ if GUI_MODE:
         def load_drivers_data(self):
             if not hasattr(self, "drivers_table"):
                 return
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            try:
-                self._drivers_all_data = self._collect_drivers_data()
-            except Exception:
-                self._drivers_all_data = []
-            finally:
-                QApplication.restoreOverrideCursor()
+            if getattr(self, "_closing", False):
+                return
+            if getattr(self, "_drivers_data_ready", False):
+                return
+            if getattr(self, "_drivers_loader", None) is not None and self._drivers_loader.isRunning():
+                return
+            self.drivers_table.setRowCount(0)
+            self.drivers_table.insertRow(0)
+            cell = QTableWidgetItem("Загрузка списка драйверов в фоне...")
+            cell.setForeground(QColor(136, 136, 136))
+            cell.setFlags(Qt.ItemIsEnabled)
+            self.drivers_table.setItem(0, 0, cell)
+            if hasattr(self, "driver_count_label"):
+                self.driver_count_label.setText("Загрузка...")
+
+            self._drivers_loader = keep_thread(DriversLoader(self._collect_drivers_data))
+            self._drivers_loader.data_signal.connect(self._on_drivers_loaded, Qt.QueuedConnection)
+            self._drivers_loader.finished.connect(self._on_drivers_finished, Qt.QueuedConnection)
+            self._drivers_loader.start()
+
+        def _on_drivers_loaded(self, data):
+            self._drivers_all_data = data or []
+            self._drivers_data_ready = True
             self._apply_drivers_filter()
+
+        def _on_drivers_finished(self):
+            loader = self.sender()
+            if self._drivers_loader is loader:
+                self._drivers_loader = None
+            if getattr(self, "_closing", False):
+                return
+            if getattr(self, "_drivers_reload_pending", False):
+                self._drivers_reload_pending = False
+                self._drivers_data_ready = False
+                self.load_drivers_data()
+
+        def refresh_drivers_data(self):
+            """Принудительное обновление без ожидания и убийства потока."""
+            self._drivers_all_data = []
+            self._drivers_data_ready = False
+            if getattr(self, "_drivers_loader", None) is not None and self._drivers_loader.isRunning():
+                self._drivers_reload_pending = True
+                return
+            self._drivers_loader = None
+            self.load_drivers_data()
+
+        def _ensure_driver_signature_check(self, entries):
+            if getattr(self, "_closing", False) or not entries:
+                return
+            loader = getattr(self, "_driver_sig_loader", None)
+            if loader is not None and loader.isRunning():
+                return
+            unique = []
+            seen = set()
+            for entry in entries:
+                path = str(entry.get("path", "") or "")
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                unique.append(entry)
+            if not unique:
+                return
+            self._driver_sig_loader = keep_thread(
+                DriverSignatureLoader(unique, self._driver_signature_state))
+            self._driver_sig_loader.data_signal.connect(
+                self._on_driver_signatures, Qt.QueuedConnection)
+            self._driver_sig_loader.finished.connect(
+                self._on_driver_signatures_finished, Qt.QueuedConnection)
+            self._driver_sig_loader.start()
+            if hasattr(self, "driver_count_label"):
+                self.driver_count_label.setText("Проверка подписей...")
+
+        def _on_driver_signatures(self, results):
+            if not isinstance(results, dict):
+                return
+            for entry in getattr(self, "_drivers_all_data", []) or []:
+                path = str(entry.get("path", "") or "")
+                if path in results:
+                    entry["signed"] = results[path]
+            self._apply_drivers_filter()
+
+        def _on_driver_signatures_finished(self):
+            if self._driver_sig_loader is self.sender():
+                self._driver_sig_loader = None
 
         def _apply_drivers_filter(self):
             if not hasattr(self, "drivers_table"):
@@ -19379,8 +19301,14 @@ if GUI_MODE:
             only_signed = self.chk_driver_signature.isChecked()
             only_suspicious = self.chk_driver_suspicious.isChecked()
             need_signature = only_signed or only_suspicious
+            if need_signature:
+                unknown = [
+                    entry for entry in getattr(self, "_drivers_all_data", []) or []
+                    if entry.get("signed") is None and entry.get("path")
+                ]
+                self._ensure_driver_signature_check(unknown)
             visible = []
-            for entry in self._drivers_all_data:
+            for entry in getattr(self, "_drivers_all_data", []) or []:
                 if entry.get("category") not in active_categories:
                     continue
                 search_text = " ".join((
@@ -19391,38 +19319,41 @@ if GUI_MODE:
                 )).lower()
                 if query and query not in search_text:
                     continue
-                if need_signature and entry.get("signed") is None:
-                    entry["signed"] = self._driver_signature_state(
-                        entry.get("path", ""))
+                signed = entry.get("signed")
+                if need_signature and signed is None:
+                    continue
                 suspicious = bool(entry.get("suspicious"))
-                if entry.get("signed") is False:
+                if signed is False:
                     suspicious = True
                 if only_suspicious and not suspicious:
                     continue
-                if only_signed and entry.get("signed") is not True:
+                if only_signed and signed is not True:
                     continue
                 visible.append(entry)
 
             table = self.drivers_table
             table.setSortingEnabled(False)
-            table.setRowCount(0)
-            white = QColor(255, 255, 255)
-            gray = QColor(170, 170, 170)
-            for entry in visible:
-                row = table.rowCount()
-                table.insertRow(row)
-                for column, text in enumerate((
-                        entry.get("name", ""),
-                        entry.get("desc", ""),
-                        entry.get("date", ""))):
-                    cell = QTableWidgetItem(str(text or ""))
-                    cell.setForeground(white if column == 0 else gray)
-                    cell.setToolTip(entry.get("tooltip", ""))
-                    cell.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                    if column == 0:
-                        cell.setData(Qt.UserRole, entry)
-                    table.setItem(row, column, cell)
-            total = len(self._drivers_all_data)
+            table.setUpdatesEnabled(False)
+            try:
+                table.setRowCount(len(visible))
+                white = QColor(255, 255, 255)
+                gray = QColor(170, 170, 170)
+                for row, entry in enumerate(visible):
+                    for column, text in enumerate((
+                            entry.get("name", ""),
+                            entry.get("desc", ""),
+                            entry.get("date", ""))):
+                        cell = QTableWidgetItem(str(text or ""))
+                        cell.setForeground(white if column == 0 else gray)
+                        cell.setToolTip(entry.get("tooltip", ""))
+                        cell.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                        if column == 0:
+                            cell.setData(Qt.UserRole, entry)
+                        table.setItem(row, column, cell)
+            finally:
+                table.setUpdatesEnabled(True)
+
+            total = len(getattr(self, "_drivers_all_data", []) or [])
             if hasattr(self, "driver_count_label"):
                 self.driver_count_label.setText(
                     "Показано: %d / %d" % (len(visible), total))
@@ -20889,7 +20820,7 @@ if GUI_MODE:
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Запущена служба: {service_name}")
-                    self.load_services_data()
+                    self.load_services_data(force=True)
                     self.show_toast("ГОТОВО", "Служба запущена")
                 else:
                     QMessageBox.warning(self, "Ошибка", f"Не удалось запустить службу: {result.stderr}")
@@ -20912,7 +20843,7 @@ if GUI_MODE:
                     
                     if result.returncode == 0:
                         logger.log("Services", "success", f"Остановлена служба: {service_name}")
-                        self.load_services_data()
+                        self.load_services_data(force=True)
                         self.show_toast("ГОТОВО", "Служба остановлена")
                     else:
                         QMessageBox.warning(self, "Ошибка", f"Не удалось остановить службу: {result.stderr}")
@@ -20931,7 +20862,7 @@ if GUI_MODE:
                 
                 if result.returncode == 0:
                     logger.log("Services", "success", f"Перезапущена служба: {service_name}")
-                    self.load_services_data()
+                    self.load_services_data(force=True)
                     self.show_toast("ГОТОВО", "Служба перезапущена")
                 else:
                     QMessageBox.warning(self, "Ошибка", f"Не удалось перезапустить службу: {result.stderr}")
@@ -20971,12 +20902,7 @@ if GUI_MODE:
             return entries
 
         def get_scheduler_startup(self):
-            """Возвращает список (name, status, task_run, full_path, source).
-
-            Основной источник — PowerShell Get-ScheduledTask: он видит скрытые
-            задачи и отдаёт полный путь. Резервный — schtasks /query. Дубликаты
-            удаляются по полному пути (TaskPath + TaskName).
-            """
+            """Возвращает список (name, status, task_run, full_path, source)."""
             entries = []
             seen_paths = set()
 
@@ -20986,67 +20912,11 @@ if GUI_MODE:
                     return "Системная"
                 return "Пользовательская"
 
-            def _state_map(state):
-                return {
-                    "Ready": "Готова",
-                    "Running": "Выполняется",
-                    "Disabled": "Отключена",
-                    "Unknown": "Неизвестно",
-                }.get(state, state or "Готова")
-
-            try:
-                ps_script = (
-                    "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
-                    "Get-ScheduledTask | Select-Object TaskPath, TaskName, State, Actions | "
-                    "ConvertTo-Json -Depth 4 -Compress"
-                )
-                result = subprocess.run(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace",
-                    timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                )
-                if result.stdout:
-                    import json
-                    tasks = json.loads(result.stdout)
-                    if isinstance(tasks, dict):
-                        tasks = [tasks]
-                    for task in tasks:
-                        task_path = str(task.get("TaskPath") or "")
-                        task_name = str(task.get("TaskName") or "")
-                        full_path = task_path + task_name
-                        if not task_name or full_path in seen_paths:
-                            continue
-
-                        actions = task.get("Actions") or []
-                        if isinstance(actions, dict):
-                            actions = [actions]
-                        task_run = ""
-                        for act in actions:
-                            if isinstance(act, dict):
-                                cmd = str(act.get("Execute") or "")
-                                arg = str(act.get("Arguments") or "")
-                                if cmd:
-                                    task_run = (cmd + " " + arg).strip()
-                                    break
-                            elif isinstance(act, str) and act:
-                                task_run = act
-                                break
-
-                        seen_paths.add(full_path)
-                        entries.append((
-                            task_name,
-                            _state_map(str(task.get("State") or "")),
-                            task_run,
-                            full_path,
-                            _classify(full_path),
-                        ))
-            except Exception:
-                pass
-
+            # 1. Быстрый и лёгкий опрос через нативную утилиту schtasks
             try:
                 result = subprocess.run(
                     ["schtasks", "/query", "/fo", "CSV", "/v", "/nh"],
-                    capture_output=True, text=True, encoding="cp866", timeout=25,
+                    capture_output=True, text=True, encoding="cp866", timeout=12,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 )
                 import csv as _csv
@@ -21073,6 +20943,64 @@ if GUI_MODE:
                         continue
             except Exception:
                 pass
+
+            # 2. Если schtasks не вернул задачи, резервный опрос через PowerShell
+            if not entries:
+                def _state_map(state):
+                    return {
+                        "Ready": "Готова",
+                        "Running": "Выполняется",
+                        "Disabled": "Отключена",
+                        "Unknown": "Неизвестно",
+                    }.get(state, state or "Готова")
+                try:
+                    ps_script = (
+                        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                        "Get-ScheduledTask | Select-Object TaskPath, TaskName, State, Actions | "
+                        "ConvertTo-Json -Depth 4 -Compress"
+                    )
+                    result = subprocess.run(
+                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                        timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    )
+                    if result.stdout:
+                        import json
+                        tasks = json.loads(result.stdout)
+                        if isinstance(tasks, dict):
+                            tasks = [tasks]
+                        for task in tasks:
+                            task_path = str(task.get("TaskPath") or "")
+                            task_name = str(task.get("TaskName") or "")
+                            full_path = task_path + task_name
+                            if not task_name or full_path in seen_paths:
+                                continue
+
+                            actions = task.get("Actions") or []
+                            if isinstance(actions, dict):
+                                actions = [actions]
+                            task_run = ""
+                            for act in actions:
+                                if isinstance(act, dict):
+                                    cmd = str(act.get("Execute") or "")
+                                    arg = str(act.get("Arguments") or "")
+                                    if cmd:
+                                        task_run = (cmd + " " + arg).strip()
+                                        break
+                                elif isinstance(act, str) and act:
+                                    task_run = act
+                                    break
+
+                            seen_paths.add(full_path)
+                            entries.append((
+                                task_name,
+                                _state_map(str(task.get("State") or "")),
+                                task_run,
+                                full_path,
+                                _classify(full_path),
+                            ))
+                except Exception:
+                    pass
 
             return entries
 
@@ -21201,6 +21129,7 @@ if GUI_MODE:
             if not hasattr(self, "_scheduler_building"):
                 self._scheduler_building = False
             self._scheduler_building = True
+            self.scheduler_tree.setUpdatesEnabled(False)
             try:
                 self.scheduler_tree.clear()
                 lower = (filter_text or "").lower()
@@ -21332,6 +21261,7 @@ if GUI_MODE:
                     _restore(self.scheduler_tree.topLevelItem(index))
                 self.scheduler_tree.setCurrentItem(None)
             finally:
+                self.scheduler_tree.setUpdatesEnabled(True)
                 self._scheduler_building = False
 
         def get_services_startup(self):
@@ -22031,7 +21961,7 @@ if GUI_MODE:
                         if entry["suspicious"]:
                             print(f"[WMI] {entry['kind']}: {entry['name']}")
 
-                worker = Worker(job)
+                worker = keep_thread(Worker(job))
                 state["scan_worker"] = worker
                 worker.finished_signal.connect(on_scan_finished)
                 worker.start()
@@ -22135,7 +22065,7 @@ if GUI_MODE:
                 def job():
                     state["delete_result"] = _wmi_remove_entries(targets)
 
-                worker = Worker(job)
+                worker = keep_thread(Worker(job))
                 state["delete_worker"] = worker
                 worker.finished_signal.connect(on_delete_finished)
                 worker.start()
@@ -22144,7 +22074,8 @@ if GUI_MODE:
                 for key in ("scan_worker", "delete_worker"):
                     worker = state.get(key)
                     if worker is not None and worker.isRunning():
-                        worker.wait(3000)
+                        worker.requestInterruption()
+                        worker.quit()
 
             scan_btn.clicked.connect(scan)
             delete_btn.clicked.connect(delete_selected)
@@ -22676,7 +22607,8 @@ if GUI_MODE:
                 for key in ("scan_worker", "delete_worker"):
                     worker = state.get(key)
                     if worker is not None and worker.isRunning():
-                        worker.wait(10000)
+                        worker.requestInterruption()
+                        worker.quit()
 
             progress_timer = QTimer(dialog)
             progress_timer.setInterval(250)
@@ -22964,7 +22896,7 @@ if GUI_MODE:
                     state["stats"] = stats or {}
                     state["cancelled_text"] = bool((stats or {}).get("cancelled"))
 
-                worker = Worker(job)
+                worker = keep_thread(Worker(job))
                 state["worker"] = worker
 
                 def on_finished(_output):
@@ -23025,7 +22957,8 @@ if GUI_MODE:
             def cancel_and_close():
                 state["cancel"].set()
                 if state["worker"] is not None and state["worker"].isRunning():
-                    state["worker"].wait(5000)
+                    state["worker"].requestInterruption()
+                    state["worker"].quit()
                 progress_timer.stop()
 
             scan_btn.clicked.connect(scan)
@@ -23068,7 +23001,7 @@ if GUI_MODE:
             editor.setReadOnly(True)
             editor.setPlainText(text)
             editor.setStyleSheet(
-                "QPlainTextEdit { background: #000000; color: #66ff88;"
+                "QPlainTextEdit { background: #000000; color: #e0e0e0;"
                 " border: 1px solid #333333; font-family: Consolas,"
                 " 'Courier New', monospace; font-size: 11px; }")
             layout.addWidget(editor, 1)
@@ -23576,7 +23509,7 @@ if GUI_MODE:
             windows_row.addWidget(windows_combo, 1)
             firmware_label = QLabel(firmware)
             firmware_label.setStyleSheet(
-                "color: #66ff88; font-size: 10px; font-weight: bold;"
+                "color: #ffffff; font-size: 10px; font-weight: bold;"
                 " font-family: 'Consolas', 'Courier New', monospace;")
             windows_row.addWidget(firmware_label)
             layout.addLayout(windows_row)
@@ -23602,7 +23535,7 @@ if GUI_MODE:
             output = QPlainTextEdit()
             output.setReadOnly(True)
             output.setStyleSheet(
-                "QPlainTextEdit { background: #000000; color: #66ff88;"
+                "QPlainTextEdit { background: #000000; color: #cccccc;"
                 " border: 1px solid #222222; font-size: 10px;"
                 " font-family: 'Consolas', 'Courier New', monospace; }")
             layout.addWidget(output, 1)
@@ -24415,52 +24348,95 @@ if GUI_MODE:
                     return
                 self.run_task(fn)
 
-            # ── semantic keyword map: card title → extra search tokens ──────
+            # ── semantic keyword map: card title → extra search tokens (RU / UK / EN) ──
             _CARD_KEYWORDS = {
-                "Включить UAC":            ["блокировка", "контроль", "учетных", "запись", "уак", "uac", "политика", "разрешение"],
-                "GpeditMsc":               ["политика", "групповая", "gpedit", "блокировка", "ограничение", "запрет"],
-                "Заменить sethc и utilman":["залипание", "shift", "sethc", "utilman", "бэкдор", "backdoor", "подмена", "блокировка"],
+                "Включить UAC":            ["блокировка", "контроль", "учетных", "запись", "уак", "uac", "политика", "разрешение",
+                                             "блокування", "обліковий", "запис", "дозвіл", "контроль облікових записів", "user account control", "elevation", "admin"],
+                "GpeditMsc":               ["политика", "групповая", "gpedit", "блокировка", "ограничение", "запрет",
+                                             "політика", "групова", "обмеження", "заборона", "group policy", "gpo", "policies"],
+                "Заменить sethc и utilman":["залипание", "shift", "sethc", "utilman", "бэкдор", "backdoor", "подмена", "блокировка",
+                                             "залипання", "підміна", "sticky keys", "ease of access"],
                 "Аудит подмен и бэкдоров": ["ifeo", "debugger", "sethc", "utilman", "osk", "залипание", "бэкдор", "backdoor",
-                                             "подмена", "перехватчик", "блокировка", "реестр"],
-                "Управление ассоциациями": ["ассоциация", "exe", "lnk", "привязка", "блокировка", "открытие"],
-                "Управление пользователями":["пароль", "учетная", "аккаунт", "пользователь", "учётка"],
-                "Сброс пароля":            ["пароль", "учетная", "аккаунт", "авторизация", "вход", "логин"],
-                "ВОСТАНОВИТЬ ЗАГРУЗКУ":    ["загрузка", "bcd", "bcdboot", "mbr", "uefi", "bios", "boot", "бут", "winre"],
-                "mbrRE":                   ["mbr", "bcd", "загрузка", "boot", "bios", "uefi", "бут"],
-                "Сохранение WinRE":        ["winre", "образ", "wim", "восстановление", "загрузка", "резервная"],
-                "Войти в WinRE":           ["winre", "загрузка", "восстановление", "среда", "bcd"],
-                "Восстановить системные файлы": ["sfc", "файлы", "восстановление", "офлайн", "системные"],
-                "sfc /scannow":            ["sfc", "файлы", "восстановление", "проверка", "системные"],
-                "Анализ файлов запуска":   ["автозагрузка", "запуск", "подпись", "дата", "startup", "старт"],
-                "Корреляция Malware":      ["автозагрузка", "служба", "задача", "малварь", "malware", "запуск"],
-                "Перезапуск Explorer":     ["проводник", "explorer", "рабочий стол", "оболочка", "зависание"],
-                "Проводник":               ["проводник", "explorer", "файл", "менеджер", "папка"],
-                "Сетевые порты":           ["сеть", "интернет", "порт", "соединение", "tcp", "udp", "network"],
-                "Вернуть русский язык":    ["шрифт", "язык", "раскладка", "русский", "ru", "локаль"],
-                "Вернуть стандартную тему":["тема", "оформление", "стиль", "рабочий стол", "шрифт"],
-                "Починить шрифты":         ["шрифт", "font", "язык", "текст", "отображение"],
-                "WMI Persistence":         ["wmi", "persistence", "фильтр", "subscription", "скрытый", "автозагрузка"],
-                "NTFS ADS":                ["ads", "ntfs", "потоки", "zone", "скрытый", "метка"],
-                "Process Memory":          ["память", "rwx", "pe", "процесс", "инъекция", "dll", "unbacked"],
-                "Редактор реестра":        ["реестр", "registry", "ключ", "hklm", "ifeo", "политика"],
-                "Диспетчер задач":         ["задача", "процесс", "блокировка", "таскменеджер", "taskmgr", "заморозка"],
-                "Добавить NoVir в WinRE":  ["winre", "wim", "образ", "встроить", "загрузка"],
-                "Записать NoVir в CmdLine":["cmdline", "автозапуск", "загрузка", "реестр", "setup"],
-                "Записать NoVir в Службы": ["служба", "service", "автозапуск", "запуск"],
-                "Записать NoVir в Планировщик задач": ["планировщик", "task", "scheduler", "автозапуск", "запуск"],
-                "Экстремальное восстановление": ["оболочка", "автозагрузка", "иконки", "сброс", "восстановление", "explorer"],
-                "Очистка системы":         ["temp", "корзина", "кэш", "мусор", "очистка", "диск"],
-                "Удаление дисков":         ["диск", "раздел", "disk", "partition", "управление"],
-                "Полный доступ к файлу":   ["права", "takeown", "доступ", "файл", "разблокировка", "acl"],
-                "Выключить тестовый режим":["тестовый", "подпись", "driver", "signature", "тест", "режим"],
-                "Удобный запуск":          ["контекстное", "меню", "nov", "cmd", "запуск"],
-                "Восстановить LogonUI":    ["logonui", "экран", "вход", "логон", "запуск"],
-                "Очистка драйверов":       ["драйвер", "driver", "сторонний", "удаление"],
-                "Выйти из пользователя":   ["сеанс", "выход", "logoff", "пользователь"],
-                "Выполнить":               ["run", "win+r", "запуск", "диалог", "выполнить"],
-                "Ctrl+Alt+N":              ["быстрый", "запуск", "hotkey", "горячая", "клавиша"],
-                "Командная строка":        ["cmd", "командная", "строка", "консоль", "терминал"],
-                "Сведения о системе":      ["железо", "hardware", "система", "процессор", "ram", "cpu"],
+                                             "подмена", "перехватчик", "блокировка", "реестр", "реєстр", "залипання", "підміна",
+                                             "перехоплювач", "image file execution options", "hijack", "auditor"],
+                "Управление ассоциациями": ["ассоциация", "exe", "lnk", "привязка", "блокировка", "открытие",
+                                             "асоціація", "прив'язка", "відкриття", "file association", "file type"],
+                "Управление пользователями":["пароль", "учетная", "аккаунт", "пользователь", "учётка",
+                                             "користувач", "обліковий", "паролі", "user accounts", "users", "net user"],
+                "Сброс пароля":            ["пароль", "учетная", "аккаунт", "авторизация", "вход", "логин",
+                                             "скидання", "скинути", "паролю", "вхід", "password reset", "clear password"],
+                "ВОСТАНОВИТЬ ЗАГРУЗКУ":    ["загрузка", "bcd", "bcdboot", "mbr", "uefi", "bios", "boot", "бут", "winre",
+                                             "завантаження", "відновлення", "відновити", "bootloader", "boot repair"],
+                "mbrRE":                   ["mbr", "bcd", "загрузка", "boot", "bios", "uefi", "бут",
+                                             "завантаження", "сектор", "master boot record", "partition"],
+                "Сохранение WinRE":        ["winre", "образ", "wim", "восстановление", "загрузка", "резервная",
+                                             "відновлення", "завантаження", "резервна", "копія", "backup", "recovery environment"],
+                "Войти в WinRE":           ["winre", "загрузка", "восстановление", "среда", "bcd",
+                                             "завантаження", "відновлення", "середовище", "reboot to winre"],
+                "Восстановить системные файлы": ["sfc", "файлы", "восстановление", "офлайн", "системные",
+                                             "файли", "відновлення", "офлайн", "system files", "offline sfc", "scannow"],
+                "sfc /scannow":            ["sfc", "файлы", "восстановление", "проверка", "системные",
+                                             "перевірка", "сканування", "system file checker", "scan", "integrity"],
+                "Анализ файлов запуска":   ["автозагрузка", "запуск", "подпись", "дата", "startup", "старт",
+                                             "підпис", "автозапуск", "цифровий", "autorun", "signature"],
+                "Корреляция Malware":      ["автозагрузка", "служба", "задача", "малварь", "malware", "запуск",
+                                             "сервіс", "завдання", "загроза", "threat", "correlation", "analysis"],
+                "Перезапуск Explorer":     ["проводник", "explorer", "рабочий стол", "оболочка", "зависание",
+                                             "провідник", "робочий стіл", "оболонка", "зависання", "restart explorer", "shell"],
+                "Проводник":               ["проводник", "explorer", "файл", "менеджер", "папка",
+                                             "провідник", "тека", "file manager", "browser"],
+                "Сетевые порты":           ["сеть", "интернет", "порт", "соединение", "tcp", "udp", "network",
+                                             "мережа", "інтернет", "з'єднання", "портів", "netstat", "listening", "ports"],
+                "Вернуть русский язык":    ["шрифт", "язык", "раскладка", "русский", "ru", "локаль",
+                                             "мова", "розкладка", "language", "layout", "locale"],
+                "Вернуть стандартную тему":["тема", "оформление", "стиль", "рабочий стол", "шрифт",
+                                             "оформлення", "робочий стіл", "theme", "visual style", "default theme"],
+                "Починить шрифты":         ["шрифт", "font", "язык", "текст", "отображение",
+                                             "шрифти", "відображення", "fonts", "fix fonts"],
+                "WMI Persistence":         ["wmi", "persistence", "фильтр", "subscription", "скрытый", "автозагрузка",
+                                             "фільтр", "прихований", "автозапуск", "wmi consumer", "event filter"],
+                "NTFS ADS":                ["ads", "ntfs", "потоки", "zone", "скрытый", "метка",
+                                             "потоки", "прихований", "мітка", "alternate data streams", "zone.identifier"],
+                "Process Memory":          ["память", "rwx", "pe", "процесс", "инъекция", "dll", "unbacked",
+                                             "пам'ять", "ін'єкція", "процес", "memory inspection", "injection"],
+                "Редактор реестра":        ["реестр", "registry", "ключ", "hklm", "ifeo", "политика",
+                                             "реєстр", "політика", "regedit", "hive"],
+                "Диспетчер задач":         ["задача", "процесс", "блокировка", "таскменеджер", "taskmgr", "заморозка",
+                                             "завдання", "процес", "блокування", "заморожування", "task manager", "kill process"],
+                "Добавить NoVir в WinRE":  ["winre", "wim", "образ", "встроить", "загрузка",
+                                             "вбудувати", "завантаження", "integrate novir", "winre.wim"],
+                "Записать NoVir в CmdLine":["cmdline", "автозапуск", "загрузка", "реестр", "setup",
+                                             "реєстр", "завантаження", "setup cmdline"],
+                "Записать NoVir в Службы": ["служба", "service", "автозапуск", "запуск",
+                                             "сервіс", "служба windows", "windows service"],
+                "Записать NoVir в Планировщик задач": ["планировщик", "task", "scheduler", "автозапуск", "запуск",
+                                             "планувальник", "завдання", "task scheduler"],
+                "Экстремальное восстановление": ["оболочка", "автозагрузка", "иконки", "сброс", "восстановление", "explorer",
+                                             "скидання", "відновлення", "значки", "extreme recovery", "deep reset"],
+                "Очистка системы":         ["temp", "корзина", "кэш", "мусор", "очистка", "диск",
+                                             "сміття", "кошик", "очищення", "disk cleanup", "temp cleaner"],
+                "Удаление дисков":         ["диск", "раздел", "disk", "partition", "управление",
+                                             "розділ", "керування", "drive manager"],
+                "Полный доступ к файлу":   ["права", "takeown", "доступ", "файл", "разблокировка", "acl",
+                                             "дозвіл", "розблокування", "take ownership", "icacls", "permissions"],
+                "Выключить тестовый режим":["тестовый", "подпись", "driver", "signature", "тест", "режим",
+                                             "тестовий", "підпис", "testsigning", "disable test mode"],
+                "Удобный запуск":          ["контекстное", "меню", "nov", "cmd", "запуск",
+                                             "контекстне", "меню", "context menu", "quick run"],
+                "Восстановить LogonUI":    ["logonui", "экран", "вход", "логон", "запуск",
+                                             "екран", "вхід", "login screen", "logon screen"],
+                "Очистка драйверов":       ["драйвер", "driver", "сторонний", "удаление",
+                                             "сторонній", "видалення", "driver removal", "clean drivers"],
+                "Выйти из пользователя":   ["сеанс", "выход", "logoff", "пользователь",
+                                             "вихід", "користувач", "sign out", "logout"],
+                "Выполнить":               ["run", "win+r", "запуск", "диалог", "выполнить",
+                                             "діалог", "виконати", "run dialog"],
+                "Ctrl+Alt+N":              ["быстрый", "запуск", "hotkey", "горячая", "клавиша",
+                                             "швидкий", "гаряча", "shortcut", "hotkey"],
+                "Командная строка":        ["cmd", "командная", "строка", "консоль", "терминал",
+                                             "командний", "рядок", "command prompt", "terminal", "console"],
+                "Сведения о системе":      ["железо", "hardware", "система", "процессор", "ram", "cpu",
+                                             "залізо", "процесор", "system information", "specs"],
             }
 
             # all_section_entries: list of (section_frame, section_title_label, card_entries)
@@ -24669,8 +24645,9 @@ if GUI_MODE:
 
             # ── filter logic ─────────────────────────────────────────────────
             def _on_advanced_search(text):
-                q = text.strip().lower()
-                if not q:
+                import re
+                raw = (text or "").strip().lower()
+                if not raw:
                     for frame, st_lbl, sd_lbl, card_entries in all_sections:
                         frame.setVisible(True)
                         st_lbl.setVisible(True)
@@ -24678,8 +24655,16 @@ if GUI_MODE:
                         for cw, *_ in card_entries:
                             cw.setVisible(True)
                     return
-                # tokenize query: each space-separated token must match
-                tokens = q.split()
+                # tokenize query: split by spaces and punctuation, ignore empty tokens
+                tokens = [t for t in re.split(r'[\s,.;]+', raw) if t]
+                if not tokens:
+                    for frame, st_lbl, sd_lbl, card_entries in all_sections:
+                        frame.setVisible(True)
+                        st_lbl.setVisible(True)
+                        sd_lbl.setVisible(True)
+                        for cw, *_ in card_entries:
+                            cw.setVisible(True)
+                    return
                 for frame, st_lbl, sd_lbl, card_entries in all_sections:
                     any_visible = False
                     for cw, lo_title, lo_desc, extra_kw in card_entries:
@@ -28188,7 +28173,7 @@ if GUI_MODE:
                 nums = re.findall(r"\d+", tag)
                 return tuple(int(x) for x in nums) if nums else (0,)
 
-            cur_v = _parse_ver(globals().get("CURRENT_VERSION", "2.5.1"))
+            cur_v = _parse_ver(globals().get("CURRENT_VERSION", "2.5.8"))
             stable_v = _parse_ver(stable)
             pre_v = _parse_ver(prerelease)
 
@@ -28204,7 +28189,7 @@ if GUI_MODE:
                 QMessageBox.information(
                     self,
                     "Обновление",
-                    f"У вас установлена последняя версия NoVir ({globals().get('CURRENT_VERSION', '2.5.1')})."
+                    f"У вас установлена последняя версия NoVir ({globals().get('CURRENT_VERSION', '2.5.8')})."
                 )
 
         def _show_update_dialog(self, stable, prerelease):
@@ -28693,6 +28678,7 @@ if GUI_MODE:
 
         def closeEvent(self, event):
             """Корректно останавливаем все фоновые потоки перед закрытием"""
+            self._closing = True
             try:
                 if getattr(self, "_snowman", None) is not None:
                     self._snowman.shutdown()
@@ -28710,6 +28696,10 @@ if GUI_MODE:
             threads_to_stop = []
             if hasattr(self, '_scheduler_loader') and self._scheduler_loader is not None:
                 threads_to_stop.append(self._scheduler_loader)
+            if hasattr(self, '_drivers_loader') and self._drivers_loader is not None:
+                threads_to_stop.append(self._drivers_loader)
+            if hasattr(self, '_driver_sig_loader') and self._driver_sig_loader is not None:
+                threads_to_stop.append(self._driver_sig_loader)
             if hasattr(self, 'worker') and self.worker is not None:
                 threads_to_stop.append(self.worker)
             if hasattr(self, '_services_loader') and self._services_loader is not None:
@@ -28726,13 +28716,30 @@ if GUI_MODE:
                 if _t not in threads_to_stop:
                     threads_to_stop.append(_t)
 
+            # Не убиваем QThread через terminate() и не блокируем UI на секунды:
+            # просим потоки завершиться и даём им короткий общий интервал.
             for thread in threads_to_stop:
                 try:
                     if thread.isRunning():
+                        thread.requestInterruption()
                         thread.quit()
-                        if not thread.wait(1500):  # ждём 1.5 секунды
-                            thread.terminate()
-                            thread.wait(500)
+                except Exception:
+                    pass
+            import time as _close_time
+            deadline = _close_time.monotonic() + 0.35
+            for thread in threads_to_stop:
+                still_running = False
+                try:
+                    still_running = bool(thread.isRunning())
+                except Exception:
+                    still_running = False
+                if not still_running:
+                    continue
+                remaining = deadline - _close_time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    thread.wait(max(1, int(remaining * 1000)))
                 except Exception:
                     pass
 
@@ -28803,11 +28810,20 @@ def main():
         admin_required = not DRY_RUN
         if not is_admin and admin_required and not _IS_WINPE:
             import ctypes
-            script = os.path.abspath(sys.argv[0])
-            params = " ".join(sys.argv[1:])
+            is_frozen = getattr(sys, 'frozen', False)
+            if is_frozen:
+                target_exe = sys.executable
+                params = " ".join(f'"{arg}"' if " " in arg else arg for arg in sys.argv[1:])
+            else:
+                target_exe = sys.executable
+                script = os.path.abspath(sys.argv[0])
+                rest_params = " ".join(f'"{arg}"' if " " in arg else arg for arg in sys.argv[1:])
+                params = f'"{script}" {rest_params}'.strip()
             try:
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", sys.executable, f'"{script}" {params}', None, 1)
+                ret = ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", target_exe, params, None, 1)
+                if ret <= 32:
+                    raise OSError(f"ShellExecuteW returned {ret}")
             except Exception as _elevate_err:
                 _novir_boot("elevation_failed", repr(_elevate_err))
                 ctypes.windll.user32.MessageBoxW(
